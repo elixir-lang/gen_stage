@@ -1,0 +1,2 @@
+defmodule GenRouter do
+end
