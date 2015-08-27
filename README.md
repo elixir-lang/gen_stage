@@ -4,6 +4,9 @@
 
 ## Installation
 
+GenRouter requires Erlang 18 as it is meant to be included in
+Elixir v1.3 or later.
+
   1. Add gen_router to your list of dependencies in mix.exs:
 
         def deps do
