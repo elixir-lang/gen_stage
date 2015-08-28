@@ -109,80 +109,6 @@ defmodule GenRouter do
 
       GenRouter.cancel(source, ref)
 
-  ## Callbacks
-
-  Below we present a complete overview of `GenRouter` callbacks:
-
-    * `init(args)` - invoked when the router is started.
-
-      It must return:
-
-      - `{:ok, state}`
-      - `{:ok, state, timeout}`
-      - `{:ok, state, :hibernate}`
-      - `:ignore`
-      - `{:stop, reason}`
-
-    * `handle_up({pid, ref}, state)` - invoked when a sink asks
-      for data (once per `ref`)
-
-      It must return:
-
-      - `{:ok, new_state}`
-      - `{:ok, new_state, timeout}`
-      - `{:ok, new_state, :hibernate}`
-      - `{:error, reason, new_state}`
-      - `{:error, reason, new_state, timeout}`
-      - `{:error, reason, new_state, :hibernate}`
-      - `{:stop, reason, new_state}`
-
-    * `handle_down(reason, {pid, ref}, state)` - invoked when a sink
-      cancels subscription or crashes
-
-      It must return:
-
-      - `{:ok, new_state}`
-      - `{:ok, new_state, timeout}`
-      - `{:ok, new_state, :hibernate}`
-      - `{:stop, reason, new_state}`
-
-    * `handle_dispatch(event, state)` - invoked to figure out to which
-      event dispatch to
-
-      It must return:
-
-      - `{:ok, pids, new_state}`
-      - `{:ok, pids, new_state, timeout}`
-      - `{:ok, pids, new_state, :hibernate}`
-      - `{:stop, reason, new_state}`
-
-    * `handle_info(msg, state)` - invoked to handle all other messages
-      which are received by the process.
-
-      It must return:
-
-      - `{:ok, state}`
-      - `{:ok, state, timeout}`
-      - `{:stop, reason, state}`
-
-    * `terminate(reason, state)` - called when the server is about to
-      terminate, useful for cleaning up. It must return `:ok`.
-      If part of a supervision tree, terminate only gets called if the
-      GenServer is set to trap exits using `Process.flag/2` *and*
-      the shutdown strategy of the Supervisor is a timeout value,
-      not `:brutal_kill`. The callback is also not invoked if links
-      are broken unless trapping exits. For such reasons, we usually
-      recommend important clean-up rules to happen in separated
-      processes either by use of monitoring or by links themselves.
-
-    * `code_change(old_vsn, state, extra)` - called when the application
-      code is being upgraded live (hot code swapping)
-
-      It must return:
-
-      - `{:ok, new_state}`
-      - `{:error, reason}`
-
   ## Name Registration
 
   GenRouter processes are bound to the same name registration rules
@@ -234,6 +160,79 @@ defmodule GenRouter do
   The GenRouter is just one of the many processes that
   implement the message format defined above.
   """
+
+  @doc """
+  Invoked when the router is started.
+  """
+  @callback init(args :: term) ::
+            {:ok, state :: term} |
+            {:ok, state :: term, timeout | :hibernate} |
+            {:stop, reason :: term} |
+            :ignore
+
+  @doc """
+  Invoked when a sink asks for data.
+
+  The callback is invoked only once per ref (so the same pid
+  can be given multiple times if it asks using different refs).
+  """
+  @callback handle_up({pid, reference}, state :: term) ::
+            {:ok, new_state :: term} |
+            {:ok, new_state :: term, timeout | :hibernate} |
+            {:error, reason :: term, new_state :: term} |
+            {:error, reason :: term, new_state :: term, timeout | :hibernate} |
+            {:stop, reason :: term, new_state :: term}
+
+  @doc """
+  Invoked when a sink cancels subscription or crashes.
+  """
+  @callback handle_down(reason :: term, {pid, reference}, state :: term) ::
+            {:ok, new_state :: term} |
+            {:ok, new_state :: term, timeout | :hibernate} |
+            {:stop, reason :: term, new_state :: term}
+
+  @doc """
+  Specifies to which process(es) an event should be dispatched to.
+  """
+  @callback handle_dispatch(event :: term, state :: term) ::
+            {:ok, [pid], new_state :: term} |
+            {:ok, [pid], new_state :: term, timeout | :hibernate} |
+            {:stop, reason :: term, [pid], new_state :: term} |
+            {:stop, reason :: term, new_state :: term}
+
+  @doc """
+  Invoked to handle all other messages received by the router process.
+  """
+  @callback handle_info(info :: :timeout | term, state :: term) ::
+            {:ok, new_state :: term} |
+            {:ok, new_state :: term, timeout | :hibernate} |
+            {:stop, reason :: term, new_state :: term}
+
+  @doc """
+  Called when the server is about to terminate, useful for cleaning up.
+
+  It must return `:ok`. If part of a supervision tree, terminate only gets
+  called if the router is set to trap exits using `Process.flag/2` *and*
+  the shutdown strategy of the Supervisor is a timeout value, not `:brutal_kill`.
+  The callback is also not invoked if links are broken unless trapping exits.
+  For such reasons, we usually recommend important clean-up rules to happen
+  in separated processes either by use of monitoring or by links themselves.
+  """
+  @callback terminate(reason :: :normal | :shutdown | {:shutdown, term} | term, state :: term) ::
+            :ok
+
+  @doc """
+  Called when the application code is being upgraded live (hot code swapping).
+  """
+  @callback code_change(old_vsn :: term | {:down, term}, state :: term, extra :: term) ::
+            {:ok, new_state :: term} |
+            {:error, reason :: term}
+
+  # TODO: Provide @callback in GenServer (documentation purposes)
+  # TODO: Provide GenServer.stop/1
+
+  # TODO: Implement and provide format_status/2
+  # TODO: Provide GenRouter.stop/1
 
   use GenServer
 end
