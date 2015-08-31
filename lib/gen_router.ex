@@ -54,8 +54,9 @@ defmodule GenRouter do
       to start receiving the data (i.e. become a sink). It receives
       the pid, the reference and the router state. The reference is
       the one sent by the sink and  `handle_up/3` is invoked only
-      once per sink. In this case, all we do is to store the new
-      `ref` and `pid` pair in the state
+      once per sink (until `handle_down/3` or `handle_overflow/2`
+      are invoked) . In the implementation above, all we do is in
+      `handle_up/2` is to store the new `ref` and `pid` pair in a map
 
     * `handle_down/3` - if `handle_up/2` returns an `:ok` tuple, the
       sink then is monitored. `handle_down/3` is called when the
@@ -95,7 +96,7 @@ defmodule GenRouter do
 
   Often you will want one router to become a sink to another
   router and vice-versa. This can be done with the `subscribe/2`
-  function, which tells the router to ask the given router for
+  function, which tells the router to ask a given source for
   data, similar to the example shown above:
 
       {:ok, ref} = GenRouter.subscribe(sink, to: source)
@@ -108,11 +109,6 @@ defmodule GenRouter do
   Or to cancel directly in the source:
 
       GenRouter.cancel(source, ref)
-
-  ## Name Registration
-
-  GenRouter processes are bound to the same name registration rules
-  as `GenServer`. Read more about it in the `GenServer` docs.
 
   ## Flow control
 
@@ -159,6 +155,58 @@ defmodule GenRouter do
   Note those messages are not tied to GenRouter at all.
   The GenRouter is just one of the many processes that
   implement the message format defined above.
+
+  ### Overflow
+
+  As mentioned above, if one of the sinks cannot ask for messages
+  as fast as they are arriving, the system becomes pull, with the
+  sink asking the source for data.
+
+  Everytime this happens, `handle_overflow/2` is invoked with the
+  sink reference. This allows the router to react to unexpected
+  overflows. For example, in case of the router above, one could
+  remove the slow sink from the list of processes.
+
+  After `handle_overflow/2` is called, one of `handle_up/2` or
+  `handle_down/3` will eventually be called. The first when the
+  sink asks for more data, the second if the sink crashes or
+  cancels its subscription.
+
+  In order to avoid overflow to be triggered multiple times, it
+  is recommended for sinks to work with a window of messages.
+  For example, instead of asking for 20 messages and then asking
+  for 20 more messages when the original 20 messages are received,
+  it is preferred to ask for 20 messages and ask for more when
+  the first 10 messages (i.e. 50% of the quota) are processed.
+
+      # TODO: handle_overflow/2 examples and docs
+
+  ### Load shedding or postponing
+
+  When dispatching to a sink that has overflown, the router will
+  stop dispatching until the sink asks for more messages.
+
+  In some occasions, you may choose to act differenty, either by
+  simply discarding messages (load shedding) or by postponing
+  dispatching until one or more sinks are ready for receiving data.
+
+  Load shedding can be done by:
+
+      # TODO: Example
+
+  Postponing can be achieved by:
+
+      # TODO: Example
+
+  In fact, postponing can be used to hold on dispatching messages
+  until a sink is connect. For example:
+
+      # TODO: Example
+
+  ## Name Registration
+
+  GenRouter processes are bound to the same name registration rules
+  as `GenServer`. Read more about it in the `GenServer` docs.
   """
 
   @doc """
@@ -176,7 +224,7 @@ defmodule GenRouter do
   The callback is invoked only once per ref (so the same pid
   can be given multiple times if it asks using different refs).
   """
-  @callback handle_up({pid, reference}, state :: term) ::
+  @callback handle_up(sink :: {pid, reference}, state :: term) ::
             {:ok, new_state :: term} |
             {:ok, new_state :: term, timeout | :hibernate} |
             {:error, reason :: term, new_state :: term} |
@@ -186,7 +234,7 @@ defmodule GenRouter do
   @doc """
   Invoked when a sink cancels subscription or crashes.
   """
-  @callback handle_down(reason :: term, {pid, reference}, state :: term) ::
+  @callback handle_down(reason :: term, sink :: {pid, reference}, state :: term) ::
             {:ok, new_state :: term} |
             {:ok, new_state :: term, timeout | :hibernate} |
             {:stop, reason :: term, new_state :: term}
@@ -194,7 +242,7 @@ defmodule GenRouter do
   @doc """
   Specifies to which process(es) an event should be dispatched to.
   """
-  @callback handle_dispatch(event :: term, state :: term) ::
+  @callback handle_dispatch(event :: term, source :: {pid, reference}, state :: term) ::
             {:ok, [pid], new_state :: term} |
             {:ok, [pid], new_state :: term, timeout | :hibernate} |
             {:stop, reason :: term, [pid], new_state :: term} |
