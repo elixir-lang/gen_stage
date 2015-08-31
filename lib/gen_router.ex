@@ -179,8 +179,6 @@ defmodule GenRouter do
   it is preferred to ask for 20 messages and ask for more when
   the first 10 messages (i.e. 50% of the quota) are processed.
 
-      # TODO: handle_overflow/2 examples and docs
-
   ### Load shedding or postponing
 
   When dispatching to a sink that has overflown, the router will
@@ -246,6 +244,20 @@ defmodule GenRouter do
             {:ok, [pid], new_state :: term} |
             {:ok, [pid], new_state :: term, timeout | :hibernate} |
             {:stop, reason :: term, [pid], new_state :: term} |
+            {:stop, reason :: term, new_state :: term}
+
+
+  @doc """
+  Callback invoke when a sink is behind in event processing.
+
+  After `handle_overflow/2` is called, one of `handle_up/2` or
+  `handle_down/3` will eventually be called. The first when the
+  sink asks for more data, the second if the sink crashes or
+  cancels its subscription.
+  """
+  @callback handle_overflow(sink :: {pid, reference}, state :: term) ::
+            {:ok, new_state :: term} |
+            {:ok, new_state :: term, timeout | :hibernate} |
             {:stop, reason :: term, new_state :: term}
 
   @doc """
