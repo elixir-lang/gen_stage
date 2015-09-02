@@ -3,6 +3,8 @@ defmodule GenRouter.Out do
   Specifies the outgoing part of a router.
   """
 
+  # TODO: Define __using__
+
   @doc """
   Invoked when the router is started.
   """
@@ -33,7 +35,7 @@ defmodule GenRouter.Out do
   Specifies to which process(es) an event should be dispatched to.
   """
   @callback handle_dispatch(event :: term, state :: term) ::
-            {:ok, [pid], new_state :: term} |
+            {:ok, [sink :: {pid, reference}], new_state :: term} |
             {:stop, reason :: term, [pid], new_state :: term} |
             {:stop, reason :: term, new_state :: term}
 
@@ -48,7 +50,7 @@ defmodule GenRouter.Out do
   in separated processes either by use of monitoring or by links themselves.
   """
   @callback terminate(reason :: :normal | :shutdown | {:shutdown, term} | term, state :: term) ::
-            :ok
+            term()
 
   @doc """
   Called when the router code is being upgraded live (hot code swapping).
