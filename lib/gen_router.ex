@@ -1,10 +1,10 @@
 defmodule GenRouter do
-  @moduledoc """
-  A behaviour module for routing data from multiple sources
+  @moduledoc ~S"""
+  A behaviour module for routing events from multiple sources
   to multiple sinks.
 
-  `GenRouter` allows developers to receive data from multiple
-  sources and/or send data to multiple sinks. The relationship
+  `GenRouter` allows developers to receive events from multiple
+  sources and/or send events to multiple sinks. The relationship
   between sources (the one sending messages) and sinks (the one
   receiving them) is established when the sink explicitly asks
   for data.
@@ -22,109 +22,211 @@ defmodule GenRouter do
   sink to B and B is a sink to A. A is a definite source, C is
   a definite sink.
 
-  ## A broadcasting router
+  ## Incoming and outgoing
 
-  As an example, let's implement a router that simplies
-  broadcast all incoming events to all sinks. Its implementation
-  is as follows:
+  The router is split in two parts, one for handling incoming
+  messages and another to handle outgoing ones. Imagine `B` below
+  is a router:
 
-      defmodule BroadcastRouter do
-        use GenRouter
+      [A] -> [B] -> [C]
 
-        def start_link do
-          GenRouter.start_link(__MODULE__, %{})
-        end
+  We can split it in two parts:
 
-        def handle_up({pid, ref}, state) do
-          {:ok, Map.put(state, ref, pid)}
-        end
+      [A] -> [incoming | outgoing] -> [C]
 
-        def handle_down(_reason, {_pid, ref}, state) do
-          {:ok, Map.delete(state, ref)}
-        end
+  Those parts are defined by different callback modules, allowing
+  developers to compose functionality at will. For example, you
+  can have a router that receives messages dynamically from multiple
+  processes using `GenRouter.DynamicIn` composed with a router that
+  relays those messages to multiple sinks at the same time
+  (`GenRouter.BroadcastOut`). Or the same `GenRouter.DynamicIn`
+  coupled with a custom `RoundRobinOut` mechanism.
 
-        def handle_dispatch(_event, state) do
-          {:ok, Map.values(state), state}
-        end
-      end
+  Let's see an example:
 
-  Our broadcast router implements 3 callbacks:
+      # Starts a new router
+      iex> {:ok, pid} = GenRouter.start_link(GenRouter.DynamicIn, [],
+                                             GenRouter.BroadcastOut, [])
 
-    * `handle_up/2` - it is invoked when a process asks the router
-      to start receiving the data (i.e. become a sink). It receives
-      the pid, the reference and the router state. The reference is
-      the one sent by the sink and  `handle_up/3` is invoked only
-      once per sink (until `handle_down/3` or `handle_overflow/2`
-      are invoked) . In the implementation above, all we do is in
-      `handle_up/2` is to store the new `ref` and `pid` pair in a map
+      # Let's ask the router for 10 messages, officialy making
+      # the current process a sink for the current router
+      iex> GenRouter.ask(pid, self(), Process.monitor(ref), 10)
 
-    * `handle_down/3` - if `handle_up/2` returns an `:ok` tuple, the
-      sink then is monitored. `handle_down/3` is called when the
-      sink process dies or explicitly cancels its subscription
+      # Spawns a task that sends one event to the router
+      iex> Task.start_link fn -> GenRouter.sync_notify(pid, :hello) end
 
-    * `handle_dispatch/2` - invoked everytime an event comes. It
-      must return `{:ok, pids, state}`, where `pids` is a list of
-      pids to dispatch the event to
-
-  Let's give it a try on terminal:
-
-      # Start the broadcast router
-      iex> {:ok, pid} = BroadcastRouter.start_link()
-
-      # Create a reference and use it to ask for data
-      iex> ref = Process.monitor(pid)
-      iex> GenRouter.ask(pid, self(), ref, 10)
-
-      # Finally broadcast something
-      iex> GenRouter.sync_notify(BroadcastRouter, :hello)
-
-      # We have received it
+      # Eventually the routed message arrives
       iex> flush()
 
-  The first time we invoke `ask/4` for that given reference,
-  it is registered in the router which will now send data.
-  We have initially asked the router to send us 10 events.
-  Once the 10 events are delivered, the router will buffer
-  messages until we ask for more or until a customizable
-  threshold is reached. It is possible to opt-out by calling
-  `GenRouter.cancel/2`.
+  The documentation to implement the incoming and outgoing parts
+  of the router are defined in `GenRouter.In` and `GenRouter.Out`
+  respectively.
 
-  The underlying routing messages for routing, asking and
-  cancelling are defined in later sections.
+  ### Built-in incoming and outgoing
 
-  ## Subscribing routers
+    * `GenRouter.In` - documents the callbacks required to implement
+      the incoming part of a router (not an implementation)
 
-  Often you will want one router to become a sink to another
-  router and vice-versa. This can be done with the `subscribe/2`
-  function, which tells the router to ask a given source for
-  data, similar to the example shown above:
+    * `GenRouter.DynamicIn` - a special incoming router that receives
+      events via `GenRouter.sync_notify/3` instead of receiving them
+      from sources
 
-      {:ok, ref} = GenRouter.subscribe(sink, to: source)
+    * `GenRouter.SingleIn` - a router that has a single source.
+      The source can be given on start or by calling
+      `GenRouter.subscribe/3`
 
-  Subscription returns a pid and a reference. The reference can
-  be given to unsubscribe from the sink:
+    * `GenRouter.Out` - documents the callbacks required to implement
+      the outgoing part of a router (not an implementation)
 
-      GenRouter.unsubscribe(sink, ref)
+    * `GenRouter.BroadcastOut` - a router that has multiple sinks,
+      broadcasting all messages to all of the sinks
+
+  ### Subscribing
+
+  Sometimes the routing topology is defined dynamically. For example,
+  developers may define multiple routers, so how to make the events
+  flow between them?
+
+  We have seen in the example above that the sink must explicitly
+  ask the source for data. When we have multiple routers, we then
+  need to tell a router (the sink) to ask another router (the
+  source) for data. We call subscribe the process of telling one
+  process to ask another process for data.
+
+  Let's see an example:
+
+      # Starts a new router that receives dynamic messages
+      iex> {:ok, router1} = GenRouter.start_link(GenRouter.DynamicIn, [],
+                                                 GenRouter.BroadcastOut, [])
+
+      # Starts another router that will have a single source
+      iex> {:ok, router2} = GenRouter.start_link(GenRouter.SingleIn, [],
+                                                 GenRouter.BroadcastOut, []))
+
+      # Let's ask the second router to subscribe to the first router
+      iex> GenRouter.subscribe(router2, to: router1)
+
+      # Finally ask the second router for data. The second router will
+      # signal this demand to the first router (by calling `ask/4` internally)
+      iex> GenRouter.ask(pid, self(), Process.monitor(ref), 10)
+
+      # Spawns a task that sends one event to the first router
+      iex> Task.start_link fn -> GenRouter.sync_notify(pid, :hello) end
+
+      # The first router will send it to second the router which sends
+      # it to the current process
+      iex> flush()
+
+  In other words, all subscribe does is to tell a router to ask another
+  router for data. Imagine we have the following diagram:
+
+      [router 1] - [router 2] - [the shell]
+
+  Once the shell asks for data, the demand flows upstream:
+
+      [router 1] <- [router 2] <- [the shell]
+
+  Once events arrive to the router 1 (via `GenRouter.sync_notify/3`),
+  it is sent downstream according to the demand:
+
+      [router 1] -> [router 2] -> [the shell]
+
+  One question is: when to use subscribe and when to use ask?
+
+    * You use ask when you want the current process, the one you are
+      currently in control of, to ask for events from a given source.
+      In the example above, the shell process is asking for data
+
+    * You use subscribe when you want another process, usually a
+      router, to ask for events from a given resource. In the example
+      above, the second router will ask the first router for data
+
+  Note subscribing returns a pid and a reference. The reference can
+  be given to ask the router to unsubscribe:
+
+      GenRouter.unsubscribe(router2, ref)
 
   Or to cancel directly in the source:
 
-      GenRouter.cancel(source, ref)
+      GenRouter.cancel(router1, ref)
+
+  Finally, note it is not possible to ask a GenRouter with
+  `GenRouter.DynamicIn` to subscribe to a source. That's because
+  `GenRouter.DynamicIn` expects, by definition, to receive events
+  dynamically and not from a single place.
+
+  ### Custom sinks
+
+  In the example above, the definite sink was the shell process.
+  However, most of the times, we want to use a custom process as
+  a sink too, which will also abstract the act of asking for data
+  from us. This is done with `GenRouter.Sink`:
+
+      defmodule MySink do
+        use GenRouter.Sink
+
+        def start_link do
+          GenRouter.Sink.start_link(__MODULE__, [])
+        end
+
+        def handle_event(event, state) do
+          IO.puts "Got #{inspect event}"
+          {:ok, state}
+        end
+      end
+
+  Now we can define a topology with our custom sink:
+
+      # Starts a router that receives dynamic messages
+      iex> {:ok, source} = GenRouter.start_link(GenRouter.DynamicIn, [],
+                                                GenRouter.BroadcastOut, [])
+
+      # Starts another router that will have a single source
+      iex> {:ok, router} = GenRouter.start_link(GenRouter.SingleIn, [],
+                                                GenRouter.BroadcastOut, []))
+
+      # Our definitive sink
+      iex> {:ok, sink} = MySink.start_link
+
+      # Let's subscribe the proper elements
+      iex> GenRouter.subscribe(router, to: source)
+      iex> GenRouter.subscribe(sink, to: router)
+
+      # Pushing an event now reaches the sink
+      iex> GenRouter.sync_notify(source, :hello)
 
   ## Flow control
 
-  The reason why the sink must ask for data is to provide
-  flow control and alternate between push and pull.
+  In the examples above, we have used `GenRouter.ask/4` to ask
+  the router for data. The reason why the sink must ask for data
+  is to provide flow control and alternate between push and pull.
 
-  If the sink is faster than the source, it can ask for
-  large chunks of data, which the source ends-up sending
-  at will, working as if it was simply pushing data.
+  One way to look at it as the communication between sources and
+  sinks are demand-driven. The source won't send any data to the
+  sink unless the sink first ask for it. Furthermore, the source
+  must never send more data to the sink than the amount asked for.
 
-  However, if the sink is slower than the source, explicitly
-  asking for data makes it a pull system, where the source
-  needs to wait before sending more data to the sink. If
-  the difference is large, the source should then buffer
-  up to some point and then start loadshedding or drop the
-  sink.
+  One workflow would look like:
+
+    * The sink asks for 10 items
+    * The source sends 3 items
+    * The source sends 2 items
+    * The sink asks for more 5 items (so it never has the buffer
+      empty but always capping at some limit, in this case, 10)
+    * The source sends 4 items
+    * ...
+    * The source sends EOS (end of stream) or the sink cancels subscription
+
+  This allows proper back-pressure and flow control in different
+  occasions. If the sink is faster than the source, it can ask for
+  large amounts of data, which the source ends-up sending at will,
+  working as if it was simply pushing data.
+
+  However, if the sink is slower than the source, explicitly asking
+  for data makes it a pull system, where the source needs to wait
+  before sending more data to the sink. If the difference is large,
+  it will force the definite source to either buffer messages up to
+  some limit or to start discarding them.
 
   The messages between source and sink are as follows:
 
@@ -134,7 +236,7 @@ defmodule GenRouter do
       data up to the counter. Following messages will
       increase the counter kept by the source.
 
-    * `{:"$gen_notify", {pid, ref}, [event]}` -
+    * `{:"$gen_route", {pid, ref}, [event]}` -
       used to send data to a sink. The third argument is a
       non-empty list of events. The `ref` is the same used
       when asked for the data.
@@ -147,59 +249,14 @@ defmodule GenRouter do
       may crash just before sending the confirmation). For
       such, it is recomended for the source to be monitored.
 
-    * `{:"$gen_notify", {pid, ref}, {:eos, reason}}` -
+    * `{:"$gen_route", {pid, ref}, {:eos, reason}}` -
       signals the end of the "event stream". Reason may
       be `:done`, `:halted`, `:cancelled` or even `{:error,
       reason}` (in case `handle_up/2` returns error).
 
-  Note those messages are not tied to GenRouter at all.
-  The GenRouter is just one of the many processes that
-  implement the message format defined above.
-
-  ### Overflow
-
-  As mentioned above, if one of the sinks cannot ask for messages
-  as fast as they are arriving, the system becomes pull, with the
-  sink asking the source for data.
-
-  Everytime this happens, `handle_overflow/2` is invoked with the
-  sink reference. This allows the router to react to unexpected
-  overflows. For example, in case of the router above, one could
-  remove the slow sink from the list of processes.
-
-  After `handle_overflow/2` is called, one of `handle_up/2` or
-  `handle_down/3` will eventually be called. The first when the
-  sink asks for more data, the second if the sink crashes or
-  cancels its subscription.
-
-  In order to avoid overflow to be triggered multiple times, it
-  is recommended for sinks to work with a window of messages.
-  For example, instead of asking for 20 messages and then asking
-  for 20 more messages when the original 20 messages are received,
-  it is preferred to ask for 20 messages and ask for more when
-  the first 10 messages (i.e. 50% of the quota) are processed.
-
-  ### Load shedding or postponing
-
-  When dispatching to a sink that has overflown, the router will
-  stop dispatching until the sink asks for more messages.
-
-  In some occasions, you may choose to act differenty, either by
-  simply discarding messages (load shedding) or by postponing
-  dispatching until one or more sinks are ready for receiving data.
-
-  Load shedding can be done by:
-
-      # TODO: Example
-
-  Postponing can be achieved by:
-
-      # TODO: Example
-
-  In fact, postponing can be used to hold on dispatching messages
-  until a sink is connect. For example:
-
-      # TODO: Example
+  Note those messages are not tied to GenRouter at all. The
+  GenRouter is just one of the many processes that implement
+  the message format defined above.
 
   ## Name Registration
 
@@ -245,7 +302,6 @@ defmodule GenRouter do
             {:ok, [pid], new_state :: term, timeout | :hibernate} |
             {:stop, reason :: term, [pid], new_state :: term} |
             {:stop, reason :: term, new_state :: term}
-
 
   @doc """
   Callback invoke when a sink is behind in event processing.
@@ -293,6 +349,11 @@ defmodule GenRouter do
 
   # TODO: Implement and provide format_status/2
   # TODO: Provide GenRouter.stop/1
+
+  # TODO: GenRouter.Supervisor
+  # TODO: GenRouter.TCPIn
+  # TODO: GenRouter.Stream
+  # TODO: ask with :via
 
   use GenServer
 end
