@@ -148,7 +148,7 @@ defmodule GenRouter do
 
   Or to cancel directly in the source:
 
-      GenRouter.cancel(router1, ref)
+      GenRouter.cancel(router1, ref, reason \\ :cancel)
 
   Finally, note it is not possible to ask a GenRouter with
   `GenRouter.DynamicIn` to subscribe to a source. That's because
@@ -263,86 +263,6 @@ defmodule GenRouter do
   GenRouter processes are bound to the same name registration rules
   as `GenServer`. Read more about it in the `GenServer` docs.
   """
-
-  @doc """
-  Invoked when the router is started.
-  """
-  @callback init(args :: term) ::
-            {:ok, state :: term} |
-            {:ok, state :: term, timeout | :hibernate} |
-            {:stop, reason :: term} |
-            :ignore
-
-  @doc """
-  Invoked when a sink asks for data.
-
-  The callback is invoked only once per ref (so the same pid
-  can be given multiple times if it asks using different refs).
-  """
-  @callback handle_up(sink :: {pid, reference}, state :: term) ::
-            {:ok, new_state :: term} |
-            {:ok, new_state :: term, timeout | :hibernate} |
-            {:error, reason :: term, new_state :: term} |
-            {:error, reason :: term, new_state :: term, timeout | :hibernate} |
-            {:stop, reason :: term, new_state :: term}
-
-  @doc """
-  Invoked when a sink cancels subscription or crashes.
-  """
-  @callback handle_down(reason :: term, sink :: {pid, reference}, state :: term) ::
-            {:ok, new_state :: term} |
-            {:ok, new_state :: term, timeout | :hibernate} |
-            {:stop, reason :: term, new_state :: term}
-
-  @doc """
-  Specifies to which process(es) an event should be dispatched to.
-  """
-  @callback handle_dispatch(event :: term, source :: {pid, reference}, state :: term) ::
-            {:ok, [pid], new_state :: term} |
-            {:ok, [pid], new_state :: term, timeout | :hibernate} |
-            {:stop, reason :: term, [pid], new_state :: term} |
-            {:stop, reason :: term, new_state :: term}
-
-  @doc """
-  Callback invoke when a sink is behind in event processing.
-
-  After `handle_overflow/2` is called, one of `handle_up/2` or
-  `handle_down/3` will eventually be called. The first when the
-  sink asks for more data, the second if the sink crashes or
-  cancels its subscription.
-  """
-  @callback handle_overflow(sink :: {pid, reference}, state :: term) ::
-            {:ok, new_state :: term} |
-            {:ok, new_state :: term, timeout | :hibernate} |
-            {:stop, reason :: term, new_state :: term}
-
-  @doc """
-  Invoked to handle all other messages received by the router process.
-  """
-  @callback handle_info(info :: :timeout | term, state :: term) ::
-            {:ok, new_state :: term} |
-            {:ok, new_state :: term, timeout | :hibernate} |
-            {:stop, reason :: term, new_state :: term}
-
-  @doc """
-  Called when the server is about to terminate, useful for cleaning up.
-
-  It must return `:ok`. If part of a supervision tree, terminate only gets
-  called if the router is set to trap exits using `Process.flag/2` *and*
-  the shutdown strategy of the Supervisor is a timeout value, not `:brutal_kill`.
-  The callback is also not invoked if links are broken unless trapping exits.
-  For such reasons, we usually recommend important clean-up rules to happen
-  in separated processes either by use of monitoring or by links themselves.
-  """
-  @callback terminate(reason :: :normal | :shutdown | {:shutdown, term} | term, state :: term) ::
-            :ok
-
-  @doc """
-  Called when the application code is being upgraded live (hot code swapping).
-  """
-  @callback code_change(old_vsn :: term | {:down, term}, state :: term, extra :: term) ::
-            {:ok, new_state :: term} |
-            {:error, reason :: term}
 
   # TODO: Provide @callback in GenServer (documentation purposes)
   # TODO: Provide GenServer.stop/1
