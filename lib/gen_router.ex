@@ -79,7 +79,8 @@ defmodule GenRouter do
       the outgoing part of a router (not an implementation)
 
     * `GenRouter.BroadcastOut` - a router that has multiple sinks,
-      broadcasting all messages to all of the sinks
+      synchronizing the demand between the sinks and broadcasting
+      all incoming messages to all sinks
 
   ### Subscribing
 

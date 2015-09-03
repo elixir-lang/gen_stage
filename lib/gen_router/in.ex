@@ -21,6 +21,7 @@ defmodule GenRouter.In do
   """
   @callback handle_demand(demand :: pos_integer, state :: term) ::
             {:dispatch, [event :: term], new_state :: term} |
+            {:dispatch, [event :: term], new_state :: term, timeout | :hibernate} |
             {:noreply, new_state :: term} |
             {:noreply, new_state :: term, timeout | :hibernate} |
             {:stop, reason :: term, new_state :: term}
@@ -41,6 +42,7 @@ defmodule GenRouter.In do
   """
   @callback handle_info(info :: :timeout | term, state :: term) ::
             {:dispatch, [event :: term], new_state :: term} |
+            {:dispatch, [event :: term], new_state :: term, timeout | :hibernate} |
             {:noreply, new_state :: term} |
             {:noreply, new_state :: term, timeout | :hibernate} |
             {:stop, reason :: term, new_state :: term}

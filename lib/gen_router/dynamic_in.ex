@@ -1,10 +1,13 @@
 defmodule GenRouter.DynamicIn do
   # TODO: Implement pseudo-code
+  # TODO: Set a buffer limit and what to do once it is reached
 
   def init(_) do
     queue = :queue.new()
-    {:ok, {demand, queue}}
+    {:ok, {0, queue}}
   end
+
+  # demand
 
   def handle_demand(demand, {0, queue}) do
     {demand, queue, entries} = take_demand_from_queue(demand, queue)
@@ -21,6 +24,8 @@ defmodule GenRouter.DynamicIn do
   def handle_demand(demand, {current, queue}) do
     {:noreply, {current+demand, queue}}
   end
+
+  # info
 
   def handle_info({:"$gen_notify", from, event}, {0, queue}) do
     queue = put_event_in_queue(from, event, queue)

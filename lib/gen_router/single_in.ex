@@ -1,5 +1,6 @@
 defmodule GenRouter.SingleIn do
   # TODO: Implement pseudo-code
+
   def init(_) do
     {:ok, 0}
   end
@@ -12,7 +13,7 @@ defmodule GenRouter.SingleIn do
   end
 
   def handle_demand(demand, current) when is_integer(current) do
-    {:noreply, current + demand}
+    {:noreply, current+demand}
   end
 
   # call
@@ -28,6 +29,15 @@ defmodule GenRouter.SingleIn do
       GenRouter.ask(pid, self(), ref, demand)
     end
     {:reply, {:ok, pid, ref}, {pid, ref}}
+  end
+
+  def handle_call({:unsubscribe, ref, _opts}, _from, {pid, ref}) do
+    GenRouter.cancel(pid, ref)
+    {:noreply, 0}
+  end
+
+  def handle_call({:unsubscribe, _ref, _opts}, _from, demand) do
+    {:reply, {:error, :not_subscribed}, demand}
   end
 
   # info

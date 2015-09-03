@@ -18,11 +18,19 @@ defmodule GenRouter.Out do
 
   Must return a non negative integer (>= 0) to signal the
   demand upstream. 0 means no demand.
+
+  It may optionally return a list of events to dispatch.
+  Particularly useful when events have been buffering
+  and they are now ready to be dispatched once the demand
+  arrived.
   """
   @callback handle_demand(demand :: pos_integer, sink :: {pid, reference}, state :: term) ::
             {:ok, non_neg_integer, new_state :: term} |
+            {:ok, non_neg_integer, [event], new_state :: term} |
             {:error, reason :: term, new_state :: term} |
-            {:stop, reason :: term, new_state :: term}
+            {:error, reason :: term, [event], new_state :: term} |
+            {:stop, reason :: term, new_state :: term} |
+            {:stop, reason :: term, [event], new_state :: term}
 
   @doc """
   Invoked when a sink cancels subscription or crashes.
@@ -33,10 +41,12 @@ defmodule GenRouter.Out do
 
   @doc """
   Specifies to which process(es) an event should be dispatched to.
+
+  Returns a list with references that identify existing sinks.
   """
   @callback handle_dispatch(event :: term, state :: term) ::
-            {:ok, [sink :: {pid, reference}], new_state :: term} |
-            {:stop, reason :: term, [pid], new_state :: term} |
+            {:ok, [reference], new_state :: term} |
+            {:stop, reason :: term, [reference], new_state :: term} |
             {:stop, reason :: term, new_state :: term}
 
   @doc """
