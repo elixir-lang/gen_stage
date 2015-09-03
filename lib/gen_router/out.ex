@@ -9,9 +9,7 @@ defmodule GenRouter.Out do
   Invoked when the router is started.
   """
   @callback init(args :: term) ::
-            {:ok, state :: term} |
-            {:stop, reason :: term} |
-            :ignore
+            {:ok, state :: term}
 
   @doc """
   Invoked when a sink asks for data.

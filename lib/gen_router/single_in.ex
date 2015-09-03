@@ -2,59 +2,59 @@ defmodule GenRouter.SingleIn do
   # TODO: Implement pseudo-code
 
   def init(_) do
-    {:ok, 0}
+    {:ok, {0, nil}}
   end
 
   # demand
 
-  def handle_demand(demand, {pid, ref} = source) do
-    GenRouter.ask(pid, self(), ref, demand)
-    {:noreply, source}
+  def handle_demand(demand, {current, nil}) when is_integer(current) do
+    {:noreply, {current+demand, nil}}
   end
 
-  def handle_demand(demand, current) when is_integer(current) do
-    {:noreply, current+demand}
+  def handle_demand(demand, {current, {pid, ref}} = source) do
+    GenRouter.ask(pid, self(), ref, demand)
+    {:noreply, {current+demand, source}}
   end
 
   # call
 
-  def handle_call({:subscribe, _to, _opts}, _from, {_, _} = source) do
-    {:reply, {:error, :already_subscribed}, source}
-  end
-
-  def handle_call({:subscribe, to, _opts}, _from, demand) do
+  def handle_call({:subscribe, to, _opts}, _from, {demand, nil}) do
     pid = GenServer.whereis(to)
     ref = Process.monitor(pid)
     if demand != 0 do
       GenRouter.ask(pid, self(), ref, demand)
     end
-    {:reply, {:ok, pid, ref}, {pid, ref}}
+    {:reply, {:ok, pid, ref}, {demand, {pid, ref}}}
   end
 
-  def handle_call({:unsubscribe, ref, _opts}, _from, {pid, ref}) do
+  def handle_call({:subscribe, _to, _opts}, _from, state) do
+    {:reply, {:error, :already_subscribed}, state}
+  end
+
+  def handle_call({:unsubscribe, ref, _opts}, _from, {demand, {pid, ref}}) do
     GenRouter.cancel(pid, ref)
-    {:noreply, 0}
+    {:noreply, {demand, nil}}
   end
 
-  def handle_call({:unsubscribe, _ref, _opts}, _from, demand) do
-    {:reply, {:error, :not_subscribed}, demand}
+  def handle_call({:unsubscribe, _ref, _opts}, _from, state) do
+    {:reply, {:error, :not_subscribed}, state}
   end
 
   # info
 
-  def handle_info({:"$gen_router", source, [_|_] = events}, source) do
-    {:dispatch, events, source}
+  def handle_info({:"$gen_router", source, [_|_] = events}, {demand, source}) do
+    {:dispatch, events, {demand - length(events), source}}
   end
 
-  def handle_info({:"$gen_router", source, {:eos, _}}, source) do
-    {:noreply, 0}
+  def handle_info({:"$gen_router", source, {:eos, _}}, {demand, source}) do
+    {:noreply, {demand, nil}}
   end
 
-  def handle_info({:DOWN, ref, _, pid, _}, {pid, ref}) do
-    {:noreply, 0}
+  def handle_info({:DOWN, ref, _, pid, _}, {demand, {pid, ref}}) do
+    {:noreply, {demand, nil}}
   end
 
-  def handle_info(_, source_or_demand) do
-    {:noreply, source_or_demand}
+  def handle_info(_, state) do
+    {:noreply, state}
   end
 end
