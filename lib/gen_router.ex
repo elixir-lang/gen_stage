@@ -206,15 +206,15 @@ defmodule GenRouter do
       the sink cancels subscription
 
   This allows proper back-pressure and flow control in different
-  occasions. If the sink is faster than the source, it can ask for
-  large amounts of data, which the source ends-up sending at will,
-  working as if it was simply pushing data.
+  occasions. If the sink is faster than the source, the source will
+  always send the data as soon as it arrives, ensuring the sink
+  gets the new data as fast as possible, reducing idle time.
 
-  However, if the sink is slower than the source, explicitly asking
-  for data makes it a pull system, where the source needs to wait
-  before sending more data to the sink. If the difference is large,
-  it will force the definite source to either buffer messages up to
-  some limit or to start discarding them.
+  However, if the sink is slower than the source, the source needs to
+  wait before sending more data to the sink. If the difference is
+  considerable, the sink won't overflow rather the lack of demand
+  will be reflected upstream, forcing the definite source to either
+  buffer messages (up to some limit) or to start discarding them.
 
   The messages between source and sink are as follows:
 
