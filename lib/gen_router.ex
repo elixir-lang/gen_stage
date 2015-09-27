@@ -88,7 +88,7 @@ defmodule GenRouter do
   This short example shows a couple things:
 
     * Communicatation happens by subscribing sinks to sources.
-      We will see why it happens from top to bottom later on.
+      We will see why it happens from bottom to top later on.
 
     * `GenRouter` is a building block made of `*In` and `*Out` parts
 
