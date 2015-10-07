@@ -4,6 +4,7 @@ defmodule GenRouter.Out do
   """
 
   # TODO: Define __using__
+  @type event :: any
 
   @doc """
   Invoked when the router is started.
