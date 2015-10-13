@@ -262,9 +262,8 @@ defmodule GenRouter do
 
   # TODO: Provide GenRouter.stop/1
   # TODO: Provide GenRouter.subscribe
-  # TODO: Provide GenRouter.ask
+  # TODO: Provide GenRouter.unsubscribe
   # TODO: Provide GenRouter.cancel
-  # TODO: handle receiving :"$gen_route" messages in GenServer
 
   # TODO: GenRouter.Supervisor
   # TODO: GenRouter.TCPAcceptor
@@ -297,6 +296,23 @@ defmodule GenRouter do
   def start(in_mod, in_args, out_mod, out_args, options \\ []) do
     args = {in_mod, in_args, out_mod, out_args}
     GenServer.start(__MODULE__, args, options)
+  end
+
+  @spec call(router, any, timeout) :: any
+  def call(router, request, timeout \\ 5_000)
+  defdelegate call(router, request, timeout), to: GenServer
+
+  @spec reply(GenServer.from, any) :: :ok
+  defdelegate reply(from, response), to: GenServer
+
+  def ask(router, pid, ref, demand, opts \\ []) do
+    case GenServer.whereis(router) do
+      nil ->
+        exit({:noproc, {__MODULE__, :ask, [router, pid, ref, demand, opts]}})
+      router ->
+        _ = send(router, {:"$gen_ask", {pid, ref}, {demand, opts}})
+        :ok
+    end
   end
 
   @doc false
@@ -342,14 +358,15 @@ defmodule GenRouter do
     try do
       in_mod.handle_call(request, from, in_state)
     catch
-      kind, reason ->
-        stack = System.stacktrace()
-        reraise_stop(kind, reason, stack, s)
+      :throw, value ->
+        :erlang.raise(:error, {:nocatch, value}, System.stacktrace())
     else
       {:reply, reply, in_state} ->
         {:reply, reply, %GenRouter{s | in_state: in_state}}
       {:noreply, in_state} ->
         {:noreply, %GenRouter{s | in_state: in_state}}
+      {:stop, reason, reply, in_state} ->
+        {:stop, reason, reply, %GenRouter{s | in_state: in_state}}
       {:stop, reason, in_state} ->
         {:stop, reason, %GenRouter{s | in_state: in_state}}
       other ->
@@ -364,13 +381,11 @@ defmodule GenRouter do
     try do
       out_mod.handle_demand(demand, sink, out_state)
     catch
-      kind, reason ->
-        stack = System.stacktrace()
-        s = {kind, reason, stack, s}
-        {:stop, exit_reason(kind, reason, stack), s}
+      :throw, value ->
+        :erlang.raise(:error, {:nocatch, value}, System.stacktrace())
     else
       {:ok, demand, out_state} when is_integer(demand) and demand >= 0 ->
-        handle_demand(demand, out_mod, out_state, put_sink(sink, s))
+        handle_demand(demand, out_mod, out_state, put_sink(s, sink))
       {:ok, demand, events, out_state} when is_integer(demand) and demand >= 0 ->
         ask_ok(sink, events, demand, out_mod, out_state, s)
       {:error, reason, out_state} ->
@@ -391,11 +406,11 @@ defmodule GenRouter do
     %GenRouter{sinks: sinks, monitors: monitors} = s
     case Map.pop(sinks, ref) do
       {nil, _} ->
-        Process.send(pid, :"$gen_route", {self(), ref}, {:eos, {:error, :not_found}})
+        send(pid, {:"$gen_route", {self(), ref}, {:eos, {:error, :not_found}}})
         {:noreply, s}
       {{monitor, pid}, sinks} ->
         Process.demonitor(monitor, [:flush])
-        Process.send(pid, :"$gen_route", {self(), ref}, {:eos, :cancelled})
+        send(pid, {:"$gen_route", {self(), ref}, {:eos, :cancelled}})
         monitors = Map.delete(monitors, monitor)
         handle_down(:cancelled, sink, %GenRouter{s | sinks: sinks, monitors: monitors})
     end
@@ -439,16 +454,27 @@ defmodule GenRouter do
     end
   end
 
-  defp ask_error(error, {pid, ref}, events, out_state, s) do
+  defp ask_error(error, {pid, ref} = sink, events, out_state, s) do
     %GenRouter{out_mod: out_mod} = s
-    Process.send(pid, {:"$gen_route", {self(), ref}, {:eos, {:error, error}}})
+    send(pid, {:"$gen_route", {self(), ref}, {:eos, {:error, error}}})
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
-        {:noreply, %GenRouter{s | out_state: out_state}}
+        {:noreply, delete_sink(%GenRouter{s | out_state: out_state}, sink)}
       {:stop, reason, out_state} ->
-        {:stop, reason, %GenRouter{s | out_state: out_state}}
+        {:stop, reason, delete_sink(%GenRouter{s | out_state: out_state}, sink)}
       {kind, reason, stack, out_state} ->
-        reraise_stop(kind, reason, stack, %GenRouter{s | out_state: out_state})
+        s = delete_sink(%GenRouter{s | out_state: out_state}, sink)
+        reraise_stop(kind, reason, stack, s)
+    end
+  end
+
+  defp delete_sink(%GenRouter{sinks: sinks, monitors: monitors} = s, {_, ref}) do
+    case Map.pop(sinks, ref) do
+      {{monitor, _}, sinks} ->
+        Process.demonitor(monitor, [:flush])
+        %GenRouter{s | sinks: sinks, monitors: Map.delete(monitors, monitor)}
+      _ ->
+        s
     end
   end
 
@@ -465,7 +491,7 @@ defmodule GenRouter do
         {kind, reason, stack, out_state}
     else
       {:ok, refs, out_state} ->
-        case do_dispatch(refs, event, s) do
+        case do_dispatch(refs, [event], s) do
           :ok             -> handle_dispatch(events, out_mod, out_state, s)
           {:stop, reason} -> {:stop, reason, out_state}
         end
@@ -480,11 +506,11 @@ defmodule GenRouter do
   end
 
   defp do_dispatch([], _, _), do: :ok
-  defp do_dispatch([ref | refs], event, %GenRouter{sinks: sinks} = s) do
+  defp do_dispatch([ref | refs], events, %GenRouter{sinks: sinks} = s) do
     case Map.fetch(sinks, ref) do
       {:ok, {_, pid}} ->
-        Process.send(pid, {:"$gen_route", {self(), ref}, event})
-        do_dispatch(refs, event, s)
+        send(pid, {:"$gen_route", {self(), ref}, events})
+        do_dispatch(refs, events, s)
       :error ->
         {:stop, {:bad_reference, ref}}
     end
@@ -577,9 +603,8 @@ defmodule GenRouter do
     try do
       in_mod.handle_info(msg, in_state)
     catch
-      kind, reason ->
-        stack = System.stacktrace()
-        reraise_stop(kind, reason, stack, s)
+      :throw, value ->
+        :erlang.raise(:error, {:nocatch, value}, System.stacktrace())
     else
       {:dispatch, events, in_state} ->
         in_dispatch(events, in_state, s)
@@ -589,6 +614,32 @@ defmodule GenRouter do
         {:stop, reason, %GenRouter{s | in_state: in_state}}
       other ->
         {:stop, {:bad_return_value, other}, s}
+    end
+  end
+
+  @doc false
+  def code_change(oldvsn, s, extra) do
+    %GenRouter{in_mod: in_mod, in_state: in_state, out_mod: out_mod,
+               out_state: out_state} = s
+    case code_change(out_mod, oldvsn, out_state, extra) do
+      {:ok, out_state} ->
+        case code_change(in_mod, oldvsn, in_state, extra) do
+          {:ok, in_state} ->
+            {:ok, %GenRouter{s | in_state: in_state, out_state: out_state}}
+          other ->
+            other
+        end
+      other ->
+        other
+    end
+  end
+
+  defp code_change(mod, oldvsn, state, extra) do
+    try do
+      mod.code_change(oldvsn, state, extra)
+    catch
+      :throw, value ->
+        :erlang.raise(:error, {:nocatch, value}, System.stacktrace())
     end
   end
 
