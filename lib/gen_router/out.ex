@@ -3,7 +3,6 @@ defmodule GenRouter.Out do
   Specifies the outgoing part of a router.
   """
 
-  # TODO: Define __using__
   @type event :: any
 
   @doc """
@@ -67,4 +66,49 @@ defmodule GenRouter.Out do
   @callback code_change(old_vsn :: term | {:down, term}, state :: term, extra :: term) ::
             {:ok, new_state :: term} |
             {:error, reason :: term}
+
+  @doc false
+  defmacro __using__(_) do
+    quote location: :keep do
+      @behaviour GenRouter.Out
+
+      @doc false
+      def init(args) do
+        {:ok, args}
+      end
+
+      @doc false
+      def handle_demand(demand, _sink, state) do
+        {:ok, demand, state}
+      end
+
+      @doc false
+      def handle_dispatch(event, state) do
+        # We do this to trick Dialyzer to not complain about non-local returns.
+        reason = {:bad_dispatch, event}
+        case :erlang.phash2(1, 1) do
+          0 -> exit(reason)
+          1 -> {:stop, reason, state}
+        end
+      end
+
+      @doc false
+      def handle_down(_reason, _sink, state) do
+        {:ok, state}
+      end
+
+      @doc false
+      def terminate(_reason, _state) do
+        :ok
+      end
+
+      @doc false
+      def code_change(_old, state, _extra) do
+        {:ok, state}
+      end
+
+      defoverridable [init: 1, handle_demand: 3, handle_dispatch: 2,
+                      handle_down: 3, terminate: 2, code_change: 3]
+    end
+  end
 end

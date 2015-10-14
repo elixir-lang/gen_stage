@@ -1,6 +1,8 @@
 defmodule GenRouter.SingleIn do
   # TODO: Implement pseudo-code
 
+  use GenRouter.In
+
   def init(_) do
     {:ok, {0, nil}}
   end

@@ -6,6 +6,8 @@ defmodule GenRouter.BroadcastOut do
   # no buffering. BufferIn and BufferOut should provide buffering
   # alternatives.
 
+  use GenRouter.Out
+
   def init(_) do
     {:ok, %{}}
   end

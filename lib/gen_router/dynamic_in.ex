@@ -2,6 +2,8 @@ defmodule GenRouter.DynamicIn do
   # TODO: Implement pseudo-code
   # TODO: Set a buffer limit and what to do once it is reached
 
+  use GenRouter.In
+
   def init(_) do
     queue = :queue.new()
     {:ok, {0, queue}}

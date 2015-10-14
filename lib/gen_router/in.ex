@@ -3,8 +3,6 @@ defmodule GenRouter.In do
   Specifies the incoming part of a router.
   """
 
-  # TODO: Define __using__
-
   @doc """
   Invoked when the router is started.
   """
@@ -66,4 +64,49 @@ defmodule GenRouter.In do
   @callback code_change(old_vsn :: term | {:down, term}, state :: term, extra :: term) ::
             {:ok, new_state :: term} |
             {:error, reason :: term}
+
+  @doc false
+  defmacro __using__(_) do
+    quote location: :keep do
+      @behaviour GenRouter.In
+
+      @doc false
+      def init(args) do
+        {:ok, args}
+      end
+
+      @doc false
+      def handle_demand(_demand, state) do
+        {:noreply, state}
+      end
+
+      @doc false
+      def handle_call(msg, _from, state) do
+        # We do this to trick Dialyzer to not complain about non-local returns.
+        reason = {:bad_call, msg}
+        case :erlang.phash2(1, 1) do
+          0 -> exit(reason)
+          1 -> {:stop, reason, state}
+        end
+      end
+
+      @doc false
+      def handle_info(_msg, state) do
+        {:noreply, state}
+      end
+
+      @doc false
+      def terminate(_reason, _state) do
+        :ok
+      end
+
+      @doc false
+      def code_change(_old, state, _extra) do
+        {:ok, state}
+      end
+
+      defoverridable [init: 1, handle_demand: 2, handle_call: 3,
+                      handle_info: 2, terminate: 2, code_change: 3]
+    end
+  end
 end

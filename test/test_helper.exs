@@ -2,6 +2,8 @@ ExUnit.start()
 
 defmodule RouterIn do
 
+  use GenRouter.In
+
   def init(args), do: RouterCommon.init(__MODULE__, args)
 
   def handle_call({:reply, reply}, _, parent) do
@@ -53,8 +55,10 @@ defmodule RouterIn do
 end
 
 defmodule RouterOut do
-  def init(args), do: RouterCommon.init(__MODULE__, args)
 
+  use GenRouter.Out
+
+  def init(args), do: RouterCommon.init(__MODULE__, args)
 
   def handle_demand(demand, {_, ref} = sink, parent) do
     send(parent, {__MODULE__, self(), {:demand, demand, sink}})
