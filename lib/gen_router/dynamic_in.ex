@@ -44,4 +44,7 @@ defmodule GenRouter.DynamicIn do
   defp reply({pid, ref}, reply) do
     send pid, {ref, reply}
   end
+
+  defp take_demand_from_queue(_, _), do: raise "Not implemented"
+  defp put_event_in_queue(_, _, _), do: raise "Not implemented"
 end
