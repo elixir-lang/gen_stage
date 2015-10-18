@@ -305,6 +305,10 @@ defmodule GenRouter do
   @spec reply(GenServer.from, any) :: :ok
   defdelegate reply(from, response), to: GenServer
 
+  @spec stop(router) :: :ok
+  defdelegate stop(router), to: :gen_server
+
+  @spec ask(router, pid, reference, pos_integer, Keyword.t) :: :ok
   def ask(router, pid, ref, demand, opts \\ []) do
     case GenServer.whereis(router) do
       nil ->
@@ -457,14 +461,14 @@ defmodule GenRouter do
   defp ask_error(error, {pid, ref} = sink, events, out_state, s) do
     %GenRouter{out_mod: out_mod} = s
     send(pid, {:"$gen_route", {self(), ref}, {:eos, {:error, error}}})
+    s = delete_sink(s, sink)
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
-        {:noreply, delete_sink(%GenRouter{s | out_state: out_state}, sink)}
+        {:noreply, %GenRouter{s | out_state: out_state}}
       {:stop, reason, out_state} ->
-        {:stop, reason, delete_sink(%GenRouter{s | out_state: out_state}, sink)}
+        {:stop, reason, %GenRouter{s | out_state: out_state}}
       {kind, reason, stack, out_state} ->
-        s = delete_sink(%GenRouter{s | out_state: out_state}, sink)
-        reraise_stop(kind, reason, stack, s)
+        reraise_stop(kind, reason, stack, %GenRouter{s | out_state: out_state})
     end
   end
 
