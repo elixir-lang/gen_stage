@@ -218,32 +218,43 @@ defmodule GenRouter do
 
   The messages between source and sink are as follows:
 
-    * `{:"$gen_ask", {pid, ref}, {count, options}}` -
-      used to ask data from a source. Once this message is
-      received, the source MUST monitor the sink and emit
-      data up to the counter. Following messages will
-      increase the counter kept by the source. `GenRouter.ask/5`
-      is a convenience function to send this message.
+    * `{:"$gen_subscribe, {pid, ref}, {count, options}}` -
+      used to subscribe to and ask data from a source. Once this
+      message is received, the source MUST monitor the sink (`pid`)
+      and emit data up to the counter.
+
+     * `{:"$gen_ask", {pid, ref}, {count, options}}` -
+      used ask data from a source. The `ref` must be the `ref` sent
+      in a prior `:"$gen_subscribe"` message. The source MUST emit
+      data up to the counter to the `pid` in the original
+      `:"$gen_subscribe"` message - even if it does not match the `pid`
+      in the `:"gen_ask"` message. The source MUST send a reply (detailed
+      below), even if it does not know the given reference. Following
+      messages will increase the counter kept by the source.
+      `GenRouter.ask/4` is a convenience function to send this message.
 
     * `{:"$gen_route", {pid, ref}, [event]}` -
       used to send data to a sink. The third argument is a
       non-empty list of events. The `ref` is the same used
-      when asked for the data.
+      when asked for the data. `GenRouter.route/3` is a convenience
+      function to send this message.
 
-    * `{:"$gen_ask", {pid, ref}, {:cancel, options}}` -
-      cancels the current source/sink relationship. The source
-      MUST send a reply (detailed below), even if it does not
-      know the given reference. However there is no guarantee
-      the message will be received (for example, the source
+    * `{:"$gen_unsubscribe", {pid, ref}, {reason, options}}` -
+      cancels the current source/sink relationship. The source MUST
+      send a reply to the original subscriber (detailed below), even
+      if it does not know the given reference. However there is no
+      guarantee the message will be received (for example, the source
       may crash just before sending the confirmation). For
       such, it is recomended for the source to be monitored.
-      `GenRouter.cancel/3` is a convenience function to send
+      `GenRouter.unsubscribe/4` is a convenience function to send
       this message.
 
     * `{:"$gen_route", {pid, ref}, {:eos, reason}}` -
       signals the end of the "event stream". Reason may
       be `:done`, `:halted`, `:cancelled` or even `{:error,
       reason}` (in case `handle_up/2` returns error).
+      `GenRouter.route/3` is a convenience function to send this
+      message.
 
   Note those messages are not tied to GenRouter at all. The
   GenRouter is just one of the many processes that implement
@@ -259,11 +270,6 @@ defmodule GenRouter do
 
   # TODO: Provide @callback in GenServer (documentation purposes)
   # TODO: Provide GenServer.stop/1
-
-  # TODO: Provide GenRouter.stop/1
-  # TODO: Provide GenRouter.subscribe
-  # TODO: Provide GenRouter.unsubscribe
-  # TODO: Provide GenRouter.cancel
 
   # TODO: GenRouter.Supervisor
   # TODO: GenRouter.TCPAcceptor
@@ -308,13 +314,47 @@ defmodule GenRouter do
   @spec stop(router) :: :ok
   defdelegate stop(router), to: :gen_server
 
-  @spec ask(router, pid, reference, pos_integer, Keyword.t) :: :ok
-  def ask(router, pid, ref, demand, opts \\ []) do
+  @spec subscribe(router, pid, reference, pos_integer, Keyword.t) :: :ok
+  def subscribe(router, pid, ref, demand, opts \\ []) do
     case GenServer.whereis(router) do
       nil ->
-        exit({:noproc, {__MODULE__, :ask, [router, pid, ref, demand, opts]}})
+        exit({:noproc, {__MODULE__, :subscribe, [router, pid, ref, demand, opts]}})
       router ->
-        _ = send(router, {:"$gen_ask", {pid, ref}, {demand, opts}})
+        _ = send(router, {:"$gen_subscribe", {pid, ref}, {demand, opts}})
+        :ok
+    end
+  end
+
+  @spec ask(router, reference, pos_integer, Keyword.t) :: :ok
+  def ask(router, ref, demand, opts \\ []) do
+    case GenServer.whereis(router) do
+      nil ->
+        exit({:noproc, {__MODULE__, :ask, [router, ref, demand, opts]}})
+      router ->
+        _ = send(router, {:"$gen_ask", {self(), ref}, {demand, opts}})
+        :ok
+    end
+  end
+
+  @spec route(router, reference, [any, ...] | {:eos, any}) :: :ok
+  def route(router, ref, msg)
+  when is_list(msg) or (tuple_size(msg) == 2 and elem(msg, 0) == :eos) do
+    case GenServer.whereis(router) do
+      nil ->
+        exit({:noproc, {__MODULE__, :route, [router, ref, msg]}})
+     router ->
+        _ = send(router, {:"$gen_route", {self(), ref}, msg})
+        :ok
+    end
+  end
+
+  @spec unsubscribe(router, reference, any, Keyword.t) :: :ok
+  def unsubscribe(router, ref, reason, opts \\ []) do
+    case GenServer.whereis(router) do
+      nil ->
+        exit({:noproc, {__MODULE__, :unsubscribe, [router, ref, reason, opts]}})
+      router ->
+        _ = send(router, {:"$gen_unsubscribe", {self(), ref}, {reason, opts}})
         :ok
     end
   end
@@ -379,44 +419,47 @@ defmodule GenRouter do
   end
 
   @doc false
-  def handle_info({:"$gen_ask", {pid, ref} = sink, {demand, _}}, s)
+  def handle_info({:"$gen_subscribe", {pid, ref} = sink, {demand, _}}, s)
   when is_pid(pid) and is_reference(ref) and is_integer(demand) and demand >= 0 do
-    %GenRouter{out_mod: out_mod, out_state: out_state} = s
-    try do
-      out_mod.handle_demand(demand, sink, out_state)
-    catch
-      :throw, value ->
-        :erlang.raise(:error, {:nocatch, value}, System.stacktrace())
-    else
-      {:ok, demand, out_state} when is_integer(demand) and demand >= 0 ->
-        handle_demand(demand, out_mod, out_state, put_sink(s, sink))
-      {:ok, demand, events, out_state} when is_integer(demand) and demand >= 0 ->
-        ask_ok(sink, events, demand, out_mod, out_state, s)
-      {:error, reason, out_state} ->
-        ask_error(reason, sink, [], out_state, s)
-      {:error, reason, events, out_state} ->
-        ask_error(reason, sink, events, out_state, s)
-      {:stop, reason, out_state} ->
-        {:stop, reason, %GenRouter{s | out_state: out_state}}
-      {:stop, reason, events, out_state} ->
-        stop(reason, events, put_sink(%GenRouter{s | out_state: out_state}, sink))
-      other ->
-        {:stop, {:bad_return_value, other}, s}
+    %GenRouter{sinks: sinks, monitors: monitors} = s
+    size = map_size(sinks)
+    monitor = Process.monitor(pid)
+    case Map.put_new(sinks, ref, {monitor, pid}) do
+      sinks when map_size(sinks) == size ->
+        Process.demonitor(monitor, :flush)
+        route(pid, ref, {:eos, {:error, :already_subscribed}})
+        {:noreply, s}
+      sinks ->
+        monitors = Map.put(monitors, monitor, {pid, ref})
+        s = %GenRouter{s | sinks: sinks, monitors: monitors}
+        handle_demand(demand, sink, s)
     end
   end
 
-  def handle_info({:"$gen_ask", {pid, ref} = sink, {:cancel, _}}, s)
+  @doc false
+  def handle_info({:"$gen_ask", {pid, ref} = sink, {demand, _}}, s)
+  when is_pid(pid) and is_reference(ref) and is_integer(demand) and demand >= 0 do
+    %GenRouter{sinks: sinks} = s
+    if Map.has_key?(sinks, ref) do
+      handle_demand(demand, sink, s)
+    else
+      route(pid, ref, {:eos, {:error, :not_found}})
+      {:noreply, s}
+    end
+  end
+
+  def handle_info({:"$gen_unsubscribe", {pid, ref} = sink, {reason, _}}, s)
   when is_pid(pid) and is_reference(ref) do
     %GenRouter{sinks: sinks, monitors: monitors} = s
     case Map.pop(sinks, ref) do
       {nil, _} ->
-        send(pid, {:"$gen_route", {self(), ref}, {:eos, {:error, :not_found}}})
+        route(pid, ref, {:eos, {:error, :not_found}})
         {:noreply, s}
       {{monitor, pid}, sinks} ->
         Process.demonitor(monitor, [:flush])
-        send(pid, {:"$gen_route", {self(), ref}, {:eos, :cancelled}})
+        route(pid, ref, {:eos, :cancelled})
         monitors = Map.delete(monitors, monitor)
-        handle_down(:cancelled, sink, %GenRouter{s | sinks: sinks, monitors: monitors})
+        handle_down(reason, sink, %GenRouter{s | sinks: sinks, monitors: monitors})
     end
   end
 
@@ -436,8 +479,32 @@ defmodule GenRouter do
     do_handle_info(msg, s)
   end
 
-  defp ask_ok(sink, events, demand, out_mod, out_state, s) do
-    s = put_sink(s, sink)
+  defp handle_demand(demand, sink, s) do
+    %GenRouter{out_mod: out_mod, out_state: out_state} = s
+    try do
+      out_mod.handle_demand(demand, sink, out_state)
+    catch
+      :throw, value ->
+        reraise_stop(:throw, value, System.stacktrace(), s)
+    else
+      {:ok, demand, out_state} when is_integer(demand) and demand >= 0 ->
+        handle_demand(demand, out_mod, out_state, s)
+      {:ok, demand, events, out_state} when is_integer(demand) and demand >= 0 ->
+        ask_ok(events, demand, out_mod, out_state, s)
+      {:error, reason, out_state} ->
+        ask_error(reason, sink, [], out_state, s)
+      {:error, reason, events, out_state} ->
+        ask_error(reason, sink, events, out_state, s)
+      {:stop, reason, out_state} ->
+        {:stop, reason, %GenRouter{s | out_state: out_state}}
+      {:stop, reason, events, out_state} ->
+        stop(reason, events, %GenRouter{s | out_state: out_state})
+      other ->
+        {:stop, {:bad_return_value, other}, s}
+    end
+  end
+
+  defp ask_ok(events, demand, out_mod, out_state, s) do
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
         handle_demand(demand, out_mod, out_state, s)
@@ -448,19 +515,9 @@ defmodule GenRouter do
     end
   end
 
-  defp put_sink(%GenRouter{sinks: sinks, monitors: monitors} = s, {pid, ref} = sink) do
-    if Map.has_key?(sinks, ref) do
-      s
-    else
-      monitor = Process.monitor(pid)
-      %GenRouter{s | sinks: Map.put(sinks, ref, {monitor, pid}),
-                     monitors: Map.put(monitors, monitor, sink)}
-    end
-  end
-
   defp ask_error(error, {pid, ref} = sink, events, out_state, s) do
     %GenRouter{out_mod: out_mod} = s
-    send(pid, {:"$gen_route", {self(), ref}, {:eos, {:error, error}}})
+    route(pid, ref, {:eos, {:error, error}})
     s = delete_sink(s, sink)
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
@@ -513,7 +570,7 @@ defmodule GenRouter do
   defp do_dispatch([ref | refs], events, %GenRouter{sinks: sinks} = s) do
     case Map.fetch(sinks, ref) do
       {:ok, {_, pid}} ->
-        send(pid, {:"$gen_route", {self(), ref}, events})
+        route(pid, ref, events)
         do_dispatch(refs, events, s)
       :error ->
         {:stop, {:bad_reference, ref}}
