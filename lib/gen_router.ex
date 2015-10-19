@@ -170,9 +170,9 @@ defmodule GenRouter do
       # will unsubscribe from router
       GenRouter.unsubscribe(sink, sink_source_ref)
 
-  Or you can cancel directly in the source:
+  Or you can cancel directly in the source using `GenRouter.Spec.unsubscribe/4`:
 
-      GenRouter.cancel(source, router_source_ref, reason \\ :cancel)
+      GenRouter.Spec.unsubscribe(source, router_source_ref, reason \\ :cancel, opt \\ [])
 
   Finally, note it is not possible to ask a `GenRouter` with
   `GenRouter.DynamicIn` to subscribe to a source. That's because
@@ -216,50 +216,11 @@ defmodule GenRouter do
   will be reflected upstream, forcing the definite source to either
   buffer messages (up to some limit) or to start discarding them.
 
-  The messages between source and sink are as follows:
-
-    * `{:"$gen_subscribe, {pid, ref}, {count, options}}` -
-      used to subscribe to and ask data from a source. Once this
-      message is received, the source MUST monitor the sink (`pid`)
-      and emit data up to the counter.
-
-     * `{:"$gen_ask", {pid, ref}, {count, options}}` -
-      used ask data from a source. The `ref` must be the `ref` sent
-      in a prior `:"$gen_subscribe"` message. The source MUST emit
-      data up to the counter to the `pid` in the original
-      `:"$gen_subscribe"` message - even if it does not match the `pid`
-      in the `:"gen_ask"` message. The source MUST send a reply (detailed
-      below), even if it does not know the given reference. Following
-      messages will increase the counter kept by the source.
-      `GenRouter.ask/4` is a convenience function to send this message.
-
-    * `{:"$gen_route", {pid, ref}, [event]}` -
-      used to send data to a sink. The third argument is a
-      non-empty list of events. The `ref` is the same used
-      when asked for the data. `GenRouter.route/3` is a convenience
-      function to send this message.
-
-    * `{:"$gen_unsubscribe", {pid, ref}, {reason, options}}` -
-      cancels the current source/sink relationship. The source MUST
-      send a reply to the original subscriber (detailed below), even
-      if it does not know the given reference. However there is no
-      guarantee the message will be received (for example, the source
-      may crash just before sending the confirmation). For
-      such, it is recomended for the source to be monitored.
-      `GenRouter.unsubscribe/4` is a convenience function to send
-      this message.
-
-    * `{:"$gen_route", {pid, ref}, {:eos, reason}}` -
-      signals the end of the "event stream". Reason may
-      be `:done`, `:halted`, `:cancelled` or even `{:error,
-      reason}` (in case `handle_up/2` returns error).
-      `GenRouter.route/3` is a convenience function to send this
-      message.
-
-  Note those messages are not tied to GenRouter at all. The
-  GenRouter is just one of the many processes that implement
-  the message format defined above. Therefore, knowing the
-  message format above is useful if you desire to write your
+  The messages between source and sink are defined in
+  `GenRouter.Spec`. Those messages are not tied to GenRouter at all.
+  The GenRouter is just one of the many processes that implement
+  the message format defined in `GenRouter.Spec`. Therefore, knowing
+  the message format above is useful if you desire to write your
   own process.
 
   ## Name Registration
@@ -276,6 +237,7 @@ defmodule GenRouter do
   # TODO: GenRouter.Stream
   # TODO: ask with :via
 
+  alias GenRouter.Spec
   use GenServer
 
   defstruct [in_mod: nil, in_state: nil, out_mod: nil, out_state: nil,
@@ -313,51 +275,6 @@ defmodule GenRouter do
 
   @spec stop(router) :: :ok
   defdelegate stop(router), to: :gen_server
-
-  @spec subscribe(router, pid, reference, pos_integer, Keyword.t) :: :ok
-  def subscribe(router, pid, ref, demand, opts \\ []) do
-    case GenServer.whereis(router) do
-      nil ->
-        exit({:noproc, {__MODULE__, :subscribe, [router, pid, ref, demand, opts]}})
-      router ->
-        _ = send(router, {:"$gen_subscribe", {pid, ref}, {demand, opts}})
-        :ok
-    end
-  end
-
-  @spec ask(router, reference, pos_integer, Keyword.t) :: :ok
-  def ask(router, ref, demand, opts \\ []) do
-    case GenServer.whereis(router) do
-      nil ->
-        exit({:noproc, {__MODULE__, :ask, [router, ref, demand, opts]}})
-      router ->
-        _ = send(router, {:"$gen_ask", {self(), ref}, {demand, opts}})
-        :ok
-    end
-  end
-
-  @spec route(router, reference, [any, ...] | {:eos, any}) :: :ok
-  def route(router, ref, msg)
-  when is_list(msg) or (tuple_size(msg) == 2 and elem(msg, 0) == :eos) do
-    case GenServer.whereis(router) do
-      nil ->
-        exit({:noproc, {__MODULE__, :route, [router, ref, msg]}})
-     router ->
-        _ = send(router, {:"$gen_route", {self(), ref}, msg})
-        :ok
-    end
-  end
-
-  @spec unsubscribe(router, reference, any, Keyword.t) :: :ok
-  def unsubscribe(router, ref, reason, opts \\ []) do
-    case GenServer.whereis(router) do
-      nil ->
-        exit({:noproc, {__MODULE__, :unsubscribe, [router, ref, reason, opts]}})
-      router ->
-        _ = send(router, {:"$gen_unsubscribe", {self(), ref}, {reason, opts}})
-        :ok
-    end
-  end
 
   @doc false
   def init({in_mod, in_args, out_mod, out_args}) do
@@ -427,7 +344,7 @@ defmodule GenRouter do
     case Map.put_new(sinks, ref, {monitor, pid}) do
       sinks when map_size(sinks) == size ->
         Process.demonitor(monitor, :flush)
-        route(pid, ref, {:eos, {:error, :already_subscribed}})
+        Spec.route(pid, ref, {:eos, {:error, :already_subscribed}})
         {:noreply, s}
       sinks ->
         monitors = Map.put(monitors, monitor, {pid, ref})
@@ -437,27 +354,27 @@ defmodule GenRouter do
   end
 
   @doc false
-  def handle_info({:"$gen_ask", {pid, ref} = sink, {demand, _}}, s)
+  def handle_info({:"$gen_ask", {pid, ref} = sink, demand}, s)
   when is_pid(pid) and is_reference(ref) and is_integer(demand) and demand >= 0 do
     %GenRouter{sinks: sinks} = s
     if Map.has_key?(sinks, ref) do
       handle_demand(demand, sink, s)
     else
-      route(pid, ref, {:eos, {:error, :not_found}})
+      Spec.route(pid, ref, {:eos, {:error, :not_found}})
       {:noreply, s}
     end
   end
 
-  def handle_info({:"$gen_unsubscribe", {pid, ref} = sink, {reason, _}}, s)
+  def handle_info({:"$gen_unsubscribe", {pid, ref} = sink, reason}, s)
   when is_pid(pid) and is_reference(ref) do
     %GenRouter{sinks: sinks, monitors: monitors} = s
     case Map.pop(sinks, ref) do
       {nil, _} ->
-        route(pid, ref, {:eos, {:error, :not_found}})
+        Spec.route(pid, ref, {:eos, {:error, :not_found}})
         {:noreply, s}
       {{monitor, pid}, sinks} ->
         Process.demonitor(monitor, [:flush])
-        route(pid, ref, {:eos, :cancelled})
+        Spec.route(pid, ref, {:eos, :cancelled})
         monitors = Map.delete(monitors, monitor)
         handle_down(reason, sink, %GenRouter{s | sinks: sinks, monitors: monitors})
     end
@@ -517,7 +434,7 @@ defmodule GenRouter do
 
   defp ask_error(error, {pid, ref} = sink, events, out_state, s) do
     %GenRouter{out_mod: out_mod} = s
-    route(pid, ref, {:eos, {:error, error}})
+    Spec.route(pid, ref, {:eos, {:error, error}})
     s = delete_sink(s, sink)
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
@@ -570,7 +487,7 @@ defmodule GenRouter do
   defp do_dispatch([ref | refs], events, %GenRouter{sinks: sinks} = s) do
     case Map.fetch(sinks, ref) do
       {:ok, {_, pid}} ->
-        route(pid, ref, events)
+        Spec.route(pid, ref, events)
         do_dispatch(refs, events, s)
       :error ->
         {:stop, {:bad_reference, ref}}

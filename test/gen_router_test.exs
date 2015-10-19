@@ -322,9 +322,9 @@ defmodule GenRouterTest do
     assert {:ok, router} = TR.start_link(in_agent, out_agent)
 
     parent = self()
-    GenRouter.subscribe(router, parent, ref, 1)
-    GenRouter.ask(router, ref, 2)
-    GenRouter.ask(router, ref, 3)
+    GenRouter.Spec.subscribe(router, parent, ref, 1)
+    GenRouter.Spec.ask(router, ref, 2)
+    GenRouter.Spec.ask(router, ref, 3)
     assert GenRouter.stop(router) == :ok
 
     assert_received {:"$gen_route", {^router, ^ref}, [:out_event]}
@@ -364,11 +364,11 @@ defmodule GenRouterTest do
     assert {:ok, router} = TR.start_link(in_agent, out_agent)
 
     parent = self()
-    GenRouter.subscribe(router, parent, ref, 1)
+    GenRouter.Spec.subscribe(router, parent, ref, 1)
     assert_receive {:"$gen_route", {^router, ^ref}, [:in_event]}
-    GenRouter.ask(router, ref, 2)
+    GenRouter.Spec.ask(router, ref, 2)
     assert_receive {:"$gen_route", {^router, ^ref}, [:in_event]}
-    GenRouter.ask(router, ref, 3)
+    GenRouter.Spec.ask(router, ref, 3)
     assert_receive {:"$gen_route", {^router, ^ref}, [:out_event]}
 
     assert GenRouter.stop(router) == :ok
@@ -411,15 +411,15 @@ defmodule GenRouterTest do
     assert {:ok, router} = TR.start_link(in_agent, out_agent)
 
     parent = self()
-    GenRouter.subscribe(router, parent, ref1, 1)
+    GenRouter.Spec.subscribe(router, parent, ref1, 1)
 
-    GenRouter.subscribe(router, parent, ref2, 2)
+    GenRouter.Spec.subscribe(router, parent, ref2, 2)
     assert_receive {:"$gen_route", {^router, ^ref2}, {:eos, {:error, "oops"}}}
 
-    GenRouter.subscribe(router, parent, ref2, 3)
+    GenRouter.Spec.subscribe(router, parent, ref2, 3)
     assert_receive {:"$gen_route", {^router, ^ref2}, {:eos, {:error, "oops"}}}
 
-    GenRouter.subscribe(router, parent, ref2, 4)
+    GenRouter.Spec.subscribe(router, parent, ref2, 4)
     assert_receive {:"$gen_route", {^router, ^ref2}, {:eos, {:error, "oops"}}}
 
     assert GenRouter.stop(router) == :ok
@@ -457,8 +457,8 @@ defmodule GenRouterTest do
     Process.flag(:trap_exit, true)
     assert capture_log(fn() ->
       parent = self()
-      GenRouter.subscribe(router, parent, ref, 1)
-      GenRouter.ask(router, ref, 2)
+      GenRouter.Spec.subscribe(router, parent, ref, 1)
+      GenRouter.Spec.ask(router, ref, 2)
       assert_receive {:EXIT, ^router, {:bad_reference, ^ref}}
       assert_received {:"$gen_route", {^router, ^ref}, {:eos, {:error, "oops"}}}
     end) =~ "{:bad_reference, #Reference"
@@ -488,7 +488,7 @@ defmodule GenRouterTest do
     Process.flag(:trap_exit, true)
     assert capture_log(fn() ->
       parent = self()
-      GenRouter.subscribe(router, parent, ref, 1)
+      GenRouter.Spec.subscribe(router, parent, ref, 1)
       assert_receive {:EXIT, ^router, "oops"}
     end) =~ "\"oops\""
 
@@ -519,7 +519,7 @@ defmodule GenRouterTest do
     Process.flag(:trap_exit, true)
     assert capture_log(fn() ->
       parent = self()
-      GenRouter.subscribe(router, parent, ref, 1)
+      GenRouter.Spec.subscribe(router, parent, ref, 1)
       assert_receive {:EXIT, ^router, "oops"}
       assert_received {:"$gen_route", {^router, ^ref}, [:out_event]}
     end) =~ "\"oops\""
@@ -548,7 +548,7 @@ defmodule GenRouterTest do
     Process.flag(:trap_exit, true)
     assert capture_log(fn() ->
       parent = self()
-      GenRouter.subscribe(router, parent, ref, 1)
+      GenRouter.Spec.subscribe(router, parent, ref, 1)
       assert_receive {:EXIT, ^router, {:bad_return_value, "oops"}}
     end) =~ "\"oops\""
 
@@ -577,7 +577,7 @@ defmodule GenRouterTest do
     Process.flag(:trap_exit, true)
     assert capture_log(fn() ->
       parent = self()
-      GenRouter.subscribe(router, parent, ref, 1)
+      GenRouter.Spec.subscribe(router, parent, ref, 1)
       assert_receive {:EXIT, ^router, {{:nocatch, "oops"}, [_|_]}}
     end) =~ "{:nocatch, \"oops\"}"
 
