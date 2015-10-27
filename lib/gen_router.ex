@@ -87,7 +87,7 @@ defmodule GenRouter do
 
   This short example shows a couple things:
 
-    * Communicatation happens by subscribing sinks to sources.
+    * Communication happens by subscribing sinks to sources.
       We will see why it happens from bottom to top later on.
 
     * `GenRouter` is a building block made of `*In` and `*Out` parts
@@ -190,7 +190,7 @@ defmodule GenRouter do
   In this section, we will document the messages used in the
   communication between sources and sinks. This communication is
   demand-driven. The source won't send any data to the sink unless
-  the sink first ask for it. Furthermore, the source must never
+  the sink first asks for it. Furthermore, the source must never
   send more data to the sink than the amount asked for.
 
   One workflow would look like:

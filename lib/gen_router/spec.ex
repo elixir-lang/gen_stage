@@ -4,14 +4,14 @@ defmodule GenRouter.Spec do
 
   The messages between source and sink are as follows:
 
-    * `{:"$gen_subscribe, {pid, ref}, {count, options}}` -
+    * `{:"$gen_subscribe", {pid, ref}, {count, options}}` -
       used to subscribe to and ask data from a source. Once this
       message is received, the source MUST monitor the sink (`pid`)
       and emit data up to the counter. `subscribe/5` is a convenience
       function to send this message.
 
     * `{:"$gen_ask", {pid, ref}, count}` -
-      used ask data from a source. The `ref` must be the `ref` sent
+      used to ask data from a source. The `ref` must be the `ref` sent
       in a prior `:"$gen_subscribe"` message. The source MUST emit
       data up to the counter to the `pid` in the original
       `:"$gen_subscribe"` message - even if it does not match the `pid`
