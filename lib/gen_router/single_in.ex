@@ -13,7 +13,7 @@ defmodule GenRouter.SingleIn do
     {:noreply, {current+demand, nil}}
   end
 
-  def handle_demand(demand, {current, {pid, ref}} = source) do
+  def handle_demand(demand, {current, {pid, ref} = source}) do
     GenRouter.ask(pid, self(), ref, demand)
     {:noreply, {current+demand, source}}
   end
