@@ -81,7 +81,7 @@ defmodule GenRouter do
       iex> GenRouter.subscribe(sink, to: router)
 
       # Finally spawn a task that sends one event to the router
-      iex> Task.start_link fn -> GenRouter.sync_notify(pid, :hello) end
+      iex> Task.start_link fn -> GenRouter.sync_notify(source, :hello) end
 
       # You will eventually see the event printed by the sink
 
