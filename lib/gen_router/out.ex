@@ -18,10 +18,12 @@ defmodule GenRouter.Out do
   demand upstream. 0 means no demand.
 
   It may optionally return a list of events to dispatch.
-  Particularly useful when events have been buffering
+  Particularly useful when events have been buffered
   and they are now ready to be dispatched once the demand
   arrived.
   """
+  # TODO: Should this receive options? If so, should the
+  # sink always send the same options every time it asks?
   @callback handle_demand(demand :: pos_integer, sink :: {pid, reference}, state :: term) ::
             {:ok, non_neg_integer, new_state :: term} |
             {:ok, non_neg_integer, [event], new_state :: term} |
