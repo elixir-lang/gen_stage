@@ -12,7 +12,7 @@ defmodule GenRouter.Out do
             {:ok, state :: term}
 
   @doc """
-  Invoked when a sink asks for data.
+  Invoked when a consumer asks for data.
 
   Must return a non negative integer (>= 0) to signal the
   demand upstream. 0 means no demand.
@@ -23,8 +23,8 @@ defmodule GenRouter.Out do
   arrived.
   """
   # TODO: Should this receive options? If so, should the
-  # sink always send the same options every time it asks?
-  @callback handle_demand(demand :: pos_integer, sink :: {pid, reference}, state :: term) ::
+  # consumer always send the same options every time it asks?
+  @callback handle_demand(demand :: pos_integer, consumer :: {pid, reference}, state :: term) ::
             {:ok, non_neg_integer, new_state :: term} |
             {:ok, non_neg_integer, [event], new_state :: term} |
             {:error, reason :: term, new_state :: term} |
@@ -33,16 +33,16 @@ defmodule GenRouter.Out do
             {:stop, reason :: term, [event], new_state :: term}
 
   @doc """
-  Invoked when a sink cancels subscription or crashes.
+  Invoked when a consumer cancels subscription or crashes.
   """
-  @callback handle_down(reason :: term, sink :: {pid, reference}, state :: term) ::
+  @callback handle_down(reason :: term, consumer :: {pid, reference}, state :: term) ::
             {:ok, new_state :: term} |
             {:stop, reason :: term, new_state :: term}
 
   @doc """
   Specifies to which process(es) an event should be dispatched to.
 
-  Returns a list with references that identify existing sinks.
+  Returns a list with references that identify existing consumers.
   """
   @callback handle_dispatch(event :: term, state :: term) ::
             {:ok, [reference], new_state :: term} |
@@ -80,7 +80,7 @@ defmodule GenRouter.Out do
       end
 
       @doc false
-      def handle_demand(demand, _sink, state) do
+      def handle_demand(demand, _consumer, state) do
         {:ok, demand, state}
       end
 
@@ -95,7 +95,7 @@ defmodule GenRouter.Out do
       end
 
       @doc false
-      def handle_down(_reason, _sink, state) do
+      def handle_down(_reason, _consumer, state) do
         {:ok, state}
       end
 

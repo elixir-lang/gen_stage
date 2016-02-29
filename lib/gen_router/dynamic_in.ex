@@ -1,4 +1,5 @@
 defmodule GenRouter.DynamicIn do
+  # TODO: Make this a GenRouter.Dynamic with custom out module
   # TODO: Implement pseudo-code
   # TODO: Set a buffer limit and what to do once it is reached
 

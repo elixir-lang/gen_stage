@@ -49,8 +49,8 @@ defmodule TestRouter do
 
     def init(args), do: TestRouter.init(__MODULE__, args)
 
-    def handle_demand(demand, sink, state) do
-      TestRouter.eval(__MODULE__, :handle_demand, [demand, sink, state])
+    def handle_demand(demand, consumer, state) do
+      TestRouter.eval(__MODULE__, :handle_demand, [demand, consumer, state])
     end
 
     def handle_dispatch(event, state) do

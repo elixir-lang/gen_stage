@@ -1,52 +1,54 @@
 defmodule GenRouter do
   @moduledoc ~S"""
-  A behaviour module for routing events from multiple sources
-  to multiple sinks.
+  A behaviour module for routing events from multiple producers
+  to multiple consumers.
 
   `GenRouter` allows developers to receive events from multiple
-  sources and/or send events to multiple sinks. The relationship
-  between sources (the one sending messages) and sinks (the one
-  receiving them) is established when the sink explicitly asks
-  for data.
+  producers and/or send events to multiple consumers. The relationship
+  between producers (the one sending messages) and consumers (the one
+  receiving them) is established when the consumer subscribes to the
+  producer.
 
-  Since the same process can send and receive data, the same
-  process can be both a source and sink, which is quite common.
-  Sources that only send data and sinks that only receive data
-  are called "definite source" and "definite sink", respectively.
+  I tis quite common for the same process to send and receive data,
+  acting as both producer and consumer. Producers that only send data
+  and consumers that only receive data are called "sources" and "sinks",
+  respectively.
 
   As an example, imagine the following processes A, B and C:
 
       [A] -> [B] -> [C]
 
-  A is a source to B and B is a source to C. Similarly, C is a
-  sink to B and B is a sink to A. A is a definite source, C is
-  a definite sink.
+  A is a producer to B and B is a producer to C. Similarly, C is a
+  consumer to B and B is a consumer to A. A is also a source and C
+  is a sink.
 
   ## Incoming and outgoing
 
-  The router is split in two parts, one for handling incoming
-  messages and another to handle outgoing ones. Imagine `B` below
-  is a router:
+  The router is split in two parts. Imagine `B` below is a router:
 
       [A] -> [B] -> [C]
 
   We can split it in two parts:
 
-      [A] -> [incoming | outgoing] -> [C]
+      [A] -> [consumer | producer] -> [C]
+
+  The consumer part will receive messages from upstream while
+  the producer will send them downstream. In other words, the consumer
+  handles incoming messages and the producer outgoing ones.
 
   Those parts are defined by different callback modules, allowing
   developers to compose functionality at will. For example, you
-  can have a router that receives messages dynamically from multiple
-  processes using `GenRouter.DynamicIn` composed with a router that
-  relays those messages to multiple sinks at the same time
-  (`GenRouter.BroadcastOut`). Or the same `GenRouter.DynamicIn`
-  coupled with a custom `RoundRobinOut` mechanism.
+  can have a router that receives messages dynamically from
+  multiple processes using `GenRouter.DynamicIn` composed with an
+  outgoing component that relays those messages to multiple
+  consumers at the same time (`GenRouter.BroadcastOut`) or with a
+  custom `RoundRobinOut` mechanism.
 
   Let's see an example where we define all three components above:
-  "a", "b" and "c" and connect them so events are routed through
+  "A", "B" and "C" and connect them so events are routed through
   the system.
 
-  The first step is to define a sink that will print events
+  The first step is to define the sink (C) that will print events
   to terminal as they come:
 
       defmodule MySink do
@@ -62,32 +64,32 @@ defmodule GenRouter do
         end
       end
 
-  Now let's define a source, the router, and connect to the sink:
+  Now let's define a source (A), the router (B), and connect to the sink:
 
-      # A is a router that receives events dynamically and broadcasts them
-      iex> {:ok, source} = GenRouter.start_link(GenRouter.DynamicIn, [],
-                                                GenRouter.BroadcastOut, [])
+      # A is a source that receives events dynamically and broadcasts them
+      iex> {:ok, producer} = GenRouter.start_link(GenRouter.DynamicIn, [],
+                                                  GenRouter.BroadcastOut, [])
 
-      # B is a router that receives events from one source and broadcasts them
+      # B is a router that receives events from one producer and broadcasts them
       iex> {:ok, router} = GenRouter.start_link(GenRouter.SingleIn, [],
                                                 GenRouter.BroadcastOut, [])
 
-      # C is the sink (it doesn't care about outgoing events)
-      iex> {:ok, sink} = MySink.start_link()
+      # C is the consumer (it doesn't care about outgoing events)
+      iex> {:ok, consumer} = MySink.start_link()
 
-      # Now let's subscribe the sink to the router,
-      # and the router to the source
-      iex> GenRouter.subscribe(router, to: source)
-      iex> GenRouter.subscribe(sink, to: router)
+      # Now let's subscribe the consumer to the router,
+      # and the router to the producer
+      iex> GenRouter.subscribe(router, to: producer)
+      iex> GenRouter.subscribe(consumer, to: router)
 
       # Finally spawn a task that sends one event to the router
-      iex> Task.start_link fn -> GenRouter.sync_notify(source, :hello) end
+      iex> Task.start_link fn -> GenRouter.sync_notify(producer, :hello) end
 
-      # You will eventually see the event printed by the sink
+      # You will eventually see the event printed by the consumer
 
   This short example shows a couple things:
 
-    * Communication happens by subscribing sinks to sources.
+    * Communication happens by subscribing consumers to producers.
       We will see why it happens from bottom to top later on.
 
     * `GenRouter` is a building block made of `*In` and `*Out` parts
@@ -109,10 +111,10 @@ defmodule GenRouter do
 
     * `GenRouter.DynamicIn` - a special incoming router that receives
       events via `GenRouter.sync_notify/3` instead of receiving them
-      from sources
+      from producers
 
-    * `GenRouter.SingleIn` - a router that has a single source.
-      The source can be given on start or by calling
+    * `GenRouter.SingleIn` - a router that has a single producer.
+      The producer can be given on start or by calling
       `GenRouter.subscribe/3`
 
   The following are outgoing parts of a router:
@@ -120,103 +122,103 @@ defmodule GenRouter do
     * `GenRouter.Out` - documents the callbacks required to implement
       the outgoing part of a router (not an implementation)
 
-    * `GenRouter.BroadcastOut` - a router that has multiple sinks,
-      synchronizing the demand between the sinks and broadcasting
-      all incoming messages to all sinks
+    * `GenRouter.BroadcastOut` - a router that has multiple consumers,
+      synchronizing the demand between the consumers and broadcasting
+      all incoming messages to all consumers
 
-  The following are custom sources or sinks that are useful but
+  The following are custom producers or consumers that are useful but
   cannot be broken into In and Out components (usually because
   the logic between the two parts is tightly coupled):
 
-    * `GenRouter.TCPAcceptor` - a definite source that accepts TCP
-      connections and dispatches the socket to its sink
+    * `GenRouter.TCPAcceptor` - a definite producer that accepts TCP
+      connections and dispatches the socket to its consumer
 
-    * `GenRouter.Sink` - a definite sink. Useful for tidying up
+    * `GenRouter.Sink` - a definite consumer. Useful for tidying up
       and when there is nowhere else to route the event to
 
-    * `GenRouter.Supervisor` - a definite sink that can receive
+    * `GenRouter.Supervisor` - a definite consumer that can receive
       routing messages and spawn children based on each message,
       with control of min and max amount of children (it is an
       improvement over simple_one_for_one supervisors)
 
   ## Subscribing
 
-  In the example above, we have seen that we tell a sink to
-  subscribe to a source. This is necessary because before
-  the source sends any data to a sink, the sink must ask for
-  data first. In other words, the sink initiates the whole process.
+  In the example above, we have seen that we tell a consumer to
+  subscribe to a producer. This is necessary because before
+  the producer sends any data to a consumer, the consumer must ask for
+  data first. In other words, the consumer initiates the whole process.
 
-  All subscribe does is to tell a sink to ask the source for data.
+  All subscribe does is to tell a consumer to ask the producer for data.
   Let's go back to our previous diagram:
 
-      [source] - [router] - [sink]
+      [producer] - [router] - [consumer]
 
-  Once the sink subscribes to the router, it asks the router for data,
-  which then asks the source for data, so the demand flows upstream:
+  Once the consumer subscribes to the router, it asks the router for data,
+  which then asks the producer for data, so the demand flows upstream:
 
-      [source] <- [router] <- [sink]
+      [producer] <- [router] <- [consumer]
 
-  Once events arrive to the source (via `GenRouter.sync_notify/3`),
+  Once events arrive to the producer (via `GenRouter.sync_notify/3`),
   it is sent downstream according to the demand:
 
-      [source] -> [router] -> [sink]
+      [producer] -> [router] -> [consumer]
 
   Note subscribing returns a pid and a reference. The reference
   can be given to ask a process to unsubscribe:
 
-      # will unsubscribe from source
-      GenRouter.unsubscribe(router, router_source_ref)
+      # will unsubscribe from producer
+      GenRouter.unsubscribe(router, router_producer_ref)
 
       # will unsubscribe from router
-      GenRouter.unsubscribe(sink, sink_source_ref)
+      GenRouter.unsubscribe(consumer, consumer_producer_ref)
 
-  Or you can cancel directly in the source using `GenRouter.Spec.unsubscribe/4`:
+  Or you can cancel directly in the producer using `GenRouter.Spec.unsubscribe/4`:
 
-      GenRouter.Spec.unsubscribe(source, router_source_ref, reason \\ :cancel, opt \\ [])
+      GenRouter.Spec.unsubscribe(producer, router_producer_ref, reason \\ :cancel, opt \\ [])
 
   Finally, note it is not possible to ask a `GenRouter` with
-  `GenRouter.DynamicIn` to subscribe to a source. That's because
+  `GenRouter.DynamicIn` to subscribe to a producer. That's because
   `GenRouter.DynamicIn` expects by definition to receive events
-  dynamically and not from fixed sources. Another way to put it
+  dynamically and not from fixed producers. Another way to put it
   is that a router with `GenRouter.DynamicIn` is always a definite
-  source.
+  producer.
 
   ## Flow control
 
-  Now we know the sink must subscribe to the source so it asks
-  the source for data. The reason why the sink must ask for data
+  Now we know the consumer must subscribe to the producer so it asks
+  the producer for data. The reason why the consumer must ask for data
   is to provide flow control and alternate between push and pull.
 
   In this section, we will document the messages used in the
-  communication between sources and sinks. This communication is
-  demand-driven. The source won't send any data to the sink unless
-  the sink first asks for it. Furthermore, the source must never
-  send more data to the sink than the amount asked for.
+  communication between producers and consumers. This communication is
+  demand-driven. The producer won't send any data to the consumer unless
+  the consumer first asks for it. Furthermore, the producer must never
+  send more data to the consumer than the amount asked for.
 
   One workflow would look like:
 
-    * The sink asks for 10 items
-    * The source sends 3 items
-    * The source sends 2 items
-    * The sink asks for more 5 items (so it never has the buffer
+    * The consumer asks for 10 items
+    * The producer sends 3 items
+    * The producer sends 2 items
+    * The consumer asks for more 5 items (so it never has the buffer
       empty but always capping at some limit, in this case, 10)
-    * The source sends 4 items
+    * The producer sends 4 items
     * ...
-    * The source sends EOS (end of stream) or
-      the sink cancels subscription
+    * The producer sends EOS (end of stream) or
+      the consumer cancels subscription
 
   This allows proper back-pressure and flow control in different
-  occasions. If the sink is faster than the source, the source will
-  always send the data as soon as it arrives, ensuring the sink
+  occasions. If the consumer is faster than the producer, the producer will
+  always send the data as soon as it arrives, ensuring the consumer
   gets the new data as fast as possible, reducing idle time.
 
-  However, if the sink is slower than the source, the source needs to
-  wait before sending more data to the sink. If the difference is
-  considerable, the sink won't overflow rather the lack of demand
-  will be reflected upstream, forcing the definite source to either
+  However, if the consumer is slower than the producer, the producer needs to
+  wait before sending more data to the consumer. If the difference is
+  considerable, the consumer won't overflow rather the lack of demand
+  will be reflected upstream, forcing the definite producer to either
   buffer messages (up to some limit) or to start discarding them.
 
-  The messages between source and sink are defined in
+  The messages between producer and consumer are defined in
   `GenRouter.Spec`. Those messages are not tied to GenRouter at all.
   The GenRouter is just one of the many processes that implement
   the message format defined in `GenRouter.Spec`. Therefore, knowing
@@ -241,7 +243,7 @@ defmodule GenRouter do
   use GenServer
 
   defstruct [in_mod: nil, in_state: nil, out_mod: nil, out_state: nil,
-    sinks: %{}, monitors: %{}]
+    consumers: %{}, monitors: %{}]
 
   @typedoc "The router reference"
   @type router :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
@@ -274,7 +276,7 @@ defmodule GenRouter do
   defdelegate reply(from, response), to: GenServer
 
   @spec stop(router) :: :ok
-  defdelegate stop(router), to: :gen_server
+  defdelegate stop(router), to: GenServer
 
   @doc false
   def init({in_mod, in_args, out_mod, out_args}) do
@@ -319,6 +321,7 @@ defmodule GenRouter do
     try do
       in_mod.handle_call(request, from, in_state)
     catch
+      # TODO: Remove this when it is fixed in Elixir's GenServer
       :throw, value ->
         :erlang.raise(:error, {:nocatch, value}, System.stacktrace())
     else
@@ -336,59 +339,66 @@ defmodule GenRouter do
   end
 
   @doc false
-  def handle_info({:"$gen_subscribe", {pid, ref} = sink, {demand, _}}, s)
-  when is_pid(pid) and is_reference(ref) and is_integer(demand) and demand >= 0 do
-    %GenRouter{sinks: sinks, monitors: monitors} = s
-    size = map_size(sinks)
-    monitor = Process.monitor(pid)
-    case Map.put_new(sinks, ref, {monitor, pid}) do
-      sinks when map_size(sinks) == size ->
-        Process.demonitor(monitor, :flush)
+  def handle_info({:"$gen_subscribe", {pid, ref} = consumer, {demand, _}}, s)
+      when is_pid(pid) and is_reference(ref) and is_integer(demand) and demand >= 0 do
+    %{consumers: consumers, monitors: monitors} = s
+
+    case consumers do
+      %{^ref => _} ->
+        # TODO: Document error already_subscribed
         Spec.route(pid, ref, {:eos, {:error, :already_subscribed}})
         {:noreply, s}
-      sinks ->
-        monitors = Map.put(monitors, monitor, {pid, ref})
-        s = %GenRouter{s | sinks: sinks, monitors: monitors}
-        handle_demand(demand, sink, s)
+      %{} ->
+        monitor   = Process.monitor(pid)
+        monitors  = Map.put(monitors, monitor, {pid, ref})
+        consumers = Map.put_new(consumers, ref, {monitor, pid})
+        handle_out_demand(demand, consumer, %GenRouter{s | consumers: consumers, monitors: monitors})
     end
   end
 
   @doc false
-  def handle_info({:"$gen_ask", {pid, ref} = sink, demand}, s)
-  when is_pid(pid) and is_reference(ref) and is_integer(demand) and demand >= 0 do
-    %GenRouter{sinks: sinks} = s
-    if Map.has_key?(sinks, ref) do
-      handle_demand(demand, sink, s)
-    else
-      Spec.route(pid, ref, {:eos, {:error, :not_found}})
-      {:noreply, s}
+  def handle_info({:"$gen_ask", {pid, ref} = consumer, demand}, s)
+      when is_pid(pid) and is_reference(ref) and is_integer(demand) and demand >= 0 do
+    %{consumers: consumers} = s
+
+    case consumers do
+      %{^ref => _} ->
+        handle_out_demand(demand, consumer, s)
+      %{} ->
+        # TODO: Document error not_found
+        Spec.route(pid, ref, {:eos, {:error, :not_found}})
+        {:noreply, s}
     end
   end
 
-  def handle_info({:"$gen_unsubscribe", {pid, ref} = sink, reason}, s)
-  when is_pid(pid) and is_reference(ref) do
-    %GenRouter{sinks: sinks, monitors: monitors} = s
-    case Map.pop(sinks, ref) do
-      {nil, _} ->
+  def handle_info({:"$gen_unsubscribe", {pid, ref} = consumer, reason}, s)
+      when is_pid(pid) and is_reference(ref) do
+    %{consumers: consumers, monitors: monitors} = s
+
+    case consumers do
+      %{^ref => {monitor, pid}} ->
+        Process.demonitor(monitor, [:flush])
+        Spec.route(pid, ref, {:eos, :halted})
+        monitors = Map.delete(monitors, monitor)
+        consumers = Map.delete(consumers, ref)
+        handle_down(reason, consumer, %GenRouter{s | consumers: consumers, monitors: monitors})
+      %{} ->
+        # TODO: Document error not_found
         Spec.route(pid, ref, {:eos, {:error, :not_found}})
         {:noreply, s}
-      {{monitor, pid}, sinks} ->
-        Process.demonitor(monitor, [:flush])
-        Spec.route(pid, ref, {:eos, :cancelled})
-        monitors = Map.delete(monitors, monitor)
-        handle_down(reason, sink, %GenRouter{s | sinks: sinks, monitors: monitors})
     end
   end
 
   def handle_info({:DOWN, monitor, :process, _, reason} = msg, s) do
-    %GenRouter{sinks: sinks, monitors: monitors} = s
-    case Map.pop(monitors, monitor) do
-      {nil, _} ->
-        do_handle_info(msg, s)
-      {{_, ref} = sink, monitors} ->
+    %{consumers: consumers, monitors: monitors} = s
+
+    case monitors do
+      %{^monitor => {_, ref} = consumer} ->
         monitors = Map.delete(monitors, monitor)
-        sinks = Map.delete(sinks, ref)
-        handle_down(reason, sink, %GenRouter{s | sinks: sinks, monitors: monitors})
+        consumers = Map.delete(consumers, ref)
+        handle_down(reason, consumer, %GenRouter{s | consumers: consumers, monitors: monitors})
+      %{} ->
+        do_handle_info(msg, s)
     end
   end
 
@@ -396,22 +406,23 @@ defmodule GenRouter do
     do_handle_info(msg, s)
   end
 
-  defp handle_demand(demand, sink, s) do
-    %GenRouter{out_mod: out_mod, out_state: out_state} = s
+  defp handle_out_demand(demand, consumer, s) do
+    %{out_mod: out_mod, out_state: out_state} = s
+
     try do
-      out_mod.handle_demand(demand, sink, out_state)
+      out_mod.handle_demand(demand, consumer, out_state)
     catch
       :throw, value ->
-        reraise_stop(:throw, value, System.stacktrace(), s)
+        reraise_stop(:throw, value, System.stacktrace, s)
     else
       {:ok, demand, out_state} when is_integer(demand) and demand >= 0 ->
-        handle_demand(demand, out_mod, out_state, s)
+        handle_in_demand(demand, out_mod, out_state, s)
       {:ok, demand, events, out_state} when is_integer(demand) and demand >= 0 ->
         ask_ok(events, demand, out_mod, out_state, s)
       {:error, reason, out_state} ->
-        ask_error(reason, sink, [], out_state, s)
+        ask_error(reason, consumer, [], out_state, s)
       {:error, reason, events, out_state} ->
-        ask_error(reason, sink, events, out_state, s)
+        ask_error(reason, consumer, events, out_state, s)
       {:stop, reason, out_state} ->
         {:stop, reason, %GenRouter{s | out_state: out_state}}
       {:stop, reason, events, out_state} ->
@@ -424,7 +435,7 @@ defmodule GenRouter do
   defp ask_ok(events, demand, out_mod, out_state, s) do
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
-        handle_demand(demand, out_mod, out_state, s)
+        handle_in_demand(demand, out_mod, out_state, s)
       {:stop, reason, out_state} ->
         {:stop, reason, %GenRouter{s | out_state: out_state}}
       {kind, reason, stack, out_state} ->
@@ -432,10 +443,10 @@ defmodule GenRouter do
     end
   end
 
-  defp ask_error(error, {pid, ref} = sink, events, out_state, s) do
-    %GenRouter{out_mod: out_mod} = s
+  defp ask_error(error, {pid, ref} = consumer, events, out_state, s) do
+    %{out_mod: out_mod} = s
     Spec.route(pid, ref, {:eos, {:error, error}})
-    s = delete_sink(s, sink)
+    s = delete_consumer(s, consumer)
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
         {:noreply, %GenRouter{s | out_state: out_state}}
@@ -446,17 +457,20 @@ defmodule GenRouter do
     end
   end
 
-  defp delete_sink(%GenRouter{sinks: sinks, monitors: monitors} = s, {_, ref}) do
-    case Map.pop(sinks, ref) do
-      {{monitor, _}, sinks} ->
+  defp delete_consumer(%GenRouter{consumers: consumers, monitors: monitors} = s, {_, ref}) do
+    case consumers do
+      %{^ref => {monitor, _}} ->
         Process.demonitor(monitor, [:flush])
-        %GenRouter{s | sinks: sinks, monitors: Map.delete(monitors, monitor)}
-      _ ->
+        monitors = Map.delete(monitors, monitor)
+        consumers = Map.delete(consumers, ref)
+        %{s | consumers: consumers, monitors: monitors}
+      %{} ->
         s
     end
   end
 
-  ## TODO: consider batching events per sink
+  ## TODO: consider batching events per consumer
+  ## TODO: Simplify dispatch logic by moving it to the OUT mechanism?
   defp handle_dispatch([], _, out_state, _) do
     {:ok, out_state}
   end
@@ -484,12 +498,12 @@ defmodule GenRouter do
   end
 
   defp do_dispatch([], _, _), do: :ok
-  defp do_dispatch([ref | refs], events, %GenRouter{sinks: sinks} = s) do
-    case Map.fetch(sinks, ref) do
-      {:ok, {_, pid}} ->
+  defp do_dispatch([ref | refs], events, %{consumers: consumers} = s) do
+    case consumers do
+      %{^ref => {_, pid}} ->
         Spec.route(pid, ref, events)
         do_dispatch(refs, events, s)
-      :error ->
+      %{} ->
         {:stop, {:bad_reference, ref}}
     end
   end
@@ -502,12 +516,12 @@ defmodule GenRouter do
     end
   end
 
-  defp handle_demand(0, _, out_state, s) do
+  defp handle_in_demand(0, _, out_state, s) do
     {:noreply, %GenRouter{s | out_state: out_state}}
   end
 
-  defp handle_demand(demand, out_mod, out_state, s) do
-    %GenRouter{in_mod: in_mod, in_state: in_state} = s
+  defp handle_in_demand(demand, out_mod, out_state, s) do
+    %{in_mod: in_mod, in_state: in_state} = s
     try do
       in_mod.handle_demand(demand, in_state)
     catch
@@ -526,11 +540,6 @@ defmodule GenRouter do
     end
   end
 
-  defp in_dispatch(events, in_state, s) do
-    %GenRouter{out_mod: out_mod, out_state: out_state} = s
-    in_dispatch(events, in_state, out_mod, out_state, s)
-  end
-
   defp in_dispatch(events, in_state, out_mod, out_state, s) do
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
@@ -544,10 +553,10 @@ defmodule GenRouter do
     end
   end
 
-  defp handle_down(reason, sink, s) do
-    %GenRouter{out_mod: out_mod, out_state: out_state} = s
+  defp handle_down(reason, consumer, s) do
+    %{out_mod: out_mod, out_state: out_state} = s
     try do
-      out_mod.handle_down(reason, sink, out_state)
+      out_mod.handle_down(reason, consumer, out_state)
     catch
       kind, reason ->
         stack = System.stacktrace()
@@ -585,7 +594,8 @@ defmodule GenRouter do
         :erlang.raise(:error, {:nocatch, value}, System.stacktrace())
     else
       {:dispatch, events, in_state} ->
-        in_dispatch(events, in_state, s)
+        %{out_mod: out_mod, out_state: out_state} = s
+        in_dispatch(events, in_state, out_mod, out_state, s)
       {:noreply, in_state} ->
         {:noreply, %GenRouter{s | in_state: in_state}}
       {:stop, reason, in_state} ->
@@ -597,25 +607,17 @@ defmodule GenRouter do
 
   @doc false
   def code_change(oldvsn, s, extra) do
-    %GenRouter{in_mod: in_mod, in_state: in_state, out_mod: out_mod,
-               out_state: out_state} = s
-    case code_change(out_mod, oldvsn, out_state, extra) do
-      {:ok, out_state} ->
-        case code_change(in_mod, oldvsn, in_state, extra) do
-          {:ok, in_state} ->
-            {:ok, %GenRouter{s | in_state: in_state, out_state: out_state}}
-          other ->
-            other
-        end
-      other ->
-        other
-    end
+    %{in_mod: in_mod, in_state: in_state, out_mod: out_mod, out_state: out_state} = s
+    with {:ok, out_state} <- code_change(out_mod, oldvsn, out_state, extra),
+         {:ok, in_state} <- code_change(in_mod, oldvsn, in_state, extra),
+         do: {:ok, %GenRouter{s | in_state: in_state, out_state: out_state}}
   end
 
   defp code_change(mod, oldvsn, state, extra) do
     try do
       mod.code_change(oldvsn, state, extra)
     catch
+      # TODO: Remove this when it is fixed in Elixir's GenServer
       :throw, value ->
         :erlang.raise(:error, {:nocatch, value}, System.stacktrace())
     end
@@ -623,14 +625,12 @@ defmodule GenRouter do
 
   @doc false
   def format_status(:normal, [pdict, s]) do
-    %GenRouter{in_mod: in_mod, in_state: in_state, out_mod: out_mod,
-               out_state: out_state} = s
+    %{in_mod: in_mod, in_state: in_state, out_mod: out_mod, out_state: out_state} = s
     normal_status('In', in_mod, pdict, in_state) ++
     normal_status('Out', out_mod, pdict, out_state)
   end
   def format_status(:terminate, [pdict, %GenRouter{} = s]) do
-    %GenRouter{in_mod: in_mod, in_state: in_state, out_mod: out_mod,
-               out_state: out_state} = s
+    %{in_mod: in_mod, in_state: in_state, out_mod: out_mod, out_state: out_state} = s
     in_state = terminate_status(in_mod, pdict, in_state)
     out_state = terminate_status(out_mod, pdict, out_state)
     %GenRouter{s | in_state: in_state, out_state: out_state}
@@ -685,8 +685,7 @@ defmodule GenRouter do
 
   @doc false
   def terminate(reason, %GenRouter{} = s) do
-    %GenRouter{in_mod: in_mod, in_state: in_state, out_mod: out_mod,
-               out_state: out_state} = s
+    %{in_mod: in_mod, in_state: in_state, out_mod: out_mod, out_state: out_state} = s
     try do
       terminate(out_mod, reason, out_state)
     after
@@ -720,7 +719,7 @@ defmodule GenRouter do
   end
 
   defp stop(reason, events, s) do
-    %GenRouter{out_mod: out_mod, out_state: out_state} = s
+    %{out_mod: out_mod, out_state: out_state} = s
     case handle_dispatch(events, out_mod, out_state, s) do
       {:ok, out_state} ->
         {:stop, reason, %GenRouter{s | out_state: out_state}}

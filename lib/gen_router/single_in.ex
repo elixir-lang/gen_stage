@@ -13,9 +13,9 @@ defmodule GenRouter.SingleIn do
     {:noreply, {current+demand, nil}}
   end
 
-  def handle_demand(demand, {current, {pid, ref}} = source) do
+  def handle_demand(demand, {current, {pid, ref}} = producer) do
     GenRouter.ask(pid, self(), ref, demand)
-    {:noreply, {current+demand, source}}
+    {:noreply, {current+demand, producer}}
   end
 
   # call
@@ -44,11 +44,11 @@ defmodule GenRouter.SingleIn do
 
   # info
 
-  def handle_info({:"$gen_router", source, [_|_] = events}, {demand, source}) do
-    {:dispatch, events, {demand - length(events), source}}
+  def handle_info({:"$gen_router", producer, [_|_] = events}, {demand, producer}) do
+    {:dispatch, events, {demand - length(events), producer}}
   end
 
-  def handle_info({:"$gen_router", source, {:eos, _}}, {demand, source}) do
+  def handle_info({:"$gen_router", producer, {:eos, _}}, {demand, producer}) do
     {:noreply, {demand, nil}}
   end
 

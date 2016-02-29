@@ -15,7 +15,7 @@ defmodule GenRouter.In do
   @doc """
   Invoked when there is demand from downstream.
 
-  This is usually where you ask the upstream sources for data.
+  This is usually where you ask the upstream producers for data.
   """
   @callback handle_demand(demand :: pos_integer, state :: term) ::
             {:dispatch, [event :: term], new_state :: term} |

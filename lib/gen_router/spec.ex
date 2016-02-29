@@ -2,27 +2,27 @@ defmodule GenRouter.Spec do
   @moduledoc """
   Convenience functions for sending `GenRouter` protocol messages.
 
-  The messages between source and sink are as follows:
+  The messages between producer and consumer are as follows:
 
     * `{:"$gen_subscribe", {pid, ref}, {count, options}}` -
-      used to subscribe to and ask data from a source. Once this
-      message is received, the source MUST monitor the sink (`pid`)
+      used to subscribe to and ask data from a producer. Once this
+      message is received, the producer MUST monitor the consumer (`pid`)
       and emit data up to the counter. `subscribe/5` is a convenience
       function to send this message.
 
     * `{:"$gen_ask", {pid, ref}, count}` -
-      used to ask data from a source. The `ref` must be the `ref` sent
-      in a prior `:"$gen_subscribe"` message. The source MUST emit
+      used to ask data from a producer. The `ref` must be the `ref` sent
+      in a prior `:"$gen_subscribe"` message. The producer MUST emit
       data up to the counter to the `pid` in the original
       `:"$gen_subscribe"` message - even if it does not match the `pid`
-      in the `:"gen_ask"` message. The source MUST send a reply (detailed
+      in the `:"gen_ask"` message. The producer MUST send a reply (detailed
       below), even if it does not know the given reference, in which case
       the reply MUST be an `:eos`. Following messages will increase the
-      counter kept by the source. `ask/3` is a convenience function to
+      counter kept by the producer. `ask/3` is a convenience function to
       send this message.
 
     * `{:"$gen_route", {pid, ref}, [event]}` -
-      used to send data to a sink. The third argument is a non-empty
+      used to send data to a consumer. The third argument is a non-empty
       list of events. The `ref` is the same used when asked for the
       data. `route/3` is a convenience function to send this message.
 
@@ -33,119 +33,121 @@ defmodule GenRouter.Spec do
       `route/3` is a convenience function to send this message.
 
     * `{:"$gen_unsubscribe", {pid, ref}, reason}` -
-      cancels the current source/sink relationship. The source MUST
+      cancels the current producer/consumer relationship. The producer MUST
       send a `:"$gen_route"` `:eos` message as a reply (detailed below)
       to the original subscriber, if it does not know the given
       reference the reply is sent to `pid`. However there is no
-      guarantee the message will be received (for example, the source
+      guarantee the message will be received (for example, the producer
       may crash just before sending the confirmation). For
-      such, it is recomended for the source to be monitored.
+      such, it is recomended for the producer to be monitored.
       `unsubscribe/3` is a convenience function to send
       this message.
   """
 
-  @doc """
-  Send a subscription request to a source and ask for events.
+  # TODO: Introduce both {:eos, :done | :halted} and {:error, reason}
 
-  Sends `{:"$gen_subscribe", {self(), ref}, {demand, opts}}` to `source`.
+  @doc """
+  Send a subscription request to a producer and ask for events.
+
+  Sends `{:"$gen_subscribe", {self(), ref}, {demand, opts}}` to `producer`.
 
   `ref` is the subscription stream reference and must be unique. It
   will be included in all future messages concerning the subscribed stream.
 
-  If a sink is already subscribed to the source with the same reference,
+  If a consumer is already subscribed to the producer with the same reference,
   the message
-  `{:"$gen_route", {source_pid, ref}, {:eos, {:error, :already_subscribed}}}`
+  `{:"$gen_route", {producer_pid, ref}, {:eos, {:error, :already_subscribed}}}`
   is sent to the caller.
 
-      source = GenServer.whereis(:source) || raise "no process named :source"
-      ref = Process.monitor(source)
-      GenRouter.Spec.subscribe(source, self, ref, 1)
+      producer = GenServer.whereis(:producer) || raise "no process named :producer"
+      ref = Process.monitor(producer)
+      GenRouter.Spec.subscribe(producer, self, ref, 1)
       receive do
-        {:"$gen_route", {_source, ^ref}, [event]} -> event
-        {:DOWN, ^ref, :process, _source, reason}  -> exit(reason)
+        {:"$gen_route", {_producer, ^ref}, [event]} -> event
+        {:DOWN, ^ref, :process, _producer, reason}  -> exit(reason)
       end
   """
   @spec subscribe(GenRouter.router, pid, reference, pos_integer, Keyword.t) :: :ok
-  def subscribe(source, pid, ref, demand, opts \\ []) do
-    source = whereis(source)
-    _ = send(source, {:"$gen_subscribe", {pid, ref}, {demand, opts}})
+  def subscribe(producer, pid, ref, demand, opts \\ []) do
+    producer = whereis(producer)
+    _ = send(producer, {:"$gen_subscribe", {pid, ref}, {demand, opts}})
     :ok
   end
 
   @doc """
-  Ask for events from a source using an existing subscription stream.
+  Ask for events from a producer using an existing subscription stream.
 
-  Sends `{:"$gen_ask", {self(), ref}, demand}` to `source`.
+  Sends `{:"$gen_ask", {self(), ref}, demand}` to `producer`.
 
   `ref` is the reference of an existing subscription. If
-  subscription stream does not exist on the source the message
-  `{:"$gen_route", {source_pid, ref}, {:eos, {:error, :not_found}}}`
+  subscription stream does not exist on the producer the message
+  `{:"$gen_route", {producer_pid, ref}, {:eos, {:error, :not_found}}}`
   is sent to the caller.
 
-      GenRouter.Spec.ask(source, ref, 1)
+      GenRouter.Spec.ask(producer, ref, 1)
       receive do
-        {:"$gen_route", {_source_pid, ^ref}, [event]} -> event
+        {:"$gen_route", {_producer_pid, ^ref}, [event]} -> event
       end
   """
   @spec ask(GenRouter.router, reference, pos_integer) :: :ok
-  def ask(source, ref, demand) do
-    source = whereis(source)
-    _ = send(source, {:"$gen_ask", {self(), ref}, demand})
+  def ask(producer, ref, demand) do
+    producer = whereis(producer)
+    _ = send(producer, {:"$gen_ask", {self(), ref}, demand})
     :ok
   end
 
   @doc """
-  Send events or notification of the end of a stream to a sink.
+  Send events or notification of the end of a stream to a consumer.
 
-  Sends `{:"$gen_route", {self(), ref}, msg}` to `sink`.
+  Sends `{:"$gen_route", {self(), ref}, msg}` to `consumer`.
 
   `ref` is the reference of the subscription stream that asked for
-  events. If the subscription exists the `sink` must be the process
+  events. If the subscription exists the `consumer` must be the process
   that sent the `:"$gen_subscribe"` request with reference `ref`. This
   may not be the same process that sent the `:"$gen_ask"` request.
 
       receive do
-        {:"$gen_subscribe", {sink, ^ref}, {1, _opts}} ->
-          GenRouter.Spec.route(sink, ref, [:hello_sink])
+        {:"$gen_subscribe", {consumer, ^ref}, {1, _opts}} ->
+          GenRouter.Spec.route(consumer, ref, [:hello_consumer])
       end
       receive do
         {:"$gen_ask", {_sender, ^ref}, 1} ->
-          GenRouter.Spec.route(sink, ref, [:hello_again])
+          GenRouter.Spec.route(consumer, ref, [:hello_again])
       end
   """
   @spec route(GenRouter.router, reference, [any, ...] | {:eos, any}) :: :ok
-  def route(sink, ref, [_|_] = events) do
-    sink = whereis(sink)
-    _ = send(sink, {:"$gen_route", {self(), ref}, events})
+  def route(consumer, ref, [_|_] = events) do
+    consumer = whereis(consumer)
+    _ = send(consumer, {:"$gen_route", {self(), ref}, events})
     :ok
   end
-  def route(sink, ref, {:eos, _} = eos) do
-    sink = whereis(sink)
-    _ = send(sink, {:"$gen_route", {self(), ref}, eos})
+  def route(consumer, ref, {:eos, _} = eos) do
+    consumer = whereis(consumer)
+    _ = send(consumer, {:"$gen_route", {self(), ref}, eos})
     :ok
   end
 
   @doc """
-  Cancel a subscription to a source.
+  Cancel a subscription to a producer.
 
-  Sends `{:"$gen_unsubscribe", {self(), ref}, reason}` to `source`.
+  Sends `{:"$gen_unsubscribe", {self(), ref}, reason}` to `producer`.
 
   `ref` is the reference of an existing subscription. If the stream is
   cancelled the message
-  `{:"$gen_route", {source_pid, ref}, {:eos, :cancelled}}` is sent to the
-  subscribed process. If the subscription does not exist then the source
-  sends `{:"$gen_route", {source_pid, ref}, {:eos, {:error, :not_found}}}`
+  `{:"$gen_route", {producer_pid, ref}, {:eos, :cancelled}}` is sent to the
+  subscribed process. If the subscription does not exist then the producer
+  sends `{:"$gen_route", {producer_pid, ref}, {:eos, {:error, :not_found}}}`
   to the caller.
 
-      GenRouter.Spec.unsubscribe(source, ref, :done)
+      GenRouter.Spec.unsubscribe(producer, ref, :done)
       receive do
-        {:"$gen_route", {_source_pid, ^ref}, {:eos, :cancelled} -> :ok
+        {:"$gen_route", {_producer_pid, ^ref}, {:eos, :cancelled} -> :ok
       end
   """
   @spec unsubscribe(GenRouter.router, reference, any) :: :ok
-  def unsubscribe(source, ref, reason) do
-    source = whereis(source)
-    _ = send(source, {:"$gen_unsubscribe", {self(), ref}, reason})
+  def unsubscribe(producer, ref, reason) do
+    producer = whereis(producer)
+    _ = send(producer, {:"$gen_unsubscribe", {self(), ref}, reason})
     :ok
   end
 

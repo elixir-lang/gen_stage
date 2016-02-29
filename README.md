@@ -18,3 +18,18 @@ Elixir v1.3 or later.
         def application do
           [applications: [:gen_router]]
         end
+
+## TODO
+
+  * Discuss naming convention:
+    * `GenRouter.*Source`
+    * `GenRouter.*Sink`
+    * `GenRouter.*In` and `GenRouter.*Out`
+
+  * See if we can remove subscribers from inside GenRouter
+
+  * Revisit why we need both :"$gen_subscribe" and :"$gen_ask"
+
+  * What happens if a producer dies?
+
+  * What happens if a consumer dies?
