@@ -1,6 +1,6 @@
 language: elixir
 elixir:
-  - 1.1.0
+  - 1.2.3
 sudo: false # to use faster container based build environment
 notifications:
   recipients:
