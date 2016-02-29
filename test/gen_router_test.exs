@@ -35,11 +35,10 @@ defmodule GenRouterTest do
     assert TA.record(out_agent) == [{:init, [out_agent]}]
 
     assert Process.info(router, :registered_name) == {:registered_name, :router}
-
     assert {GenRouter, _, _} = :proc_lib.translate_initial_call(router)
   end
 
-  test "start/2 returns error on In :stop" do
+  test "In start/2 returns error on :stop" do
     {:ok, in_agent} = TA.start_link([{:stop, "oops"}])
     {:ok, out_agent} = TA.start_link([{:ok, 1}, :ok])
     assert TR.start(in_agent, out_agent) == {:error, "oops"}
@@ -50,7 +49,7 @@ defmodule GenRouterTest do
        {:terminate, ["oops", 1]}]
   end
 
-  test "start/2 returns error on In raise" do
+  test "In start/2 returns error on raise" do
     {:ok, in_agent} = TA.start_link([fn(_) -> raise "oops" end])
     {:ok, out_agent} = TA.start_link([{:ok, 1}, :ok])
     assert {:error, reason = {%RuntimeError{}, _}} = TR.start(in_agent, out_agent)
@@ -61,7 +60,7 @@ defmodule GenRouterTest do
        {:terminate, [reason, 1]}]
   end
 
-  test "start/2 returns error on In throw" do
+  test "In start/2 returns error on throw" do
     {:ok, in_agent} = TA.start_link([fn(_) -> throw "oops" end])
     {:ok, out_agent} = TA.start_link([{:ok, 1}, :ok])
     assert {:error, reason = {{:nocatch, "oops"}, _}} = TR.start(in_agent, out_agent)
@@ -72,7 +71,7 @@ defmodule GenRouterTest do
        {:terminate, [reason, 1]}]
   end
 
-  test "start/2 returns error on In exit" do
+  test "In start/2 returns error on exit" do
     {:ok, in_agent} = TA.start_link([fn(_) -> exit "oops" end])
     {:ok, out_agent} = TA.start_link([{:ok, 1}, :ok])
     assert {:error, reason = "oops"} = TR.start(in_agent, out_agent)
@@ -83,7 +82,7 @@ defmodule GenRouterTest do
        {:terminate, [reason, 1]}]
   end
 
-  test "start/2 returns error on Out :stop" do
+  test "Out start/2 returns error on :stop" do
     {:ok, in_agent} = TA.start_link([])
     {:ok, out_agent} = TA.start_link([{:stop, "oops"}])
     assert TR.start(in_agent, out_agent) == {:error, "oops"}
@@ -91,7 +90,7 @@ defmodule GenRouterTest do
     assert TA.record(out_agent) == [{:init, [out_agent]}]
   end
 
-  test "start/2 returns error on Out raise" do
+  test "Out start/2 returns error on raise" do
     {:ok, in_agent} = TA.start_link([])
     {:ok, out_agent} = TA.start_link([fn(_) -> raise "oops" end])
     assert {:error, {%RuntimeError{}, _}} = TR.start(in_agent, out_agent)
@@ -100,7 +99,7 @@ defmodule GenRouterTest do
     assert TA.record(out_agent) == [{:init, [out_agent]}]
   end
 
-  test "start/2 returns error on Out throw" do
+  test "Out start/2 returns error on throw" do
     {:ok, in_agent} = TA.start_link([])
     {:ok, out_agent} = TA.start_link([fn(_) -> throw "oops" end])
     assert {:error, {{:nocatch, "oops"}, _}} = TR.start(in_agent, out_agent)
@@ -109,7 +108,7 @@ defmodule GenRouterTest do
     assert TA.record(out_agent) == [{:init, [out_agent]}]
   end
 
-  test "start/2 returns error on Out exit" do
+  test "Out start/2 returns error on exit" do
     {:ok, in_agent} = TA.start_link([])
     {:ok, out_agent} = TA.start_link([fn(_) -> exit "oops" end])
     assert {:error, "oops"} = TR.start(in_agent, out_agent)
@@ -591,5 +590,23 @@ defmodule GenRouterTest do
        handle_demand: [1, {^caller, ^ref}, 1],
        # state doesnt change on throw
        terminate: [{{:nocatch, "oops"}, [_|_]}, 1]] = TA.record(out_agent)
+  end
+
+  test "subscribe/unsubscribe/ask workflow" do
+    ref = make_ref()
+    {:ok, in_agent}  = TA.start_link([{:ok, %{}}])
+    {:ok, out_agent} = TA.start_link([{:ok, %{}},
+        {:ok, 0, %{}}, # handle_demand
+        fn(:enough, s) -> {:ok, s} end # handle_down
+      ])
+
+    assert {:ok, router} = TR.start_link(in_agent, out_agent)
+    GenRouter.Spec.ask(router, ref, 1)
+    assert_receive {:"$gen_route", {pid, ref}, {:eos, {:error, :not_found}}}
+    GenRouter.Spec.unsubscribe(router, ref, :enough)
+    assert_receive {:"$gen_route", {pid, ref}, {:eos, {:error, :not_found}}}
+    GenRouter.Spec.subscribe(router, self(), ref, 0)
+    GenRouter.Spec.unsubscribe(router, ref, :enough)
+    assert_receive {:"$gen_route", {pid, ref}, {:eos, :halted}}
   end
 end
