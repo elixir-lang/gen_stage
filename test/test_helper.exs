@@ -1,7 +1,6 @@
 ExUnit.start()
 
 defmodule TestRouter do
-
   def start(in_agent, out_agent, opts \\ []) do
     GenRouter.start(TestRouter.In, in_agent, TestRouter.Out, out_agent, opts)
   end
@@ -21,7 +20,6 @@ defmodule TestRouter do
   end
 
   defmodule In do
-
     use GenRouter.In
 
     def init(args), do: TestRouter.init(__MODULE__, args)
@@ -44,7 +42,6 @@ defmodule TestRouter do
   end
 
   defmodule Out do
-
     use GenRouter.Out
 
     def init(args), do: TestRouter.init(__MODULE__, args)
@@ -64,7 +61,6 @@ defmodule TestRouter do
 end
 
 defmodule TestAgent do
-
   def start_link(stack), do: Agent.start_link(fn() -> {stack, []} end)
 
   def eval(agent, fun, args) do
