@@ -240,7 +240,7 @@ defmodule GenRouter do
   # TODO: ask with :via
 
   alias GenRouter.Spec
-  use GenServer
+  @behaviour GenServer
 
   defstruct [in_mod: nil, in_state: nil, out_mod: nil, out_state: nil,
     consumers: %{}, monitors: %{}]
