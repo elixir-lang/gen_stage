@@ -45,9 +45,8 @@ defmodule GenRouter.DynamicIn do
     send pid, {ref, reply}
   end
 
-  defp take_demand_from_queue(demand, queue), do: take_demand_from_queue(demand, queue, [])
   defp take_demand_from_queue(0, queue, events), do: {0, queue, Enum.reverse(events)}
-  defp take_demand_from_queue(demand, queue, events) do
+  defp take_demand_from_queue(demand, queue, events \\ []) do
       case :queue.out(queue) do
           {{:value, entry}, new_queue} -> take_demand_from_queue(demand-1, new_queue, [entry | events])
           {:empty, queue} -> {demand, queue, Enum.reverse(events)}
