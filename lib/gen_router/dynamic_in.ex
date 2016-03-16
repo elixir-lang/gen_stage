@@ -1,6 +1,4 @@
 defmodule GenRouter.DynamicIn do
-  # TODO: Make this a GenRouter.Dynamic with custom out module
-  # TODO: Implement pseudo-code
   # TODO: Set a buffer limit and what to do once it is reached
 
   use GenRouter.In
@@ -14,7 +12,6 @@ defmodule GenRouter.DynamicIn do
 
   def handle_demand(demand, {0, queue}) do
     {demand, queue, entries} = take_demand_from_queue(demand, queue)
-
     events =
       for {from, event} <- entries do
         reply(from, :ok)
@@ -48,6 +45,13 @@ defmodule GenRouter.DynamicIn do
     send pid, {ref, reply}
   end
 
-  defp take_demand_from_queue(_, _), do: raise "Not implemented"
-  defp put_event_in_queue(_, _, _), do: raise "Not implemented"
+  defp take_demand_from_queue(0, queue, events), do: {0, queue, Enum.reverse(events)}
+  defp take_demand_from_queue(demand, queue, events \\ []) do
+      case :queue.out(queue) do
+          {{:value, entry}, new_queue} -> take_demand_from_queue(demand-1, new_queue, [entry | events])
+          {:empty, queue} -> {demand, queue, Enum.reverse(events)}
+      end
+  end
+
+  defp put_event_in_queue(from, event, queue), do: :queue.in({from, event}, queue)
 end
