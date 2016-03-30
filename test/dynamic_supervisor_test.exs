@@ -35,9 +35,30 @@ defmodule DynamicSupervisorTest do
   def start_link(:ignore),  do: :ignore
   def start_link(:unknown), do: :unknown
 
+  def start_link(:try_again, notify) do
+    if Process.get(:try_again) do
+      Process.put(:try_again, false)
+      send notify, {:try_again, false}
+      {:error, :try_again}
+    else
+      Process.put(:try_again, true)
+      send notify, {:try_again, true}
+      start_link(:ok2)
+    end
+  end
+
   def start_link(:non_local, :throw), do: throw(:oops)
   def start_link(:non_local, :error), do: raise("oops")
   def start_link(:non_local, :exit),  do: exit(:oops)
+
+  def start_link(:restart, value) do
+    if Process.get({:restart, value}) do
+      start_link(value)
+    else
+      Process.put({:restart, value}, true)
+      start_link(:ok2)
+    end
+  end
 
   test "start_child/2" do
     init = {:ok, [worker(__MODULE__, [])], strategy: :one_for_one}
@@ -89,7 +110,7 @@ defmodule DynamicSupervisorTest do
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :whatever
-    assert %{specs: 1} = DynamicSupervisor.count_children(pid)
+    assert %{specs: 1, active: 1} = DynamicSupervisor.count_children(pid)
   end
 
   test "permanent child is restarted regardless of reason" do
@@ -98,15 +119,87 @@ defmodule DynamicSupervisorTest do
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
-    assert %{specs: 1} = DynamicSupervisor.count_children(pid)
+    assert %{specs: 1, active: 1} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, {:shutdown, :signal}
-    assert %{specs: 2} = DynamicSupervisor.count_children(pid)
+    assert %{specs: 2, active: 2} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :whatever
-    assert %{specs: 3} = DynamicSupervisor.count_children(pid)
+    assert %{specs: 3, active: 3} = DynamicSupervisor.count_children(pid)
+  end
+
+  test "child is restarted with different values" do
+    init = {:ok, [worker(__MODULE__, [:restart], restart: :permanent)],
+                 strategy: :one_for_one, max_restarts: 100_000}
+    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
+    assert_kill child, :shutdown
+    assert %{specs: 1, active: 1} = DynamicSupervisor.count_children(pid)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok3])
+    assert_kill child, :shutdown
+    assert %{specs: 2, active: 2} = DynamicSupervisor.count_children(pid)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ignore])
+    assert_kill child, :shutdown
+    assert %{specs: 2, active: 2} = DynamicSupervisor.count_children(pid)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:error])
+    assert_kill child, :shutdown
+    assert %{specs: 3, active: 2} = DynamicSupervisor.count_children(pid)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:unknown])
+    assert_kill child, :shutdown
+    assert %{specs: 4, active: 2} = DynamicSupervisor.count_children(pid)
+  end
+
+  test "child is restarted when trying again" do
+    init = {:ok, [worker(__MODULE__, [], restart: :permanent)],
+                 strategy: :one_for_one, max_restarts: 2}
+    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:try_again, self()])
+    assert_received {:try_again, true}
+    assert_kill child, :shutdown
+    assert_receive {:try_again, false}
+    assert_receive {:try_again, true}
+    assert %{specs: 1, active: 1} = DynamicSupervisor.count_children(pid)
+  end
+
+  test "child triggers maximum restarts" do
+    Process.flag(:trap_exit, true)
+    init = {:ok, [worker(__MODULE__, [], restart: :permanent)],
+                 strategy: :one_for_one, max_restarts: 1}
+    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:restart, :error])
+    assert_kill child, :shutdown
+    assert_receive {:EXIT, ^pid, :shutdown}
+  end
+
+  test "child triggers maximum seconds" do
+    Process.flag(:trap_exit, true)
+    init = {:ok, [worker(__MODULE__, [], restart: :permanent)],
+                 strategy: :one_for_one, max_seconds: 0}
+    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:restart, :error])
+    assert_kill child, :shutdown
+    assert_receive {:EXIT, ^pid, :shutdown}
+  end
+
+  test "child triggers maximum intensity when trying again" do
+    Process.flag(:trap_exit, true)
+    init = {:ok, [worker(__MODULE__, [], restart: :permanent)],
+                 strategy: :one_for_one, max_restarts: 10}
+    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:restart, :error])
+    assert_kill child, :shutdown
+    assert_receive {:EXIT, ^pid, :shutdown}
   end
 
   defp assert_kill(pid, reason) do

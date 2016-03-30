@@ -19,6 +19,7 @@ defmodule DynamicSupervisor do
     GenServer.start_link(__MODULE__, {mod, args, opts[:name]}, opts)
   end
 
+  # TODO: Document me
   @spec start_child(supervisor, [any]) :: GenServer.on_start
   def start_child(supervisor, args) when is_list(args) do
     GenServer.call(supervisor, {:start_child, args})
@@ -171,6 +172,23 @@ defmodule DynamicSupervisor do
     end
   end
 
+  def handle_info({:"$gen_restart", pid}, state) do
+    %{children: children, template: child, restarting: restarting} = state
+    state = %{state | restarting: restarting - 1}
+
+    case children do
+      %{^pid => args} ->
+        case restart_child(pid, args, child, state) do
+          {:ok, state} ->
+            {:noreply, state}
+          {:shutdown, state} ->
+            {:stop, :shutdown, state}
+        end
+      %{} ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(msg, state) do
     :error_logger.error_msg('Supervisor received unexpected message: ~p~n', [msg])
     {:noreply, state}
@@ -225,7 +243,7 @@ defmodule DynamicSupervisor do
           {:ok, state} ->
             {:ok, state}
           {:try_again, state} ->
-            send(self(), {:"$gen_restart", pid}) # TODO: Handle me
+            send(self(), {:"$gen_restart", pid})
             {:ok, state}
         end
       {:shutdown, state} ->
