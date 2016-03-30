@@ -30,7 +30,7 @@ defmodule DynamicSupervisor do
 
   The map contains the following keys:
 
-    * `:specs` - the total count of children, dead or alive
+    * `:specs` - always 1 as dynamic supervisors have a single specification
 
     * `:active` - the count of all actively running child processes managed by
       this supervisor
@@ -51,6 +51,7 @@ defmodule DynamicSupervisor do
 
   ## Callbacks
 
+  # TODO: Set initial call
   def init({mod, args, name}) do
     Process.flag(:trap_exit, true)
     case mod.init(args) do
@@ -80,7 +81,7 @@ defmodule DynamicSupervisor do
          :ok <- validate_restarts(max_restarts),
          :ok <- validate_seconds(max_seconds) do
       {:ok, %DynamicSupervisor{mod: mod, args: args, template: child,
-                               strategy: strategy, name: name || self(),
+                               strategy: strategy, name: name || {self(), mod},
                                max_restarts: max_restarts, max_seconds: max_seconds}}
     end
   end
@@ -115,9 +116,9 @@ defmodule DynamicSupervisor do
     reply  =
       case type do
         :supervisor ->
-          %{specs: specs, active: active, workers: 0, supervisors: specs}
+          %{specs: 1, active: active, workers: 0, supervisors: specs}
         :worker ->
-          %{specs: specs, active: active, workers: specs, supervisors: 0}
+          %{specs: 1, active: active, workers: specs, supervisors: 0}
       end
 
     {:reply, reply, state}

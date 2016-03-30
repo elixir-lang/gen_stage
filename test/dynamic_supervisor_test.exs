@@ -89,11 +89,11 @@ defmodule DynamicSupervisorTest do
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
-    assert %{specs: 0, active: 0} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :whatever
-    assert %{specs: 0, active: 0} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(pid)
   end
 
   test "transient child is restarted unless normal/shutdown/{shutdown, _}" do
@@ -102,15 +102,15 @@ defmodule DynamicSupervisorTest do
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
-    assert %{specs: 0, active: 0} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, {:shutdown, :signal}
-    assert %{specs: 0, active: 0} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :whatever
-    assert %{specs: 1, active: 1} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(pid)
   end
 
   test "permanent child is restarted regardless of reason" do
@@ -119,15 +119,15 @@ defmodule DynamicSupervisorTest do
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
-    assert %{specs: 1, active: 1} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, {:shutdown, :signal}
-    assert %{specs: 2, active: 2} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :whatever
-    assert %{specs: 3, active: 3} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 3, active: 3} = DynamicSupervisor.count_children(pid)
   end
 
   test "child is restarted with different values" do
@@ -137,23 +137,23 @@ defmodule DynamicSupervisorTest do
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
-    assert %{specs: 1, active: 1} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok3])
     assert_kill child, :shutdown
-    assert %{specs: 2, active: 2} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ignore])
     assert_kill child, :shutdown
-    assert %{specs: 2, active: 2} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:error])
     assert_kill child, :shutdown
-    assert %{specs: 3, active: 2} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 3, active: 2} = DynamicSupervisor.count_children(pid)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:unknown])
     assert_kill child, :shutdown
-    assert %{specs: 4, active: 2} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 4, active: 2} = DynamicSupervisor.count_children(pid)
   end
 
   test "child is restarted when trying again" do
@@ -166,7 +166,7 @@ defmodule DynamicSupervisorTest do
     assert_kill child, :shutdown
     assert_receive {:try_again, false}
     assert_receive {:try_again, true}
-    assert %{specs: 1, active: 1} = DynamicSupervisor.count_children(pid)
+    assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(pid)
   end
 
   test "child triggers maximum restarts" do
