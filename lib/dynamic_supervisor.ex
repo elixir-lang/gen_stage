@@ -1,11 +1,10 @@
 defmodule DynamicSupervisor do
   @behaviour GenServer
 
-  alias DynamicSupervisor, as: Sup
   defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
              children: %{}, restarts: [], restarting: 0]
 
-  # TODO: Add start_link/2
+  # TODO: Add start_link(specs, opts) as in Supervisor
   # TODO: Define behaviour
   # TODO: Add max_demand / min_demand
 
@@ -23,6 +22,30 @@ defmodule DynamicSupervisor do
   @spec start_child(supervisor, [any]) :: GenServer.on_start
   def start_child(supervisor, args) when is_list(args) do
     GenServer.call(supervisor, {:start_child, args})
+  end
+
+  @doc """
+  Returns a map containing count values for the supervisor.
+
+  The map contains the following keys:
+
+    * `:specs` - the total count of children, dead or alive
+
+    * `:active` - the count of all actively running child processes managed by
+      this supervisor
+
+    * `:supervisors` - the count of all supervisors whether or not the child
+      process is still alive
+
+    * `:workers` - the count of all workers, whether or not the child process
+      is still alive
+
+  """
+  @spec count_children(supervisor) ::
+        %{specs: non_neg_integer, active: non_neg_integer,
+          supervisors: non_neg_integer, workers: non_neg_integer}
+  def count_children(supervisor) do
+    GenServer.call(supervisor, :count_children)
   end
 
   ## Callbacks
@@ -55,9 +78,9 @@ defmodule DynamicSupervisor do
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
          :ok <- validate_seconds(max_seconds) do
-      {:ok, %Sup{mod: mod, args: args, template: child,
-                 strategy: strategy, name: name || self(),
-                 max_restarts: max_restarts, max_seconds: max_seconds}}
+      {:ok, %DynamicSupervisor{mod: mod, args: args, template: child,
+                               strategy: strategy, name: name || self(),
+                               max_restarts: max_restarts, max_seconds: max_seconds}}
     end
   end
   defp init(_name, _mod, _args, [_], _opts) do
@@ -82,6 +105,23 @@ defmodule DynamicSupervisor do
   defp validate_seconds(_), do: {:error, "max_seconds must be an integer"}
 
   @doc false
+  def handle_call(:count_children, _from, state) do
+    %{children: children, template: child, restarting: restarting} = state
+    {_, _, _, _, type, _} = child
+
+    specs  = map_size(children)
+    active = specs - restarting
+    reply  =
+      case type do
+        :supervisor ->
+          %{specs: specs, active: active, workers: 0, supervisors: specs}
+        :worker ->
+          %{specs: specs, active: active, workers: specs, supervisors: 0}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call({:start_child, extra}, _from, state) do
     %{template: child} = state
     {_, {m, f, args}, restart, _, _, _} = child
@@ -123,7 +163,7 @@ defmodule DynamicSupervisor do
 
   @doc false
   def handle_info({:EXIT, pid, reason}, state) do
-    case restart_child(pid, reason, state) do
+    case maybe_restart_child(pid, reason, state) do
       {:ok, state} ->
         {:noreply, state}
       {:shutdown, state} ->
@@ -136,50 +176,56 @@ defmodule DynamicSupervisor do
     {:noreply, state}
   end
 
-  defp restart_child(pid, reason, state) do
+  @doc false
+  def terminate(_, _) do
+    # TODO: Implement me
+    :ok
+  end
+
+  defp maybe_restart_child(pid, reason, state) do
     %{children: children, template: child} = state
     {_, _, restart, _, _, _} = child
 
     case children do
-      %{^pid => args} -> restart_child(restart, reason, pid, args, child, state)
+      %{^pid => args} -> maybe_restart_child(restart, reason, pid, args, child, state)
       %{} -> {:ok, state}
     end
   end
 
-  defp restart_child(:permanent, reason, pid, args, child, state) do
+  defp maybe_restart_child(:permanent, reason, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
-    restart(pid, args, child, state)
+    restart_child(pid, args, child, state)
   end
-  defp restart_child(_, :normal, pid, _args, _child, state) do
+  defp maybe_restart_child(_, :normal, pid, _args, _child, state) do
     {:ok, delete_child(pid, state)}
   end
-  defp restart_child(_, :shutdown, pid, _args, _child, state) do
+  defp maybe_restart_child(_, :shutdown, pid, _args, _child, state) do
     {:ok, delete_child(pid, state)}
   end
-  defp restart_child(_, {:shutdown, _}, pid, _args, _child, state) do
+  defp maybe_restart_child(_, {:shutdown, _}, pid, _args, _child, state) do
     {:ok, delete_child(pid, state)}
   end
-  defp restart_child(:transient, reason, pid, args, child, state) do
+  defp maybe_restart_child(:transient, reason, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
-    restart(pid, args, child, state)
+    restart_child(pid, args, child, state)
   end
-  defp restart_child(:temporary, reason, pid, args, child, state) do
+  defp maybe_restart_child(:temporary, reason, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
     {:ok, delete_child(pid, state)}
   end
 
   defp delete_child(pid, %{children: children} = state) do
-    %Sup{state | children: Map.delete(children, pid)}
+    %{state | children: Map.delete(children, pid)}
   end
 
-  defp restart(pid, args, child, state) do
+  defp restart_child(pid, args, child, state) do
     case add_restart(state) do
       {:ok, %{strategy: strategy} = state} ->
-        case restart(strategy, pid, args, child, state) do
+        case restart_child(strategy, pid, args, child, state) do
           {:ok, state} ->
             {:ok, state}
           {:try_again, state} ->
-            send(self(), {:"$gen_restart", pid})
+            send(self(), {:"$gen_restart", pid}) # TODO: Handle me
             {:ok, state}
         end
       {:shutdown, state} ->
@@ -192,7 +238,7 @@ defmodule DynamicSupervisor do
     %{max_seconds: max_seconds, max_restarts: max_restarts, restarts: restarts} = state
     now      = :erlang.monotonic_time(1)
     restarts = add_restart([now|restarts], now, max_seconds)
-    state    = %Sup{restarts: restarts}
+    state    = %{state | restarts: restarts}
 
     if length(restarts) <= max_restarts do
       {:ok, state}
@@ -205,18 +251,18 @@ defmodule DynamicSupervisor do
     for then <- restarts, now <= then + period, do: then
   end
 
-  defp restart(:one_for_one, pid, args, child, state) do
+  defp restart_child(:one_for_one, current_pid, args, child, state) do
     {_, {m, f, _}, restart, _, _, _} = child
 
     case start_child(m, f, args) do
       {:ok, pid, _} ->
-        {:ok, save_child(restart, pid, args, delete_child(pid, state))}
+        {:ok, save_child(restart, pid, args, delete_child(current_pid, state))}
       {:ok, pid} ->
-        {:ok, save_child(restart, pid, args, delete_child(pid, state))}
+        {:ok, save_child(restart, pid, args, delete_child(current_pid, state))}
       :ignore ->
-        {:ok, delete_child(pid, state)}
+        {:ok, delete_child(current_pid, state)}
       {:error, reason} ->
-        report_error(:start_error, reason, {:restarting, pid}, args, child, state)
+        report_error(:start_error, reason, {:restarting, current_pid}, args, child, state)
         {:try_again, update_in(state.restarting, &(&1 + 1))}
     end
   end
