@@ -1,4 +1,248 @@
 defmodule DynamicSupervisor do
+  @moduledoc ~S"""
+  A supervisor that dynamically supervises and manages children.
+
+  A supervisor is a process which supervises other processes, called
+  child processes. Different from the regular `Supervisor`,
+  `DynamicSupervisor` was designed to start, manage and supervise
+  these children dynamically.
+
+  **Note**: due to a limitation in Erlang OTP, `DynamicSupervisor`
+  currently cannot be used as the root supervisor in your supervision
+  tree if you are planning to perform hot-code upgrades. We hope this
+  issue is addressed in upcoming OTP releases. For now, it is
+  recommended to define the dynamic supervisor as a child of a regular
+  supervisor.
+
+  ## Example
+
+  Before we start our dymamic supervisor, let's first build an agent
+  that represents a stack. That's the process we will start dynamically:
+
+      defmodule Stack do
+        def start_link(state) do
+          Agent.start_link(fn -> state end, opts)
+        end
+
+        def pop(pid) do
+          Agent.get_and_update(pid, fn [h|t] -> {h, t} end)
+        end
+
+        def push(pid, h) do
+          Agent.cast(fn t -> [h|t] end)
+        end
+      end
+
+  Now let's start our dynamic supervisor. Similar to a regular
+  supervisor, the dynamic supervisor expects a list of child
+  specifications on start. Different from regular supervisors,
+  this list must contain only one item. The child specified in
+  the list won't be started alongside the supervisor, instead,
+  the child specification will be used as a template for all
+  future supervisor children.
+
+  Let's give it a try:
+
+      # Import helpers for defining supervisors
+      import Supervisor.Spec
+
+      # We are going to supervise the Stack server which
+      # will be started with a single argument [:hello]
+      # and the default name of :sup_stack.
+      children = [
+        worker(Stack, [])
+      ]
+
+      # Start the supervisor with our template
+      {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+  With the supervisor up and running, let's start our first
+  children with `DynamicSupervisor.start_child/2`. `start_child/2`
+  expects the supervisor PID and a list of arguments. Let's start
+  our child with a default stack of `[:hello]`:
+
+      {:ok, stack} = DynamicSupervisor.start_child(sup, [[:hello]])
+
+  Now let's use the stack:
+
+      Stack.pop(stack)
+      #=> :hello
+
+      Stack.push(stack, :world)
+      #=> :ok
+
+      Stack.pop(stack)
+      #=> :world
+
+  However, there is a bug in our stack agent. If we call `:pop` and
+  the stack is empty, it is going to crash because no clause matches.
+  Let's try it:
+
+      Stack.pop(stack)
+      ** (exit) exited in: GenServer.call(#PID<...>, ..., 5000)
+
+  Since the stack is being supervised, the supervisor will automatically
+  start a new agent, with the same default stack of `[:hello]` we have
+  specified before. However, if we try to access it with the same PID,
+  we will get an error:
+
+      Stack.pop(stack)
+      ** (exit) exited in: GenServer.call(#PID<...>, ..., 5000)
+         ** (EXIT) no process
+
+  Remember, the agent process for the previous stack is gone. The
+  supervisor started a new stack but it has a new PID. For now,
+  let's use `DynamicSupervisor.children/1` to fetch the new PID:
+
+      [stack] = DynamicSupervisor.children(sup)
+      Stack.pop(stack) #=> :hello
+
+  In practice though, it is unlikely we would use `DynamicSupervisor.children/1`.
+  When we are managing hundreds of thousands of processes, we want
+  more effective ways to access the children that belongs to a
+  supervisor. We have a couple options.
+
+  The first option is to use another restart m0ode for the worker.
+  For example:
+
+      worker(Stack, [], restart: :temporary)
+
+  The :temporary option will tell the supervisor to not restart
+  the worker if it dies. Read the "Exit reasons" section later on
+  for more information.
+
+  The second option is to give a name when starting the Stack agent:
+
+      DynamicSupervisor.start_child(sup, [[:hello], [name: :my_stack]])
+
+  Now whenever that particular agent is started or restarted, it will
+  be registered with a `:my_stack` name which we can use when accessing
+  it:
+
+      Stack.pop(:my_stack)
+      #=> [:hello]
+
+  There are some limitations to this approach. First of all, locally
+  register names apply to the whole node. No other process in the same
+  node may be named `:my_stack`. Attempting to do so will cause an error:
+
+      DynamicSupervisor.start_child(sup, [[:hello], [name: :example]])
+      #=> {:ok, #PID<0.65.0>}
+      DynamicSupervisor.start_child(sup, [[:hello], [name: :example]])
+      #=> {:error, {:already_started, #PID<0.65.0>}}
+
+  Second of all, locally registered names are always atoms. This is an
+  issue when `DynamicSupervisor` is used to start children based on
+  external values. Luckily for us, a `DynamicSupervisor` can also be
+  used as a registry. Let's see an example next.
+
+  ## As a registry
+
+  Imagine you are building an application where every client gets their
+  own stack. We cannot use atoms as locally registed names for each client
+  because atoms are not garbage collected. Doing so means we would leak
+  memory or atoms until a system limit is reached.
+
+  To solve such needs, the `DynamicSupervisor` can be used as a registry
+  where an ID is given to every child. In order to enable the registry
+  feature, we need to give it a registry name when starting the supervisor.
+  In most cases, we name both the registry AND the dynamic supervisor
+  itself. Assuming we are using the same `children` as specified in the
+  previous section, let's start a dynamic supervisor with a registry:
+
+      opts = [strategy: :one_for_one, name: StackSup, registry: StackSup]
+      {:ok, _} = DynamicSupervisor.start_link(children, opts)
+
+  Because the supervisor is named, we no longer need its PID. Let's start
+  a new stack:
+
+      DynamicSupervisor.start_child(StackSup, "my stack", [[:hello]])
+
+  We got a new stack and gave it the string ID of "my stack". Now all we
+  need to do is to find the agent inside the supervisor registry:
+
+      location = {:via, DynamicSupervisor, {:id, StackSup, "my stack"}}
+      Stack.pop(location)
+      #=> :hello
+
+  And it works! The `:via` tuple tells the Agent to ask the
+  DynamicSupervisor for the location of the stack. The location itself
+  is represented by the tuple `{:id, StackSup, "my stack"}`, where the
+  `:id` is the type of lookup, `StackSup` is the name of the registry
+  and `"my stack"` is the ID itself. Now, if our stack crashes, a new
+  will be started under the same ID.
+
+  Using the supervisor as a registry allows us to name only the
+  supervisor itself and avoid naming all supervisor children while
+  still providing fast lookups.
+
+  ## Module-based supervisors
+
+  In the example above, a supervisor was started by passing the
+  supervision structure to `start_link/2`. However, supervisors
+  can also be created by explicitly defining a supervision module:
+
+      defmodule MyApp.Supervisor do
+        use DynamicSupervisor
+
+        def start_link do
+          DynamicSupervisor.start_link(__MODULE__, [])
+        end
+
+        def init([]) do
+          children = [
+            worker(Stack, [[:hello]])
+          ]
+
+          {:ok, children, strategy: :one_for_one}
+        end
+      end
+
+  You may want to use a module-based supervisor if you need to
+  perform some particular action on supervisor initialization,
+  like setting up an ETS table.
+
+  ## Strategies
+
+  Currently dynamic supervisors support a single strategy:
+
+    * `:one_for_one` - if a child process terminates, only that
+      process is restarted.
+
+  ## Exit reasons
+
+  From the example above, you may have noticed that the transient restart
+  strategy for the worker does not restart the child in case it crashes with
+  reason `:normal`, `:shutdown` or `{:shutdown, term}`.
+
+  So one may ask: which exit reason should I choose when exiting my worker?
+  There are three options:
+
+    * `:normal` - in such cases, the exit won't be logged, there is no restart
+      in transient mode and linked processes do not exit
+
+    * `:shutdown` or `{:shutdown, term}` - in such cases, the exit won't be
+      logged, there is no restart in transient mode and linked processes exit
+      with the same reason unless trapping exits
+
+    * any other term - in such cases, the exit will be logged, there are
+      restarts in transient mode and linked processes exit with the same reason
+      unless trapping exits
+
+  ## Name Registration
+
+  A supervisor is bound to the same name registration rules as a `GenServer`.
+  Read more about it in the `GenServer` docs.
+  """
+
+  @doc false
+  defmacro __using__(_) do
+    quote location: :keep do
+      @behaviour DynamicSupervisor
+      import Supervisor.Spec
+    end
+  end
+
   @behaviour GenServer
 
   defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
