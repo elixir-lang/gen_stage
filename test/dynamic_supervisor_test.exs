@@ -61,8 +61,8 @@ defmodule DynamicSupervisorTest do
   end
 
   test "start_child/2" do
-    init = {:ok, [worker(__MODULE__, [])], strategy: :one_for_one}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [])]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
 
     assert {:ok, _, :extra} = DynamicSupervisor.start_child(pid, [:ok3])
     assert {:ok, _} = DynamicSupervisor.start_child(pid, [:ok2])
@@ -72,8 +72,8 @@ defmodule DynamicSupervisorTest do
   end
 
   test "start_child/2 with throw/error/exit" do
-    init = {:ok, [worker(__MODULE__, [:non_local])], strategy: :one_for_one}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [:non_local])]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
 
     assert {:error, {{:nocatch, :oops}, [_|_]}} =
            DynamicSupervisor.start_child(pid, [:throw])
@@ -84,8 +84,8 @@ defmodule DynamicSupervisorTest do
   end
 
   test "temporary child is not restarted regardless of reason" do
-    init = {:ok, [worker(__MODULE__, [], restart: :temporary)], strategy: :one_for_one}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [], restart: :temporary)]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
@@ -97,8 +97,8 @@ defmodule DynamicSupervisorTest do
   end
 
   test "transient child is restarted unless normal/shutdown/{shutdown, _}" do
-    init = {:ok, [worker(__MODULE__, [], restart: :transient)], strategy: :one_for_one}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [], restart: :transient)]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
@@ -114,8 +114,8 @@ defmodule DynamicSupervisorTest do
   end
 
   test "permanent child is restarted regardless of reason" do
-    init = {:ok, [worker(__MODULE__, [], restart: :permanent)], strategy: :one_for_one}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [], restart: :permanent)]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
@@ -131,9 +131,8 @@ defmodule DynamicSupervisorTest do
   end
 
   test "child is restarted with different values" do
-    init = {:ok, [worker(__MODULE__, [:restart], restart: :permanent)],
-                 strategy: :one_for_one, max_restarts: 100_000}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [:restart], restart: :permanent)]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 100_000)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
     assert_kill child, :shutdown
@@ -157,9 +156,8 @@ defmodule DynamicSupervisorTest do
   end
 
   test "child is restarted when trying again" do
-    init = {:ok, [worker(__MODULE__, [], restart: :permanent)],
-                 strategy: :one_for_one, max_restarts: 2}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [], restart: :permanent)]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 2)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:try_again, self()])
     assert_received {:try_again, true}
@@ -171,9 +169,8 @@ defmodule DynamicSupervisorTest do
 
   test "child triggers maximum restarts" do
     Process.flag(:trap_exit, true)
-    init = {:ok, [worker(__MODULE__, [], restart: :permanent)],
-                 strategy: :one_for_one, max_restarts: 1}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [], restart: :permanent)]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 1)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:restart, :error])
     assert_kill child, :shutdown
@@ -182,9 +179,8 @@ defmodule DynamicSupervisorTest do
 
   test "child triggers maximum seconds" do
     Process.flag(:trap_exit, true)
-    init = {:ok, [worker(__MODULE__, [], restart: :permanent)],
-                 strategy: :one_for_one, max_seconds: 0}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [], restart: :permanent)]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one, max_seconds: 0)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:restart, :error])
     assert_kill child, :shutdown
@@ -193,9 +189,8 @@ defmodule DynamicSupervisorTest do
 
   test "child triggers maximum intensity when trying again" do
     Process.flag(:trap_exit, true)
-    init = {:ok, [worker(__MODULE__, [], restart: :permanent)],
-                 strategy: :one_for_one, max_restarts: 10}
-    {:ok, pid} = DynamicSupervisor.start_link(Simple, init)
+    children = [worker(__MODULE__, [], restart: :permanent)]
+    {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 10)
 
     assert {:ok, child} = DynamicSupervisor.start_child(pid, [:restart, :error])
     assert_kill child, :shutdown
