@@ -97,7 +97,7 @@ defmodule DynamicSupervisor do
       [stack] = DynamicSupervisor.children(sup)
       Stack.pop(stack) #=> :hello
 
-  In practice though, it is unlikely we would use `DynamicSupervisor.children/1`.
+  In practice though, it is unlikely we would use `children/1`.
   When we are managing hundreds of thousands of processes, we want
   more effective ways to access the children that belongs to a
   supervisor. We have a couple options.
@@ -235,6 +235,36 @@ defmodule DynamicSupervisor do
   Read more about it in the `GenServer` docs.
   """
 
+  @behaviour GenServer
+
+  @typedoc "Options used by the `start*` functions"
+  @type options :: [registry: atom,
+                    name: Supervisor.name,
+                    strategy: Supervisor.Spec.strategy,
+                    max_restarts: non_neg_integer,
+                    max_seconds: non_neg_integer]
+
+  @doc """
+  Callback invoked to start the supervisor and during hot code upgrades.
+
+  ## Options
+
+    * `:strategy` - the restart strategy option. Only `:one_for_one`
+      is supported by dynamic supervisors.
+
+    * `:max_restarts` - the maximum amount of restarts allowed in
+      a time frame. Defaults to 3.
+
+    * `:max_seconds` - the time frame in which `:max_restarts` applies.
+      Defaults to 5.
+
+  """
+  @callback init(args :: term) ::
+    {:ok, [Supervisor.Spec.spec], options :: Keyword.t} | :ignore
+
+  defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
+             children: %{}, restarts: [], restarting: 0]
+
   @doc false
   defmacro __using__(_) do
     quote location: :keep do
@@ -243,28 +273,72 @@ defmodule DynamicSupervisor do
     end
   end
 
-  @behaviour GenServer
-
-  defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
-             children: %{}, restarts: [], restarting: 0]
-
-  # TODO: Add start_link(specs, opts) as in Supervisor
-  # TODO: Define behaviour
   # TODO: Add max_demand / min_demand
-
-  @typedoc "The supervisor reference"
-  @type supervisor :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
+  # TODO: Add registry
+  # TODO: Add susbscription support
+  # TODO: Add sharding
 
   @doc """
-  Starts and links a `DynamicSupervisor`.
+  Starts a supervisor with the given children.
+
+  A strategy is required to be given as an option. Furthermore,
+  the `:max_restarts` and `:max_seconds` value can be configured
+  as described in the documentation for the `c:init/1` callback.
+
+  The options can also be used to register a supervisor name.
+  The supported values are described under the `Name Registration`
+  section in the `GenServer` module docs.
+
+  Note that the dynamic supervisor is linked to the parent process
+  and will exit not only on crashes but also if the parent process
+  exits with `:normal` reason.
   """
-  @spec start_link(module, any, [GenServer.option]) :: GenServer.on_start
+  @spec start_link([Supervisor.Spec.spec], options) :: Supervisor.on_start
+  def start_link(children, options) when is_list(children) do
+    # TODO: Do not call supervise but the shared spec validation logic
+    {:ok, {_, spec}} = Supervisor.Spec.supervise(children, options)
+    start_link(Supervisor.Default, {:ok, spec, options}, options)
+  end
+
+  @doc """
+  Starts a dynamic supervisor module with the given `arg`.
+
+  To start the supervisor, the `init/1` callback will be invoked in the given
+  module, with `arg` passed to it. The `init/1` callback must return a
+  supervision specification which can be created with the help of the
+  `Supervisor.Spec` module.
+
+  If the `init/1` callback returns `:ignore`, this function returns
+  `:ignore` as well and the supervisor terminates with reason `:normal`.
+  If it fails or returns an incorrect value, this function returns
+  `{:error, term}` where `term` is a term with information about the
+  error, and the supervisor terminates with reason `term`.
+
+  The `:name` option can also be given in order to register a supervisor
+  name, the supported values are described under the `Name Registration`
+  section in the `GenServer` module docs.
+  """
+  @spec start_link(module, any, [options]) :: Supervisor.on_start
   def start_link(mod, args, opts \\ []) do
     GenServer.start_link(__MODULE__, {mod, args, opts[:name]}, opts)
   end
 
-  # TODO: Document me
-  @spec start_child(supervisor, [any]) :: GenServer.on_start
+  @doc """
+  Starts a child in the dynamic supervisor.
+
+  The child process will be started by appending the given list of
+  `args` to the existing function arguments in the child specification.
+
+  If the child process starts, function returns `{:ok, child}` or
+  `{:ok, child, info}`, the pid is added to the supervisor and the
+  function returns the same value.
+
+  If the child process starts, function returns ignore, an error tuple
+  or an erroneous value, or if it fails, the child is discarded and
+  `:ignore` or `{:error, error}` where `error` is a term containing
+  information about the error is returned.
+  """
+  @spec start_child(Supervisor.supervisor, [term]) :: Supervisor.on_start_child
   def start_child(supervisor, args) when is_list(args) do
     GenServer.call(supervisor, {:start_child, args})
   end
@@ -286,7 +360,7 @@ defmodule DynamicSupervisor do
       is still alive
 
   """
-  @spec count_children(supervisor) ::
+  @spec count_children(Supervisor.supervisor) ::
         %{specs: non_neg_integer, active: non_neg_integer,
           supervisors: non_neg_integer, workers: non_neg_integer}
   def count_children(supervisor) do
