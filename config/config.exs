@@ -10,11 +10,11 @@ use Mix.Config
 
 # You can configure for your application as:
 #
-#     config :gen_router, key: :value
+#     config :gen_broker, key: :value
 #
 # And access this configuration in your application as:
 #
-#     Application.get_env(:gen_router, :key)
+#     Application.get_env(:gen_broker, :key)
 #
 # Or configure a 3rd-party app:
 #
