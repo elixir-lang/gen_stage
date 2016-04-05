@@ -27,6 +27,22 @@ defmodule DynamicSupervisorTest do
            :ignore
   end
 
+  test "start_link/3 with registered process" do
+    spec = {:ok, [worker(Foo, [])], [strategy: :one_for_one]}
+    {:ok, pid} = DynamicSupervisor.start_link(Simple, spec, name: __MODULE__)
+
+    # Sets up a link
+    {:links, links} = Process.info(self, :links)
+    assert pid in links
+
+    # A name
+    assert Process.whereis(__MODULE__) == pid
+
+    # And the initial call
+    assert {:supervisor, DynamicSupervisorTest.Simple, 1} =
+           :proc_lib.translate_initial_call(pid)
+  end
+
   ## start_child/2
 
   def start_link(:ok3),     do: {:ok, spawn_link(fn -> :timer.sleep(:infinity) end), :extra}

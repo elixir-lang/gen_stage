@@ -369,9 +369,10 @@ defmodule DynamicSupervisor do
 
   ## Callbacks
 
-  # TODO: Set initial call
   def init({mod, args, name}) do
+    Process.put(:"$initial_call", {:supervisor, mod, 1})
     Process.flag(:trap_exit, true)
+
     case mod.init(args) do
       {:ok, children, opts} ->
         case validate_specs(children) do
@@ -473,7 +474,7 @@ defmodule DynamicSupervisor do
   end
 
   defp save_child(:temporary, pid, _, state),
-    do: put_in(state.children[pid], true)
+    do: put_in(state.children[pid], :undefined)
   defp save_child(_, pid, args, state),
     do: put_in(state.children[pid], args)
 
@@ -514,9 +515,95 @@ defmodule DynamicSupervisor do
   end
 
   @doc false
-  def terminate(_, _) do
-    # TODO: Implement me
+  def terminate(_, state) do
+    %{children: children, template: child} = state
+    {_, _, restart, shutdown, _, _} = child
+
+    {pids, stacks} = monitor_children(children)
+    size = map_size(pids)
+
+    stacks =
+      case shutdown do
+        :brutal_kill ->
+          for {pid, _} <- pids, do: Process.exit(pid, :kill)
+          wait_children(restart, shutdown, pids, size, nil, stacks)
+        :infinity ->
+          for {pid, _} <- pids, do: Process.exit(pid, :shutdown)
+          wait_children(restart, shutdown, pids, size, nil, stacks)
+        time ->
+          for {pid, _} <- pids, do: Process.exit(pid, :shutdown)
+          timer = :erlang.start_timer(time, self(), :kill)
+          wait_children(restart, shutdown, pids, size, timer, stacks)
+      end
+
+    for {pid, reason} <- stacks do
+      report_error(:shutdown_error, reason, pid, :undefined, child, state)
+    end
+
     :ok
+  end
+
+  defp monitor_children(children) do
+    Enum.reduce children, {%{}, %{}}, fn {pid, _}, {pids, stacks} ->
+      case monitor_child(pid) do
+        :ok ->
+          {Map.put(pids, pid, true), stacks}
+        {:error, :normal} ->
+          {pids, stacks}
+        {:error, reason} ->
+          {pids, Map.put(stacks, pid, reason)}
+      end
+    end
+  end
+
+  defp monitor_child(pid) do
+    ref = Process.monitor(pid)
+    Process.unlink(pid)
+
+    receive do
+      {:EXIT, ^pid, reason} ->
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _} -> {:error, reason}
+        end
+    after
+      0 -> :ok
+    end
+  end
+
+defp wait_children(_restart, _shutdown, _pids, 0, nil, stacks) do
+    stacks
+  end
+  defp wait_children(_restart, _shutdown, _pids, 0, timer, stacks) do
+    _ = :erlang.cancel_timer(timer)
+    receive do
+      :timedout -> stacks
+    after
+      0 -> stacks
+    end
+  end
+  defp wait_children(restart, :brutal_kill, pids, size, timer, stacks) do
+    receive do
+      {:DOWN, _ref, :process, pid, :killed} ->
+        wait_children(restart, :brutal_kill, Map.delete(pids, pid), size - 1, timer,
+                      stacks)
+      {:DOWN, _ref, :process, pid, reason} ->
+        wait_children(restart, :brutal_kill, Map.delete(pids, pid), size - 1, timer,
+                      Map.put(stacks, pid, reason))
+    end
+  end
+  defp wait_children(restart, shutdown, pids, size, timer, stacks) do
+    receive do
+      {:DOWN, _ref, :process, pid, reason} when
+          reason == :shutdown or (reason == :normal and restart != :permanent) ->
+        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer,
+                      stacks)
+      {:DOWN, _ref, :process, pid, reason} ->
+        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer,
+                      Map.put(stacks, pid, reason))
+      {:timeout, ^timer, :kill} ->
+        for {pid, _} <- pids, do: Process.exit(pid, :kill)
+        wait_children(restart, shutdown, pids, size, nil, stacks)
+    end
   end
 
   defp maybe_restart_child(pid, reason, state) do
