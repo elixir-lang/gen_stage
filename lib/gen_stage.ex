@@ -126,6 +126,56 @@ defmodule GenStage do
   is 50 (the default values), the consumer will ask for 100 events
   initially and ask for more only after it receives at least 50.
 
+  ## Dynamic events
+
+  In the example above, we have subscribed C to B and B to A,
+  sent the demand upstream and received the events downstream.
+  That's how we expect most data to flow in stages.
+
+  However, sometimes we may need to directly inject data into
+  a given stage. For example, in the example above, we may need
+  to do at some point:
+
+      GenStage.sync_notify(b, 42)
+
+  The call above would send a message to B which would eventually
+  be handled as an event and sent to C. However, once we start
+  supporting dynamic events, one important question arises:
+  what if we sent a message to B but C, its consumer, has not
+  yet sent any demand (i.e. it has not asked for any items)?
+
+  To handle such cases, all stages place dynamic events in an
+  internal buffer. If the message cannot be sent immediately,
+  it is stored and sent whenever there is an opportunity to.
+  The number of dynamic events that can be buffered is customized
+  via the `:dynamic_buffer_size` option returned by `init/1`.
+  The default value is of 100.
+
+  TODO: Is this a reasonable default? Whatever default we choose
+  needs to be reflected downstream.
+
+  TODO: Discuss if the timeout is client-based, server-based
+  or both.
+
+  ## Overflown events
+
+  Sometimes, a producer may produce more events than downstream
+  has asked for. For example, you are receiving events from an
+  external source that only sends events in batches of 10 in 10.
+  However, according to the GenStage specification, a producer
+  may never send more events than a consumer has asked for.
+
+  To handle such cases, all producer stages place overflown events
+  in an internal buffer. If the message cannot be sent immediately,
+  it is stored and sent whenever there is an opportunity to.
+  The number of overflown events that can be buffered is customized
+  via the `:overflown_buffer_size` option returned by `init/1`.
+
+  By default, the overflown buffer size is 0, which means an error
+  will be logged. This is by design as an overflown event in most
+  stages is likely an implementation error. The value can be
+  increased though as needed.
+
   ## Streams
 
   After exploring the example above, you may be thinking that's
@@ -166,7 +216,7 @@ defmodule GenStage do
   Besides exposing all of the `GenServer` callbacks, it also provides
   `handle_demand/2` to be implemented by producers and `handle_event/3`
   to be implemented by consumers, as shown above. Futhermore, all the
-  callback responses have been modified to be potentially emit events.
+  callback responses have been modified to potentially emit events.
   See the callbacks documentation for more information.
 
   By adding `use GenStage` to your module, Elixir will automatically
@@ -175,10 +225,10 @@ defmodule GenStage do
 
   Although this module exposes functions similar to the ones found in
   the `GenServer` API, like `call/3` and `cast/2`, developers can also
-  rely directly on the GenServer API such as `GenServer.multi_call/4`
+  rely directly on GenServer functions such as `GenServer.multi_call/4`
   and `GenServer.abcast/3` if they wish to.
 
-  ## Name Registration
+  ### Name Registration
 
   `GenStage` is bound to the same name registration rules as a `GenServer`.
   Read more about it in the `GenServer` docs.
@@ -210,6 +260,7 @@ defmodule GenStage do
   ### Consumer messages
 
   TODO.
+
   """
 
   # TODO: Make handle_demand and handle_event optional
@@ -251,17 +302,33 @@ defmodule GenStage do
 
   ## Options
 
-  This callback accepts a different set of options depending on the
-  stage type.
+  This callback may return options. Some options are specific to
+  the stage type while others are shared across all types.
+
+  ### Shared options
+
+    * `:dynamic_buffer_size` - the size of the buffer to store dynamic
+      events. Check the "Dynamic events" section on the module
+      documentation (defaults to 100)
 
   ### :producer options
 
-  No options are supported for this type.
+    * `:overflown_buffer_size` - the size of the buffer to store overflown
+      events. Check the "Overflown events" section on the module
+      documentation (defaults to 0)
+
+  ### :producer_consumer options
+
+    * `:overflown_buffer_size` - the size of the buffer to store overflown
+      events. Check the "Overflown events" section on the module
+      documentation (defaults to 0)
 
   ### :consumer options
 
-    * `:max_demand` - the maximum demand desired to send upstream.
-      Those options are default values
+    * `:max_demand` - the maximum demand desired to send upstream
+      (defaults to 100)
+    * `:min_demand` - the minimum demand that when reached triggers
+      more demand upstream (defaults to half of `:max_demand`)
 
   """
   @callback init(args :: term) ::
@@ -271,4 +338,45 @@ defmodule GenStage do
     {type, state, timeout | :hibernate, options} |
     :ignore |
     {:stop, reason :: any} when state: any
+
+  @doc """
+  Used by :producer types.
+  """
+  @callback handle_demand(demand :: pos_integer, state :: term) ::
+    {:noreply, [event], new_state} |
+    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:stop, reason, new_state} when new_state: term, reason: term, event: term
+
+  @doc """
+  Used by :producer_consumer and :consumer types.
+  """
+  @callback handle_event(demand :: pos_integer, GenServer.from, state :: term) ::
+    {:noreply, [event], new_state} |
+    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:stop, reason, new_state} when new_state: term, reason: term, event: term
+
+  @callback handle_call(request :: term, GenServer.from, state :: term) ::
+    {:reply, reply, [event], new_state} |
+    {:reply, reply, [event], new_state, timeout | :hibernate} |
+    {:noreply, [event], new_state} |
+    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:stop, reason, reply, new_state} |
+    {:stop, reason, new_state} when reply: term, new_state: term, reason: term, event: term
+
+  @callback handle_cast(request :: term, state :: term) ::
+    {:noreply, [event], new_state} |
+    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:stop, reason :: term, new_state} when new_state: term, event: term
+
+  @callback handle_info(msg :: :timeout | term, state :: term) ::
+    {:noreply, [event], new_state} |
+    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:stop, reason :: term, new_state} when new_state: term, event: term
+
+  @callback terminate(reason, state :: term) ::
+    term when reason: :normal | :shutdown | {:shutdown, term} | term
+
+  @callback code_change(old_vsn, state :: term, extra :: term) ::
+    {:ok, new_state :: term} |
+    {:error, reason :: term} when old_vsn: term | {:down, term}
 end
