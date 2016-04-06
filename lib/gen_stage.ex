@@ -54,7 +54,8 @@ defmodule GenStage do
   Let's start with A. Since A is a producer, its main
   responsibility is to receive demand and generate events.
   Those events may be in memory or an external queue system.
-  For simplicity, let's use a simple counter starting from 0:
+  For simplicity, let's implement a simple counter starting
+  from a given value of `counter` received on `init/1`:
 
       defmodule A do
         use GenStage
@@ -64,18 +65,19 @@ defmodule GenStage do
         end
 
         def handle_demand(demand, counter) when demand > 0 do
-          # If the counter is 3 and we ask for 2 items,
-          # we will emit 3 and 4, and set the state to 5.
+          # If the counter is 3 and we ask for 2 items, we will
+          # emit the items "3" and "4", and set the state to 5.
           events = Enum.to_list(counter..counter+demand-1)
           {:noreply, events, counter + demand}
         end
       end
 
   B is a producer-consumer. This means it does not explicitly
-  handle the demand, because the demand is always forwarded to
-  its producer. Instead B receives events and generate events
-  from the events themselves. In our case, B will receive events
-  and multiply them by a given number:
+  handle the demand because the demand is always forwarded to
+  its producer. Once A receives the demand from B, it will send
+  events to B which will be transformed by as B as desired. In
+  our case, B will receive events and multiply them by a number
+  giving on initialization and stored as the state:
 
       defmodule B do
         use GenStage
@@ -85,12 +87,12 @@ defmodule GenStage do
         end
 
         def handle_event(event, number) do
-          {:noreply, [event * number], state}
+          {:noreply, [event * number], number}
         end
       end
 
-  C will finally receive those events and print them to the
-  terminal:
+  C will finally receive those events and print them every second
+  to the terminal:
 
       defmodule C do
         use GenStage
@@ -100,6 +102,9 @@ defmodule GenStage do
         end
 
         def handle_event(event, state) do
+          # Wait for a second.
+          :timer.sleep(1000)
+
           # Inspect the event.
           IO.inspect(event)
 
@@ -118,13 +123,22 @@ defmodule GenStage do
       GenStage.sync_subscribe(b, to: a)
 
   After you subscribe all of them, demand will start flowing
-  upstream and events downstream. Because C is the one effectively
-  generating the demand, we usually set the `:max_demand` and
-  `:min_demand` options. The `:max_demand` specifies the maximum
-  amount of events it must be in flow, the `:min_demand` specifies
-  the minimum. For example, if `:max_demand` is 100 and `:min_demand`
-  is 50 (the default values), the consumer will ask for 100 events
-  initially and ask for more only after it receives at least 50.
+  upstream and events downstream. Because C blocks for one
+  second, the demand will eventually be adjusted to C needs.
+  When implementing consumers, we often set the `:max_demand` and
+  `:min_demand` options on initialization. The `:max_demand`
+  specifies the maximum amount of events that must be in flow
+  while the `:min_demand` specifies the minimum threshold to
+  trigger for more demand. For example, if `:max_demand` is 100
+  and `:min_demand` is 50 (the default values), the consumer will
+  ask for 100 events initially and ask for more only after it
+  receives at least 50.
+
+  When such values are applied to the stages above, it is easy
+  to see the producer works in bursts. The producer A ends-up
+  emitting batches of 50 items which will take approximately
+  50 seconds to be consumed by C, which will then request another
+  batch of 50 items.
 
   ## Dynamic events
 

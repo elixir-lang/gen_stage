@@ -1,4 +1,44 @@
 defmodule GenRouter do
+  defmodule Spec do
+    def subscribe(producer, pid, ref, demand, opts \\ []) do
+      producer = whereis(producer)
+      _ = send(producer, {:"$gen_subscribe", {pid, ref}, {demand, opts}})
+      :ok
+    end
+
+    def ask(producer, ref, demand) do
+      producer = whereis(producer)
+      _ = send(producer, {:"$gen_ask", {self(), ref}, demand})
+      :ok
+    end
+
+    def route(consumer, ref, [_|_] = events) do
+      consumer = whereis(consumer)
+      _ = send(consumer, {:"$gen_route", {self(), ref}, events})
+      :ok
+    end
+    def route(consumer, ref, {:eos, _} = eos) do
+      consumer = whereis(consumer)
+      _ = send(consumer, {:"$gen_route", {self(), ref}, eos})
+      :ok
+    end
+
+    def unsubscribe(producer, ref, reason) do
+      producer = whereis(producer)
+      _ = send(producer, {:"$gen_unsubscribe", {self(), ref}, reason})
+      :ok
+    end
+
+    ## Helpers
+
+    defp whereis(router) do
+      case GenServer.whereis(router) do
+        nil   -> raise ArgumentError, "no process associated with #{inspect(router)}"
+        proc -> proc
+      end
+    end
+  end
+
   @moduledoc ~S"""
   A behaviour module for routing events from multiple producers
   to multiple consumers.

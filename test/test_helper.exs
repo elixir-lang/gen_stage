@@ -20,8 +20,6 @@ defmodule TestRouter do
   end
 
   defmodule In do
-    use GenRouter.In
-
     def init(args), do: TestRouter.init(__MODULE__, args)
 
     def handle_call(req, from, state) do
@@ -42,8 +40,6 @@ defmodule TestRouter do
   end
 
   defmodule Out do
-    use GenRouter.Out
-
     def init(args), do: TestRouter.init(__MODULE__, args)
 
     def handle_demand(demand, consumer, state) do
