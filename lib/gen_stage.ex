@@ -36,9 +36,9 @@ defmodule GenStage do
   a back-pressure mechanism.
 
   Typically, a consumer may subscribe only to a single producer
-  and establish a one-to-one relationship. GenBroker lifts this
-  restriction by allowing connecting M producers to N consumers
-  and managing events with different strategies.
+  which by default establishes a one-to-one relationship.
+  GenBroker lifts this restriction by allowing M producers to
+  connect N consumers using different strategies.
 
   ## Example
 
@@ -166,7 +166,7 @@ defmodule GenStage do
   The default value is of 100.
 
   TODO: Is this a reasonable default? Whatever default we choose
-  needs to be reflected downstream.
+  needs to be reflected in the source code and docs below.
 
   TODO: Discuss if the timeout is client-based, server-based
   or both.
@@ -269,11 +269,93 @@ defmodule GenStage do
 
   ### Producer messages
 
-  TODO.
+  The producer is responsible for sending events to consumers
+  based on demand.
+
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_ref}, {:stage, options}}` -
+      sent by the consumer to the producer to start a new subscription.
+
+      Before sending, the consumer MUST monitor the producer for clean-up
+      purposes in case of crashes. The `subscription_ref` is unique to
+      identify the subscription (and may be the monitoring reference). 
+
+      Once received, the producer MUST monitor the consumer and reply with a
+      `:connect` message. If the producer already has a subscription, it MAY
+      ignore future subscriptions by sending a disconnect reply (defined
+      in the Consumer section) except for cases where the new subscription
+      matches the `subscription_ref`. In such cases, the producer MUST crash.
+
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_ref}, {:broker, strategy, options}}` -
+      sent by the consumer (a broker) to the producer to start a new subscription.
+
+      The consumer MAY establish new connections by sending `:connect`
+      messages defined below. The consumer MUST monitor the producer for
+      clean-up purposes in case of crashes. The `subscription_ref` is
+      unique to identify the subscription (and may be the monitoring
+      reference). 
+
+      Once received, the producer MUST monitor the consumer. The producer
+      MUST initialize the `strategy` by calling `strategy.init(from, options)`.
+      If the producer already has a subscription, it MAY ignore future
+      subscriptions by sending a disconnect reply (defined in the Consumer
+      section) except for cases where the new subscription matches the
+      `subscription_ref`. In such cases, the producer MUST crash.
+
+    * `{:"$gen_producer", from :: {pid, subscription_ref}, {:connect, consumers :: [pid]}}` -
+      sent by the consumer (a broker) to producers to start new connections.
+
+      Once sent, the consumer MAY immediately send demand to the producer.
+      The `subscription_ref` is unique to identify the subscription.
+
+      Once received, the producer MUST call `strategy.connect(consumers, from, state)`
+      if one is available. If the `subscription_ref` is unknown, the
+      producer MUST send an appropriate disconnect reply to each consumer.
+
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_ref}, {:disconnect, reason}}` -
+      sent by the consumer to disconnect a given consumer-subscription pair.
+
+      Once received, the producer MAY call `strategy.disconnect(reason, from, state)`
+      if one is available. The strategy MUST send a disconnect message to the
+      consumer pid. If the `consumer_pid` refers to the process that started
+      the subscription, all connections MUST be disconnected. If the
+      consumer-subscription is unknown, a disconnect MUST still be sent with
+      proper reason. In all cases, however, there is no guarantee the message
+      will be delivered (for example, the producer may crash just before sending
+      the confirmation).
+
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_ref}, {:ask, count}}` -
+      sent by consumers to ask data from a producer for a given consumer-subscription pair.
+
+      Once received, the producer MUST call `strategy.ask(count, from, state)`
+      if one is available. The producer MUST send data up to the demand. If the
+      pair is unknown, the produder MUST send an appropriate disconnect reply.
 
   ### Consumer messages
 
-  TODO.
+  The consumer is responsible for starting the subscription
+  and sending demand to producers.
+
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, {:connect, producers :: [pid]}}` -
+      sent by producers to consumers to start new connections.
+
+      Once received, the consumer MAY immediately send demand to
+      the producer. The `subscription_ref` is unique to identify
+      the subscription. If the subscription is not known, a
+      disconnect message must be sent back to each producer.
+
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, {:disconnect, reason}}` -
+      sent by producers to disconnect a given producer-subscription pair.
+
+      It is used as a confirmation for client disconnects OR whenever
+      the producer wants to cancel some upstream demand. Reason may be
+      `:done`, `:halted` or `:unknown_subscription`.
+
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, [event]}` -
+      events sent by producers to consumers.
+
+      `subscription_ref` identifies the subscription. The third argument
+      is a non-empty list of events. If the subscription is unknown, the
+      events must be ignored.
 
   """
 
