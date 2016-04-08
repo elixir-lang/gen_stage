@@ -4,7 +4,7 @@ Coming soon.
 
 ## Installation
 
-GenBorker requires Erlang 18 and Elixir v1.2.
+GenBroker requires Erlang 18 and Elixir v1.2.
 
   1. Add `:gen_broker` to your list of dependencies in mix.exs:
 
