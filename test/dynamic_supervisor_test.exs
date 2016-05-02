@@ -213,6 +213,142 @@ defmodule DynamicSupervisorTest do
     assert_receive {:EXIT, ^pid, :shutdown}
   end
 
+  ## terminate/2
+
+  test "terminates children with brutal kill" do
+    Process.flag(:trap_exit, true)
+    children = [worker(Task, [], shutdown: :brutal_kill)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> :timer.sleep(:infinity) end
+    assert {:ok, child1} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child2} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child3} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child1)
+    Process.monitor(child2)
+    Process.monitor(child3)
+    assert_kill sup, :shutdown
+    assert_receive {:DOWN, _, :process, ^child1, :killed}
+    assert_receive {:DOWN, _, :process, ^child2, :killed}
+    assert_receive {:DOWN, _, :process, ^child3, :killed}
+  end
+
+  test "terminates children with infinity shutdown" do
+    Process.flag(:trap_exit, true)
+    children = [worker(Task, [], shutdown: :infinity)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> :timer.sleep(:infinity) end
+    assert {:ok, child1} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child2} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child3} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child1)
+    Process.monitor(child2)
+    Process.monitor(child3)
+    assert_kill sup, :shutdown
+    assert_receive {:DOWN, _, :process, ^child1, :shutdown}
+    assert_receive {:DOWN, _, :process, ^child2, :shutdown}
+    assert_receive {:DOWN, _, :process, ^child3, :shutdown}
+  end
+
+  test "terminates children with infinity shutdown and abnormal reason" do
+    Process.flag(:trap_exit, true)
+    children = [worker(Task, [], shutdown: :infinity)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> Process.flag(:trap_exit, true); receive(do: (_ -> exit({:shutdown, :oops}))) end
+    assert {:ok, child1} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child2} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child3} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child1)
+    Process.monitor(child2)
+    Process.monitor(child3)
+    assert_kill sup, :shutdown
+    assert_receive {:DOWN, _, :process, ^child1, {:shutdown, :oops}}
+    assert_receive {:DOWN, _, :process, ^child2, {:shutdown, :oops}}
+    assert_receive {:DOWN, _, :process, ^child3, {:shutdown, :oops}}
+  end
+
+  test "terminates children with integer shutdown" do
+    Process.flag(:trap_exit, true)
+    children = [worker(Task, [], shutdown: 1000)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> :timer.sleep(:infinity) end
+    assert {:ok, child1} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child2} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child3} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child1)
+    Process.monitor(child2)
+    Process.monitor(child3)
+    assert_kill sup, :shutdown
+    assert_receive {:DOWN, _, :process, ^child1, :shutdown}
+    assert_receive {:DOWN, _, :process, ^child2, :shutdown}
+    assert_receive {:DOWN, _, :process, ^child3, :shutdown}
+  end
+
+  test "terminates children with integer shutdown and abnormal reason" do
+    Process.flag(:trap_exit, true)
+    children = [worker(Task, [], shutdown: 1000)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> Process.flag(:trap_exit, true); receive(do: (_ -> exit({:shutdown, :oops}))) end
+    assert {:ok, child1} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child2} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child3} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child1)
+    Process.monitor(child2)
+    Process.monitor(child3)
+    assert_kill sup, :shutdown
+    assert_receive {:DOWN, _, :process, ^child1, {:shutdown, :oops}}
+    assert_receive {:DOWN, _, :process, ^child2, {:shutdown, :oops}}
+    assert_receive {:DOWN, _, :process, ^child3, {:shutdown, :oops}}
+  end
+
+  test "terminates children with expired integer shutdown" do
+    Process.flag(:trap_exit, true)
+    children = [worker(Task, [], shutdown: 0)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> :timer.sleep(:infinity) end
+    tmt = fn -> Process.flag(:trap_exit, true); :timer.sleep(:infinity) end
+    assert {:ok, child1} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child2} = DynamicSupervisor.start_child(sup, [tmt])
+    assert {:ok, child3} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child1)
+    Process.monitor(child2)
+    Process.monitor(child3)
+    assert_kill sup, :shutdown
+    assert_receive {:DOWN, _, :process, ^child1, :shutdown}
+    assert_receive {:DOWN, _, :process, ^child2, :killed}
+    assert_receive {:DOWN, _, :process, ^child3, :shutdown}
+  end
+
+  test "terminates children with permanent restart and normal reason" do
+    Process.flag(:trap_exit, true)
+    children = [worker(Task, [], shutdown: :infinity, restart: :permanent)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> Process.flag(:trap_exit, true); receive(do: (_ -> exit(:normal))) end
+    assert {:ok, child1} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child2} = DynamicSupervisor.start_child(sup, [fun])
+    assert {:ok, child3} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child1)
+    Process.monitor(child2)
+    Process.monitor(child3)
+    assert_kill sup, :shutdown
+    assert_receive {:DOWN, _, :process, ^child1, :normal}
+    assert_receive {:DOWN, _, :process, ^child2, :normal}
+    assert_receive {:DOWN, _, :process, ^child3, :normal}
+  end
+
   defp assert_kill(pid, reason) do
     ref = Process.monitor(pid)
     Process.exit(pid, reason)

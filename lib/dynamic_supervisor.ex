@@ -98,83 +98,33 @@ defmodule DynamicSupervisor do
       Stack.pop(stack) #=> :hello
 
   In practice though, it is unlikely we would use `children/1`.
-  When we are managing hundreds of thousands of processes, we want
-  more effective ways to access the children that belongs to a
-  supervisor. We have a couple options.
+  When we are managing thousands up to million of processes, we
+  must find more efficient ways to retrieve processes. We have a
+  couple options.
 
-  The first option is to use another restart m0ode for the worker.
-  For example:
+  The first option is to ask if we really want the stack to be
+  automatically restarted. If not, we can choose another restart
+  mode for the worker. For example:
 
       worker(Stack, [], restart: :temporary)
 
-  The :temporary option will tell the supervisor to not restart
-  the worker if it dies. Read the "Exit reasons" section later on
+  The `:temporary` option will tell the supervisor to not restart
+  the worker when it exits. Read the "Exit reasons" section later on
   for more information.
 
   The second option is to give a name when starting the Stack agent:
 
-      DynamicSupervisor.start_child(sup, [[:hello], [name: :my_stack]])
+      DynamicSupervisor.start_child(sup, [[:hello], [name: MyStack]])
 
   Now whenever that particular agent is started or restarted, it will
-  be registered with a `:my_stack` name which we can use when accessing
+  be registered with a `MyStack` name which we can use when accessing
   it:
 
-      Stack.pop(:my_stack)
+      Stack.pop(MyStack)
       #=> [:hello]
 
-  There are some limitations to this approach. First of all, locally
-  register names apply to the whole node. No other process in the same
-  node may be named `:my_stack`. Attempting to do so will cause an error:
-
-      DynamicSupervisor.start_child(sup, [[:hello], [name: :example]])
-      #=> {:ok, #PID<0.65.0>}
-      DynamicSupervisor.start_child(sup, [[:hello], [name: :example]])
-      #=> {:error, {:already_started, #PID<0.65.0>}}
-
-  Second of all, locally registered names are always atoms. This is an
-  issue when `DynamicSupervisor` is used to start children based on
-  external values. Luckily for us, a `DynamicSupervisor` can also be
-  used as a registry. Let's see an example next.
-
-  ## As a registry
-
-  Imagine you are building an application where every client gets their
-  own stack. We cannot use atoms as locally registed names for each client
-  because atoms are not garbage collected. Doing so means we would leak
-  memory or atoms until a system limit is reached.
-
-  To solve such needs, the `DynamicSupervisor` can be used as a registry
-  where an ID is given to every child. In order to enable the registry
-  feature, we need to give it a registry name when starting the supervisor.
-  In most cases, we name both the registry AND the dynamic supervisor
-  itself. Assuming we are using the same `children` as specified in the
-  previous section, let's start a dynamic supervisor with a registry:
-
-      opts = [strategy: :one_for_one, name: StackSup, registry: StackSup]
-      {:ok, _} = DynamicSupervisor.start_link(children, opts)
-
-  Because the supervisor is named, we no longer need its PID. Let's start
-  a new stack:
-
-      DynamicSupervisor.start_child(StackSup, "my stack", [[:hello]])
-
-  We got a new stack and gave it the string ID of "my stack". Now all we
-  need to do is to find the agent inside the supervisor registry:
-
-      location = {:via, DynamicSupervisor, {:id, StackSup, "my stack"}}
-      Stack.pop(location)
-      #=> :hello
-
-  And it works! The `:via` tuple tells the Agent to ask the
-  DynamicSupervisor for the location of the stack. The location itself
-  is represented by the tuple `{:id, StackSup, "my stack"}`, where the
-  `:id` is the type of lookup, `StackSup` is the name of the registry
-  and `"my stack"` is the ID itself. Now, if our stack crashes, a new
-  will be started under the same ID.
-
-  Using the supervisor as a registry allows us to name only the
-  supervisor itself and avoid naming all supervisor children while
-  still providing fast lookups.
+  And that's it. If the stack crashes, another stack will be up and
+  register itself with name `MyStack`.
 
   ## Module-based supervisors
 
@@ -273,10 +223,8 @@ defmodule DynamicSupervisor do
     end
   end
 
-  # TODO: Add max_demand / min_demand
-  # TODO: Add registry
-  # TODO: Add susbscription support
-  # TODO: Add sharding
+  # TODO: Add max_demand / min_demand (pull)
+  # TODO: Add max_children (push)
 
   @doc """
   Starts a supervisor with the given children.
@@ -519,7 +467,7 @@ defmodule DynamicSupervisor do
     %{children: children, template: child} = state
     {_, _, restart, shutdown, _, _} = child
 
-    {pids, stacks} = monitor_children(children)
+    {pids, stacks} = monitor_children(children, restart)
     size = map_size(pids)
 
     stacks =
@@ -543,12 +491,12 @@ defmodule DynamicSupervisor do
     :ok
   end
 
-  defp monitor_children(children) do
+  defp monitor_children(children, restart) do
     Enum.reduce children, {%{}, %{}}, fn {pid, _}, {pids, stacks} ->
       case monitor_child(pid) do
         :ok ->
           {Map.put(pids, pid, true), stacks}
-        {:error, :normal} ->
+        {:error, :normal} when restart != :permanent ->
           {pids, stacks}
         {:error, reason} ->
           {pids, Map.put(stacks, pid, reason)}
@@ -570,16 +518,17 @@ defmodule DynamicSupervisor do
     end
   end
 
-defp wait_children(_restart, _shutdown, _pids, 0, nil, stacks) do
+  defp wait_children(_restart, _shutdown, _pids, 0, nil, stacks) do
     stacks
   end
   defp wait_children(_restart, _shutdown, _pids, 0, timer, stacks) do
     _ = :erlang.cancel_timer(timer)
     receive do
-      :timedout -> stacks
+      {:timeout, ^timer, :kill} -> :ok
     after
-      0 -> stacks
+      0 -> :ok
     end
+    stacks
   end
   defp wait_children(restart, :brutal_kill, pids, size, timer, stacks) do
     receive do
@@ -593,8 +542,10 @@ defp wait_children(_restart, _shutdown, _pids, 0, nil, stacks) do
   end
   defp wait_children(restart, shutdown, pids, size, timer, stacks) do
     receive do
-      {:DOWN, _ref, :process, pid, reason} when
-          reason == :shutdown or (reason == :normal and restart != :permanent) ->
+      {:DOWN, _ref, :process, pid, :shutdown} ->
+        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer,
+                      stacks)
+      {:DOWN, _ref, :process, pid, :normal} when restart != :permanent ->
         wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer,
                       stacks)
       {:DOWN, _ref, :process, pid, reason} ->
