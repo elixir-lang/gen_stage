@@ -152,7 +152,7 @@ defmodule GenStage do
   in an internal buffer. If the message cannot be sent immediately,
   it is stored and sent whenever there is an opportunity to.
   The number of overflown events that can be buffered is customized
-  via the `:overflown_buffer_size` option returned by `init/1`.
+  via the `:max_overflow` option returned by `init/1`.
 
   By default, the overflown buffer size is 0, which means an error
   will be logged. This is by design as an overflown event in most
@@ -372,13 +372,13 @@ defmodule GenStage do
 
   ### :producer options
 
-    * `:overflown_buffer_size` - the size of the buffer to store overflown
+    * `:max_overflow` - the size of the buffer to store overflown
       events. Check the "Overflown events" section on the module
       documentation (defaults to 0)
 
   ### :producer_consumer options
 
-    * `:overflown_buffer_size` - the size of the buffer to store overflown
+    * `:max_overflow` - the size of the buffer to store overflown
       events. Check the "Overflown events" section on the module
       documentation (defaults to 0)
 
