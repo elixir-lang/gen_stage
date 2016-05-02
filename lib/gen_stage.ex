@@ -140,37 +140,6 @@ defmodule GenStage do
   50 seconds to be consumed by C, which will then request another
   batch of 50 items.
 
-  ## Dynamic events
-
-  In the example above, we have subscribed C to B and B to A,
-  sent the demand upstream and received the events downstream.
-  That's how we expect most data to flow in stages.
-
-  However, sometimes we may need to directly inject data into
-  a given stage. For example, in the example above, we may need
-  to do at some point:
-
-      GenStage.sync_notify(b, 42)
-
-  The call above would send a message to B which would eventually
-  be handled as an event and sent to C. However, once we start
-  supporting dynamic events, one important question arises:
-  what if we sent a message to B but C, its consumer, has not
-  yet sent any demand (i.e. it has not asked for any items)?
-
-  To handle such cases, all stages place dynamic events in an
-  internal buffer. If the message cannot be sent immediately,
-  it is stored and sent whenever there is an opportunity to.
-  The number of dynamic events that can be buffered is customized
-  via the `:dynamic_buffer_size` option returned by `init/1`.
-  The default value is of 100.
-
-  TODO: Is this a reasonable default? Whatever default we choose
-  needs to be reflected in the source code and docs below.
-
-  TODO: Discuss if the timeout is client-based, server-based
-  or both.
-
   ## Overflown events
 
   Sometimes, a producer may produce more events than downstream
@@ -400,12 +369,6 @@ defmodule GenStage do
 
   This callback may return options. Some options are specific to
   the stage type while others are shared across all types.
-
-  ### Shared options
-
-    * `:dynamic_buffer_size` - the size of the buffer to store dynamic
-      events. Check the "Dynamic events" section on the module
-      documentation (defaults to 100)
 
   ### :producer options
 
