@@ -288,7 +288,44 @@ defmodule DynamicSupervisor do
   """
   @spec start_child(Supervisor.supervisor, [term]) :: Supervisor.on_start_child
   def start_child(supervisor, args) when is_list(args) do
-    GenServer.call(supervisor, {:start_child, args})
+    call(supervisor, {:start_child, args})
+  end
+
+  @doc """
+  Terminates the given child pid.
+
+  If successful, the function returns `:ok`. If there is no
+  such pid, the function returns `{:error, :not_found}`.
+  """
+  @spec terminate_child(Supervisor.supervisor, pid) :: :ok | {:error, :not_found}
+  def terminate_child(supervisor, pid) when is_pid(pid) do
+    call(supervisor, {:terminate_child, pid})
+  end
+
+  @doc """
+  Returns a list with information about all children.
+
+  Note that calling this function when supervising a large number
+  of children under low memory conditions can cause an out of memory
+  exception.
+
+  This function returns a list of tuples containing:
+
+    * `id` - as defined in the child specification but is always
+      set to `:undefined` for dynamic supervisors
+
+    * `child` - the pid of the corresponding child process or the
+      atom `:restarting` if the process is about to be restarted
+
+    * `type` - `:worker` or `:supervisor` as defined in the child
+      specification
+
+    * `modules` - as defined in the child specification
+  """
+  @spec which_children(Supervisor.supervisor) ::
+        [{:undefined, pid | :restarting, Supervisor.Spec.worker, Supervisor.Spec.modules}]
+  def which_children(supervisor) do
+    call(supervisor, :which_children)
   end
 
   @doc """
@@ -312,7 +349,13 @@ defmodule DynamicSupervisor do
         %{specs: non_neg_integer, active: non_neg_integer,
           supervisors: non_neg_integer, workers: non_neg_integer}
   def count_children(supervisor) do
-    GenServer.call(supervisor, :count_children)
+    call(supervisor, :count_children)
+  end
+
+  @compile {:inline, call: 2}
+
+  defp call(supervisor, req) do
+    GenServer.call(supervisor, req, :infinity)
   end
 
   ## Callbacks
@@ -374,6 +417,23 @@ defmodule DynamicSupervisor do
   defp validate_seconds(_), do: {:error, "max_seconds must be an integer"}
 
   @doc false
+  def handle_call(:which_children, _from, state) do
+    %{children: children, template: child} = state
+    {_, _, _, _, type, mods} = child
+
+    reply =
+      for {pid, args} <- children do
+        maybe_pid =
+          case args do
+            {:restarting, _} -> :restarting
+            _ -> pid
+          end
+        {:undefined, maybe_pid, type, mods}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call(:count_children, _from, state) do
     %{children: children, template: child, restarting: restarting} = state
     {_, _, _, _, type, _} = child
@@ -389,6 +449,16 @@ defmodule DynamicSupervisor do
       end
 
     {:reply, reply, state}
+  end
+
+  def handle_call({:terminate_child, pid}, _from, %{children: children} = state) do
+    case children do
+      %{^pid => args} ->
+        :ok = terminate_children(%{pid => args}, state)
+        {:reply, :ok, delete_child(pid, state)}
+      %{} ->
+        {:reply, {:error, :not_found}, state}
+    end
   end
 
   def handle_call({:start_child, extra}, _from, state) do
@@ -431,6 +501,11 @@ defmodule DynamicSupervisor do
   defp exit_reason(:throw, value, stack),  do: {{:nocatch, value}, stack}
 
   @doc false
+  def handle_cast(_msg, state) do
+    {:noreply, state}
+  end
+
+  @doc false
   def handle_info({:EXIT, pid, reason}, state) do
     case maybe_restart_child(pid, reason, state) do
       {:ok, state} ->
@@ -445,13 +520,18 @@ defmodule DynamicSupervisor do
     state = %{state | restarting: restarting - 1}
 
     case children do
-      %{^pid => args} ->
+      %{^pid => restarting_args} ->
+        {:restarting, args} = restarting_args
+
         case restart_child(pid, args, child, state) do
           {:ok, state} ->
             {:noreply, state}
           {:shutdown, state} ->
             {:stop, :shutdown, state}
         end
+
+      # We may hit clause if we send $gen_restart and then
+      # someone calls terminate_child, removing the child.
       %{} ->
         {:noreply, state}
     end
@@ -463,9 +543,12 @@ defmodule DynamicSupervisor do
   end
 
   @doc false
-  def terminate(_, state) do
-    %{children: children, template: child} = state
-    {_, _, restart, shutdown, _, _} = child
+  def terminate(_, %{children: children} = state) do
+    :ok = terminate_children(children, state)
+  end
+
+  defp terminate_children(children, %{template: template} = state) do
+    {_, _, restart, shutdown, _, _} = template
 
     {pids, stacks} = monitor_children(children, restart)
     size = map_size(pids)
@@ -485,22 +568,25 @@ defmodule DynamicSupervisor do
       end
 
     for {pid, reason} <- stacks do
-      report_error(:shutdown_error, reason, pid, :undefined, child, state)
+      report_error(:shutdown_error, reason, pid, :undefined, template, state)
     end
 
     :ok
   end
 
   defp monitor_children(children, restart) do
-    Enum.reduce children, {%{}, %{}}, fn {pid, _}, {pids, stacks} ->
-      case monitor_child(pid) do
-        :ok ->
-          {Map.put(pids, pid, true), stacks}
-        {:error, :normal} when restart != :permanent ->
-          {pids, stacks}
-        {:error, reason} ->
-          {pids, Map.put(stacks, pid, reason)}
-      end
+    Enum.reduce children, {%{}, %{}}, fn
+      {_, {:restarting, _}}, {pids, stacks} ->
+        {pids, stacks}
+      {pid, _}, {pids, stacks} ->
+        case monitor_child(pid) do
+          :ok ->
+            {Map.put(pids, pid, true), stacks}
+          {:error, :normal} when restart != :permanent ->
+            {pids, stacks}
+          {:error, reason} ->
+            {pids, Map.put(stacks, pid, reason)}
+        end
     end
   end
 
@@ -638,7 +724,17 @@ defmodule DynamicSupervisor do
         {:ok, delete_child(current_pid, state)}
       {:error, reason} ->
         report_error(:start_error, reason, {:restarting, current_pid}, args, child, state)
-        {:try_again, update_in(state.restarting, &(&1 + 1))}
+        state = restart_child(current_pid, state)
+        {:try_again, update_in(state.restarting, & &1 + 1)}
+    end
+  end
+
+  defp restart_child(pid, %{children: children} = state) do
+    case children do
+      %{^pid => {:restarting, _}} ->
+        state
+      %{^pid => args} ->
+        %{state | children: Map.put(children, pid, {:restarting, args})}
     end
   end
 

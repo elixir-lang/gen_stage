@@ -150,24 +150,42 @@ defmodule DynamicSupervisorTest do
     children = [worker(__MODULE__, [:restart], restart: :permanent)]
     {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 100_000)
 
-    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok2])
-    assert_kill child, :shutdown
+    assert {:ok, child1} = DynamicSupervisor.start_child(pid, [:ok2])
+    assert [{:undefined, ^child1, :worker, [DynamicSupervisorTest]}] =
+           DynamicSupervisor.which_children(pid)
+    assert_kill child1, :shutdown
     assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(pid)
 
-    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ok3])
-    assert_kill child, :shutdown
+    assert {:ok, child2} = DynamicSupervisor.start_child(pid, [:ok3])
+    assert [{:undefined, _, :worker, [DynamicSupervisorTest]},
+            {:undefined, ^child2, :worker, [DynamicSupervisorTest]}] =
+           DynamicSupervisor.which_children(pid)
+    assert_kill child2, :shutdown
     assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(pid)
 
-    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:ignore])
-    assert_kill child, :shutdown
+    assert {:ok, child3} = DynamicSupervisor.start_child(pid, [:ignore])
+    assert [{:undefined, _, :worker, [DynamicSupervisorTest]},
+            {:undefined, _, :worker, [DynamicSupervisorTest]},
+            {:undefined, _, :worker, [DynamicSupervisorTest]}] =
+           DynamicSupervisor.which_children(pid)
+    assert_kill child3, :shutdown
     assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(pid)
 
-    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:error])
-    assert_kill child, :shutdown
+    assert {:ok, child4} = DynamicSupervisor.start_child(pid, [:error])
+    assert [{:undefined, _, :worker, [DynamicSupervisorTest]},
+            {:undefined, _, :worker, [DynamicSupervisorTest]},
+            {:undefined, _, :worker, [DynamicSupervisorTest]}] =
+            DynamicSupervisor.which_children(pid)
+    assert_kill child4, :shutdown
     assert %{workers: 3, active: 2} = DynamicSupervisor.count_children(pid)
 
-    assert {:ok, child} = DynamicSupervisor.start_child(pid, [:unknown])
-    assert_kill child, :shutdown
+    assert {:ok, child5} = DynamicSupervisor.start_child(pid, [:unknown])
+    assert [{:undefined, _, :worker, [DynamicSupervisorTest]},
+            {:undefined, _, :worker, [DynamicSupervisorTest]},
+            {:undefined, :restarting, :worker, [DynamicSupervisorTest]},
+            {:undefined, _, :worker, [DynamicSupervisorTest]}] =
+            DynamicSupervisor.which_children(pid)
+    assert_kill child5, :shutdown
     assert %{workers: 4, active: 2} = DynamicSupervisor.count_children(pid)
   end
 
@@ -347,6 +365,50 @@ defmodule DynamicSupervisorTest do
     assert_receive {:DOWN, _, :process, ^child1, :normal}
     assert_receive {:DOWN, _, :process, ^child2, :normal}
     assert_receive {:DOWN, _, :process, ^child3, :normal}
+  end
+
+  ## terminate_child/2
+
+  test "terminates child with brutal kill" do
+    children = [worker(Task, [], shutdown: :brutal_kill)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> :timer.sleep(:infinity) end
+    assert {:ok, child} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child)
+    assert :ok = DynamicSupervisor.terminate_child(sup, child)
+    assert_receive {:DOWN, _, :process, ^child, :killed}
+
+    assert {:error, :not_found} = DynamicSupervisor.terminate_child(sup, child)
+    assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(sup)
+  end
+
+  test "terminates child with integer shutdown" do
+    children = [worker(Task, [], shutdown: 1000)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
+
+    fun = fn -> :timer.sleep(:infinity) end
+    assert {:ok, child} = DynamicSupervisor.start_child(sup, [fun])
+
+    Process.monitor(child)
+    assert :ok = DynamicSupervisor.terminate_child(sup, child)
+    assert_receive {:DOWN, _, :process, ^child, :shutdown}
+
+    assert {:error, :not_found} = DynamicSupervisor.terminate_child(sup, child)
+    assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(sup)
+  end
+
+  test "terminates restarting child" do
+    children = [worker(__MODULE__, [:restart], restart: :permanent)]
+    {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 100_000)
+
+    assert {:ok, child} = DynamicSupervisor.start_child(sup, [:error])
+    assert_kill child, :shutdown
+    assert :ok = DynamicSupervisor.terminate_child(sup, child)
+
+    assert {:error, :not_found} = DynamicSupervisor.terminate_child(sup, child)
+    assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(sup)
   end
 
   defp assert_kill(pid, reason) do
