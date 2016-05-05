@@ -43,6 +43,51 @@ defmodule DynamicSupervisorTest do
            :proc_lib.translate_initial_call(pid)
   end
 
+  ## Code change
+
+  test "code_change/3 with non-ok init" do
+    worker = worker(Task, [:timer, :sleep, [:infinity]])
+    {:ok, pid} = DynamicSupervisor.start_link(Simple, {:ok, [worker], strategy: :one_for_one})
+
+    assert fake_upgrade(pid, {:ok, [], []}) ==
+           {:error, {:error, {:bad_specs, "dynamic supervisor expects a list with a single item as a template"}}}
+    assert fake_upgrade(pid, {:ok, [1, 2], []}) ==
+           {:error, {:error, {:bad_specs, "dynamic supervisor expects a list with a single item as a template"}}}
+    assert fake_upgrade(pid, {:ok, [worker], nil}) ==
+           {:error, {:error, {:bad_opts, "supervisor's init expects a keywords list as options"}}}
+    assert fake_upgrade(pid, {:ok, [worker], []}) ==
+           {:error, {:error, {:bad_opts, "supervisor expects a strategy to be given"}}}
+    assert fake_upgrade(pid, {:ok, [worker], [strategy: :unknown]}) ==
+           {:error, {:error, {:bad_opts, "unknown supervision strategy for dynamic supervisor"}}}
+    assert fake_upgrade(pid, :unknown) ==
+           {:error, :unknown}
+    assert fake_upgrade(pid, :ignore) ==
+           :ok
+  end
+
+  test "code_change/3 with ok init" do
+    worker = worker(Task, [:timer, :sleep, [:infinity]])
+    {:ok, pid} = DynamicSupervisor.start_link(Simple, {:ok, [worker], strategy: :one_for_one})
+
+    {:ok, _} = DynamicSupervisor.start_child(pid, [])
+    assert %{active: 1} = DynamicSupervisor.count_children(pid)
+
+    worker = worker(Task, [Kernel, :send], restart: :temporary)
+    assert fake_upgrade(pid, {:ok, [worker], [strategy: :one_for_one]}) == :ok
+    assert %{active: 1} = DynamicSupervisor.count_children(pid)
+
+    {:ok, _} = DynamicSupervisor.start_child(pid, [[self(), :sample]])
+    assert_receive :sample
+  end
+
+  defp fake_upgrade(pid, args) do
+    :ok = :sys.suspend(pid)
+    :sys.replace_state(pid, fn state -> %{state | args: args} end)
+    res = :sys.change_code(pid, :gen_server, 123, :extra)
+    :ok = :sys.resume(pid)
+    res
+  end
+
   ## start_child/2
 
   def start_link(:ok3),     do: {:ok, spawn_link(fn -> :timer.sleep(:infinity) end), :extra}

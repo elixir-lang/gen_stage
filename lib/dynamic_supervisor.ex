@@ -368,7 +368,8 @@ defmodule DynamicSupervisor do
       {:ok, children, opts} ->
         case validate_specs(children) do
           :ok ->
-            case init(name, mod, args, children, opts) do
+            state = %DynamicSupervisor{mod: mod, args: args, name: name || {self(), mod}}
+            case init(state, children, opts) do
               {:ok, state} -> {:ok, state}
               {:error, message} -> {:stop, {:bad_opts, message}}
             end
@@ -382,7 +383,7 @@ defmodule DynamicSupervisor do
     end
   end
 
-  defp init(name, mod, args, [child], opts) when is_list(opts) do
+  defp init(state, [child], opts) when is_list(opts) do
     strategy     = opts[:strategy]
     max_restarts = Keyword.get(opts, :max_restarts, 3)
     max_seconds  = Keyword.get(opts, :max_seconds, 5)
@@ -390,12 +391,11 @@ defmodule DynamicSupervisor do
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
          :ok <- validate_seconds(max_seconds) do
-      {:ok, %DynamicSupervisor{mod: mod, args: args, template: child,
-                               strategy: strategy, name: name || {self(), mod},
-                               max_restarts: max_restarts, max_seconds: max_seconds}}
+      {:ok, %{state | template: child, strategy: strategy,
+                      max_restarts: max_restarts, max_seconds: max_seconds}}
     end
   end
-  defp init(_name, _mod, _args, [_], _opts) do
+  defp init(_state, [_], _opts) do
     {:error, "supervisor's init expects a keywords list as options"}
   end
 
@@ -540,6 +540,26 @@ defmodule DynamicSupervisor do
   def handle_info(msg, state) do
     :error_logger.error_msg('Supervisor received unexpected message: ~p~n', [msg])
     {:noreply, state}
+  end
+
+  @doc false
+  def code_change(_, %{mod: mod, args: args} = state, _) do
+    case mod.init(args) do
+      {:ok, children, opts} ->
+        case validate_specs(children) do
+          :ok ->
+            case init(state, children, opts) do
+              {:ok, state} -> {:ok, state}
+              {:error, message} -> {:error, {:bad_opts, message}}
+            end
+          {:error, message} ->
+            {:error, {:bad_specs, message}}
+        end
+      :ignore ->
+        {:ok, state}
+      error ->
+        error
+    end
   end
 
   @doc false
