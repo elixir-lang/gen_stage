@@ -148,6 +148,11 @@ defmodule DynamicSupervisor do
         end
       end
 
+  **Note:** differently from `Supervisor`, the `DynamicSupervisor`
+  expects a 3-item tuple as result from `init/1` and it does not
+  use the `supervise/2` function. The goal is to standardize both
+  implementations in the long term.
+
   You may want to use a module-based supervisor if you need to
   perform some particular action on supervisor initialization,
   like setting up an ETS table.
@@ -203,10 +208,10 @@ defmodule DynamicSupervisor do
       is supported by dynamic supervisors.
 
     * `:max_restarts` - the maximum amount of restarts allowed in
-      a time frame. Defaults to 3.
+      a time frame. Defaults to 3 times.
 
-    * `:max_seconds` - the time frame in which `:max_restarts` applies.
-      Defaults to 5.
+    * `:max_seconds` - the time frame in which `:max_restarts` applies
+      in seconds. Defaults to 5 seconds.
 
   """
   @callback init(args :: term) ::
