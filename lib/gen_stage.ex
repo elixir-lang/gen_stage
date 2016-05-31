@@ -328,7 +328,11 @@ defmodule GenStage do
 
   """
 
+  # TODO: Explore termination (or batch/window termination)
+  # TODO: Explore filtering at the data source. It may be a subscribe option,
+  #       therefore GenBroker should likely raise for options it does not handle
   # TODO: Make handle_demand and handle_event optional
+  # TODO: Explore one_for_all (zip) and one_for_one (merge) demand
 
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer

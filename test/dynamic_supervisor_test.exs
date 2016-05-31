@@ -27,6 +27,16 @@ defmodule DynamicSupervisorTest do
            :ignore
   end
 
+  test "sets initial call to the same as a regular supervisor" do
+    {:ok, pid} = Supervisor.start_link([], strategy: :one_for_one)
+    assert :proc_lib.initial_call(pid) ==
+           {:supervisor, Supervisor.Default, [:Argument__1]}
+
+    {:ok, pid} = DynamicSupervisor.start_link([worker(Foo, [])], strategy: :one_for_one)
+    assert :proc_lib.initial_call(pid) ==
+           {:supervisor, Supervisor.Default, [:Argument__1]}
+  end
+
   test "start_link/3 with registered process" do
     spec = {:ok, [worker(Foo, [])], [strategy: :one_for_one]}
     {:ok, pid} = DynamicSupervisor.start_link(Simple, spec, name: __MODULE__)
