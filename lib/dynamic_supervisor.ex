@@ -780,4 +780,13 @@ defmodule DynamicSupervisor do
      shutdown: shutdown,
      child_type: type]
   end
+
+  def format_status(:terminate, [_pdict, state]) do
+    state
+  end
+
+  def format_status(_, [_pdict, %{mod: mod} = state]) do
+    [data: [{~c"State", state}],
+     supervisor: [{~c"Callback", mod}]]
+  end
 end

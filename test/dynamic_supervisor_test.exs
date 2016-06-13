@@ -37,6 +37,17 @@ defmodule DynamicSupervisorTest do
            {:supervisor, Supervisor.Default, [:Argument__1]}
   end
 
+  # TODO: Verify this on Erlang 19
+  if function_exported?(:supervisor, :get_callback_module, 1) do
+    test "returns the callback module" do
+      {:ok, pid} = Supervisor.start_link([], strategy: :one_for_one)
+      assert :supervisor.get_callback_module(pid) == Supervisor.Default
+
+      {:ok, pid} = DynamicSupervisor.start_link([worker(Foo, [])], strategy: :one_for_one)
+      assert :supervisor.get_callback_module(pid) == Supervisor.Default
+    end
+  end
+
   test "start_link/3 with registered process" do
     spec = {:ok, [worker(Foo, [])], [strategy: :one_for_one]}
     {:ok, pid} = DynamicSupervisor.start_link(Simple, spec, name: __MODULE__)
