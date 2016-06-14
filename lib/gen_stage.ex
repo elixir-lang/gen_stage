@@ -622,7 +622,7 @@ defmodule GenStage do
   end
 
   defp init_consumer(mod, opts, state) do
-    with {:ok, max_demand} <- validate_integer(opts, :max_demand, 100, 0, :infinity),
+    with {:ok, max_demand} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
          {:ok, min_demand} <- validate_integer(opts, :min_demand, div(max_demand, 2), 0, max_demand - 1) do
       {:ok, %GenStage{mod: mod, state: state, type: :consumer, demand: {min_demand, max_demand}}}
     else
@@ -689,7 +689,10 @@ defmodule GenStage do
         %{state: state, dispatcher: {dispatcher_mod, dispatcher_state}} = stage
         {:ok, counter, dispatcher_state} = dispatcher_mod.ask(counter, from, dispatcher_state)
         stage = %{stage | dispatcher: {dispatcher_mod, dispatcher_state}}
-        noreply_callback(:handle_demand, [counter, state], stage)
+        case counter do
+          0 -> {:noreply, stage}
+          _ when counter > 0 -> noreply_callback(:handle_demand, [counter, state], stage)
+        end
       %{} ->
         send(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}

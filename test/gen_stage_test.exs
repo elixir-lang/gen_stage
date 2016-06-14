@@ -1,7 +1,11 @@
 defmodule GenStageTest do
   use ExUnit.Case, async: true
 
-  defmodule Producer do
+  defmodule Counter do
+    @moduledoc """
+    A producer that works as a counter in batches.
+    """
+
     use GenStage
 
     def start_link(init, opts \\ []) do
@@ -20,8 +24,12 @@ defmodule GenStageTest do
     end
   end
 
-  defmodule Consumer do
+  defmodule Forwarder do
     use GenStage
+
+    @moduledoc """
+    A consumer that forwards messages to the given process.
+    """
 
     def start_link(init, opts \\ []) do
       GenStage.start_link(__MODULE__, init, opts)
@@ -37,16 +45,26 @@ defmodule GenStageTest do
     end
   end
 
-  describe "one-to-one demand handling between producer and consumer" do
+  describe "producer-to-consumer" do
     test "with default max and min demand" do
-      {:ok, producer} = Producer.start_link({:producer, 0})
-      {:ok, consumer} = Consumer.start_link({:consumer, self()})
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.sync_subscribe(consumer, to: producer)
 
       batch = Enum.to_list(0..99)
       assert_receive {:consumed, ^batch}
       batch = Enum.to_list(100..199)
       assert_receive {:consumed, ^batch}
+    end
+
+    test "with 1 max and 0 min demand" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 1, min_demand: 0})
+      :ok = GenStage.sync_subscribe(consumer, to: producer)
+
+      assert_receive {:consumed, [0]}
+      assert_receive {:consumed, [1]}
+      assert_receive {:consumed, [2]}
     end
   end
 
