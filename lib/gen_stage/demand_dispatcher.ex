@@ -7,6 +7,8 @@ defmodule GenStage.DemandDispatcher do
   have exactly the same maximum demand.
   """
 
+  @behaviour GenStage.Dispatcher
+
   @doc false
   def init(_opts) do
     {:ok, {[], nil}}
@@ -14,12 +16,12 @@ defmodule GenStage.DemandDispatcher do
 
   @doc false
   def subscribe({_, _ref}, state) do
-    {:ok, state}
+    {:ok, 0, state}
   end
 
   @doc false
   def cancel({_, ref}, {demands, max}) do
-    {:ok, {delete_demand(ref, demands), max}}
+    {:ok, 0, {delete_demand(ref, demands), max}}
   end
 
   @doc false

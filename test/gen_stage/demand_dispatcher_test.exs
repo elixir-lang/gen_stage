@@ -14,10 +14,10 @@ defmodule GenStage.DemandDispatcherTest do
     ref  = make_ref()
     disp = dispatcher([])
 
-    {:ok, disp} = D.subscribe({pid, ref}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref}, disp)
     assert disp == {[], nil}
 
-    {:ok, disp} = D.cancel({pid, ref}, disp)
+    {:ok, 0, disp} = D.cancel({pid, ref}, disp)
     assert disp == {[], nil}
   end
 
@@ -26,13 +26,13 @@ defmodule GenStage.DemandDispatcherTest do
     ref  = make_ref()
     disp = dispatcher([])
 
-    {:ok, disp} = D.subscribe({pid, ref}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref}, disp)
     assert disp == {[], nil}
 
     {:ok, 10, disp} = D.ask(10, {pid, ref}, disp)
     assert disp == {[{10, pid, ref}], 10}
 
-    {:ok, disp} = D.cancel({pid, ref}, disp)
+    {:ok, 0, disp} = D.cancel({pid, ref}, disp)
     assert disp == {[], 10}
   end
 
@@ -40,7 +40,7 @@ defmodule GenStage.DemandDispatcherTest do
     pid  = self()
     ref  = make_ref()
     disp = dispatcher([])
-    {:ok, disp} = D.subscribe({pid, ref}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref}, disp)
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
     assert disp == {[{3, pid, ref}], 3}
@@ -68,9 +68,9 @@ defmodule GenStage.DemandDispatcherTest do
     ref3 = make_ref()
     disp = dispatcher([])
 
-    {:ok, disp} = D.subscribe({pid, ref1}, disp)
-    {:ok, disp} = D.subscribe({pid, ref2}, disp)
-    {:ok, disp} = D.subscribe({pid, ref3}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref2}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref3}, disp)
 
     {:ok, 4, disp} = D.ask(4, {pid, ref1}, disp)
     {:ok, 2, disp} = D.ask(2, {pid, ref2}, disp)
@@ -90,8 +90,8 @@ defmodule GenStage.DemandDispatcherTest do
     ref2 = make_ref()
     disp = dispatcher([])
 
-    {:ok, disp} = D.subscribe({pid, ref1}, disp)
-    {:ok, disp} = D.subscribe({pid, ref2}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref2}, disp)
 
     {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
     {:ok, 2, disp} = D.ask(2, {pid, ref2}, disp)
@@ -133,12 +133,13 @@ defmodule GenStage.DemandDispatcherTest do
     ref2 = make_ref()
     disp = dispatcher([])
 
-    {:ok, disp} = D.subscribe({pid, ref1}, disp)
-    {:ok, disp} = D.subscribe({pid, ref2}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe({pid, ref2}, disp)
 
     assert capture_log(fn ->
       {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
       {:ok, 4, disp} = D.ask(4, {pid, ref2}, disp)
+      disp
     end) =~ "GenStage producer DemandDispatcher expects a maximum demand of 3"
   end
 end

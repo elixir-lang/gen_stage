@@ -13,16 +13,16 @@ defmodule GenStage.Dispatcher do
   Called every time the producer gets a new subscriber.
   """
   @callback subscribe(from :: {pid, reference}, state :: term) ::
-    {:ok, new_state} when new_state: term
+    {:ok, demand :: non_neg_integer, new_state} when new_state: term
 
   @doc """
-  Called every time a subscription is cancelled.
+  Called every time a subscription is cancelled or the consumer goes down.
 
-  It is guaranteed the reference given in `from` points to a
-  reference previously given in subscribe.
+  It is guaranteed the reference given in `from` points to a reference
+  previously given in subscribe.
   """
   @callback cancel(from :: {pid, reference}, state :: term) ::
-    {:ok, new_state} when new_state: term
+    {:ok, demand :: non_neg_integer, new_state} when new_state: term
 
   @doc """
   Called every time a consumer sends demand.

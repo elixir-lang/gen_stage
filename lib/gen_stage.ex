@@ -299,7 +299,8 @@ defmodule GenStage do
 
   """
 
-  defstruct [:mod, :state, :type, :demand, :dispatcher, producers: %{}, consumers: %{}]
+  defstruct [:mod, :state, :type, :demand, :dispatcher_mod, :dispatcher_state, :overflow,
+             monitors: %{}, producers: %{}, consumers: %{}]
 
   # TODO: Explore termination
   # TODO: Explore end-of-batch/end-of-window signaling
@@ -615,10 +616,10 @@ defmodule GenStage do
   end
 
   defp init_producer(mod, opts, state) do
-    {dispatcher, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
-    {:ok, dispatcher_state} = dispatcher.init(opts)
+    {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
+    {:ok, dispatcher_state} = dispatcher_mod.init(opts)
     {:ok, %GenStage{mod: mod, state: state, type: :producer,
-                    dispatcher: {dispatcher, dispatcher_state}}}
+                    dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
   end
 
   defp init_consumer(mod, opts, state) do
@@ -647,19 +648,18 @@ defmodule GenStage do
 
   @doc false
   def handle_call({:"$subscribe", to, opts}, _from, stage) do
-    {reply, stage} = stage_subscribe(to, opts, stage)
+    {reply, stage} = consumer_subscribe(to, opts, stage)
     {:reply, reply, stage}
   end
 
   @doc false
   def handle_cast({:"$subscribe", to, opts}, stage) do
-    {_reply, stage} = stage_subscribe(to, opts, stage)
+    {_reply, stage} = consumer_subscribe(to, opts, stage)
     {:noreply, stage}
   end
 
   # TODO: handle cast/call/info/code_change/terminate
-  # TODO: handle DOWN messages
-  # TODO: handle cancel
+  # TODO: handle DOWN and cancel messages
 
   ## Producer messages
 
@@ -669,16 +669,19 @@ defmodule GenStage do
     {:noreply, stage}
   end
 
-  def handle_info({:"$gen_producer", {consumer_pid, ref}, {:subscribe, _opts}} = msg,
+  def handle_info({:"$gen_producer", {consumer_pid, ref} = from, {:subscribe, _opts}},
                   %{consumers: consumers} = stage) do
     case consumers do
-      %{^ref => {_pid, _mon_ref}} ->
-        :error_logger.error_msg('GenStage producer received duplicated subscription: ~p~n', [msg])
+      %{^ref => _} ->
+        :error_logger.error_msg('GenStage producer received duplicated subscription from: ~p~n', [from])
         send(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}})
         {:noreply, stage}
       %{} ->
-        stage = put_in stage.consumers[ref], {consumer_pid, Process.monitor(consumer_pid)}
-        {:noreply, stage}
+        mon_ref = Process.monitor(consumer_pid)
+        stage = put_in stage.monitors[mon_ref], ref
+        stage = put_in stage.consumers[ref], consumer_pid
+        %{dispatcher_state: dispatcher_state} = stage
+        dispatcher_callback(:subscribe, [from, dispatcher_state], stage)
     end
   end
 
@@ -686,13 +689,8 @@ defmodule GenStage do
                   %{consumers: consumers} = stage) when is_integer(counter) do
     case consumers do
       %{^ref => _} ->
-        %{state: state, dispatcher: {dispatcher_mod, dispatcher_state}} = stage
-        {:ok, counter, dispatcher_state} = dispatcher_mod.ask(counter, from, dispatcher_state)
-        stage = %{stage | dispatcher: {dispatcher_mod, dispatcher_state}}
-        case counter do
-          0 -> {:noreply, stage}
-          _ when counter > 0 -> noreply_callback(:handle_demand, [counter, state], stage)
-        end
+        %{dispatcher_state: dispatcher_state} = stage
+        dispatcher_callback(:ask, [counter, from, dispatcher_state], stage)
       %{} ->
         send(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
@@ -710,10 +708,10 @@ defmodule GenStage do
                   %{producers: producers, state: state} = stage) when is_list(events) do
     case producers do
       %{^ref => entry} ->
-        case adjust_demand(ref, entry, events, stage) do
+        case consumer_receive(ref, entry, events, stage) do
           {events, 0, stage} ->
             noreply_callback(:handle_events, [events, from, state], stage)
-          {events, ask, stage} when ask > 0 ->
+          {events, ask, stage} when is_integer(ask) and ask > 0 ->
             return = noreply_callback(:handle_events, [events, from, state], stage)
             send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, ask}}
             return
@@ -726,22 +724,13 @@ defmodule GenStage do
 
   ## Helpers
 
-  defp adjust_demand(ref, {producer_id, persistent?, demand}, events, %{demand: {min, max}} = stage) do
-    {demand, events} = maybe_discard_events(ref, producer_id, demand, events)
-    new_demand = if demand <= min, do: max, else: demand
-    stage = put_in stage.producers[ref], {producer_id, persistent?, new_demand}
-    {events, new_demand - demand, stage}
-  end
-
-  defp maybe_discard_events(ref, producer_id, demand, events) do
-    remaining = demand - length(events)
-
-    if remaining < 0 do
-      :error_logger.error_msg('GenStage consumer has discarded ~p events in excess from: ~p~n',
-                              [abs(remaining), {producer_id, ref}])
-      {0, Enum.take(events, demand)}
-    else
-      {remaining, events}
+  defp dispatcher_callback(callback, args, %{dispatcher_mod: dispatcher_mod} = stage) do
+    case apply(dispatcher_mod, callback, args) do
+      {:ok, 0, dispatcher_state} ->
+        {:noreply, %{stage | dispatcher_state: dispatcher_state}}
+      {:ok, counter, dispatcher_state} when is_integer(counter) and counter > 0 ->
+        %{state: state} = stage = %{stage | dispatcher_state: dispatcher_state}
+        noreply_callback(:handle_demand, [counter, state], stage)
     end
   end
 
@@ -773,9 +762,10 @@ defmodule GenStage do
   defp dispatch_events(events, %{consumers: consumers} = stage) when map_size(consumers) == 0 do
     overflow_events(events, stage)
   end
-  defp dispatch_events(events, %{dispatcher: {dispatcher_mod, dispatcher_state}} = stage) do
+  defp dispatch_events(events, stage) do
+    %{dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} = stage
     {:ok, events, dispatcher_state} = dispatcher_mod.dispatch(events, dispatcher_state)
-    overflow_events(events, %{stage | dispatcher: {dispatcher_mod, dispatcher_state}})
+    overflow_events(events, %{stage | dispatcher_state: dispatcher_state})
   end
 
   # TODO: Support overflow
@@ -786,12 +776,31 @@ defmodule GenStage do
     stage
   end
 
-  defp stage_subscribe(to, _opts, %{type: :producer} = stage) do
+  defp consumer_receive(ref, {producer_id, persistent?, demand}, events, %{demand: {min, max}} = stage) do
+    {demand, events} = consumer_check_excess(ref, producer_id, demand, events)
+    new_demand = if demand <= min, do: max, else: demand
+    stage = put_in stage.producers[ref], {producer_id, persistent?, new_demand}
+    {events, new_demand - demand, stage}
+  end
+
+  defp consumer_check_excess(ref, producer_id, demand, events) do
+    remaining = demand - length(events)
+
+    if remaining < 0 do
+      :error_logger.error_msg('GenStage consumer has discarded ~p events in excess from: ~p~n',
+                              [abs(remaining), {producer_id, ref}])
+      {0, Enum.take(events, demand)}
+    else
+      {remaining, events}
+    end
+  end
+
+  defp consumer_subscribe(to, _opts, %{type: :producer} = stage) do
     :error_logger.error_msg('GenStage producer cannot be subscribed to another stage: ~p~n', [to])
     {{:error, :not_a_consumer}, stage}
   end
 
-  defp stage_subscribe(to, opts, %{demand: {_, max}} = stage) do
+  defp consumer_subscribe(to, opts, %{demand: {_, max}} = stage) do
     {persistent?, opts} = Keyword.pop(opts, :persistent, true)
 
     if producer_pid = GenServer.whereis(to) do
