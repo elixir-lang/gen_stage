@@ -66,7 +66,7 @@ defmodule GenStage.DemandDispatcher do
   defp split_events([event | events], max, counter, acc),
     do: split_events(events, max, counter + 1, [event | acc])
 
-  defp add_demand(counter, pid, ref, [{c, _, _} | _] = demands) when counter >= c,
+  defp add_demand(counter, pid, ref, [{c, _, _} | _] = demands) when counter > c,
     do: [{counter, pid, ref} | demands]
   defp add_demand(counter, pid, ref, [demand | demands]),
     do: [demand | add_demand(counter, pid, ref, demands)]
