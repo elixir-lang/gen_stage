@@ -86,7 +86,7 @@ defmodule GenStage do
           {:producer_consumer, number}
         end
 
-        def handle_events(events, number) do
+        def handle_events(events, from, number) do
           events = Enum.map(events, & &1 * number)
           {:noreply, events, number}
         end
@@ -102,7 +102,7 @@ defmodule GenStage do
           {:consumer, :the_state_does_not_matter}
         end
 
-        def handle_events(events, state) do
+        def handle_events(events, _from, state) do
           # Wait for a second.
           :timer.sleep(1000)
 
@@ -299,7 +299,7 @@ defmodule GenStage do
 
   """
 
-  defstruct [:mod, :state, :type, :demand, producers: %{}, consumers: %{}]
+  defstruct [:mod, :state, :type, :demand, :dispatcher, producers: %{}, consumers: %{}]
 
   # TODO: Explore termination
   # TODO: Explore end-of-batch/end-of-window signaling
@@ -614,8 +614,11 @@ defmodule GenStage do
     end
   end
 
-  defp init_producer(mod, _opts, state) do
-    {:ok, %GenStage{mod: mod, state: state, type: :producer}}
+  defp init_producer(mod, opts, state) do
+    {dispatcher, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
+    {:ok, dispatcher_state} = dispatcher.init(opts)
+    {:ok, %GenStage{mod: mod, state: state, type: :producer,
+                    dispatcher: {dispatcher, dispatcher_state}}}
   end
 
   defp init_consumer(mod, opts, state) do
@@ -654,6 +657,10 @@ defmodule GenStage do
     {:noreply, stage}
   end
 
+  # TODO: handle cast/call/info/code_change/terminate
+  # TODO: handle DOWN messages
+  # TODO: handle cancel
+
   ## Producer messages
 
   @doc false
@@ -675,10 +682,13 @@ defmodule GenStage do
     end
   end
 
-  def handle_info({:"$gen_producer", {consumer_pid, ref}, {:ask, counter}},
-                  %{consumers: consumers, state: state} = stage) when is_integer(counter) do
+  def handle_info({:"$gen_producer", {consumer_pid, ref} = from, {:ask, counter}},
+                  %{consumers: consumers} = stage) when is_integer(counter) do
     case consumers do
       %{^ref => _} ->
+        %{state: state, dispatcher: {dispatcher_mod, dispatcher_state}} = stage
+        {:ok, counter, dispatcher_state} = dispatcher_mod.ask(counter, from, dispatcher_state)
+        stage = %{stage | dispatcher: {dispatcher_mod, dispatcher_state}}
         noreply_callback(:handle_demand, [counter, state], stage)
       %{} ->
         send(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :unknown_subscription}})
@@ -711,6 +721,8 @@ defmodule GenStage do
     end
   end
 
+  ## Helpers
+
   defp adjust_demand(ref, {producer_id, persistent?, demand}, events, %{demand: {min, max}} = stage) do
     {demand, events} = maybe_discard_events(ref, producer_id, demand, events)
     new_demand = if demand <= min, do: max, else: demand
@@ -722,91 +734,13 @@ defmodule GenStage do
     remaining = demand - length(events)
 
     if remaining < 0 do
-      :error_logger.error_msg('GenStage consumer has received ~p more events than demanded from: ~p~n',
+      :error_logger.error_msg('GenStage consumer has discarded ~p events in excess from: ~p~n',
                               [abs(remaining), {producer_id, ref}])
       {0, Enum.take(events, demand)}
     else
       {remaining, events}
     end
   end
-
-  defmodule DemandDispatcher do
-    def init(_opts) do
-      {:ok, {%{}, nil}}
-    end
-
-    def subscribe({_, _ref}, state) do
-      {:ok, state}
-    end
-
-    def cancel({_, ref}, {demands, max}) do
-      {:ok, {delete_demand(ref, demands), max}}
-    end
-
-    def ask(counter, {pid, ref}, {demands, max}) do
-      max = max || counter
-
-      if counter > max do
-        :error_logger.error_msg('GenStage producer DemandDispatcher expects a maximum demand of ~p. ' ++
-                                'Using different maximum demands will overload greedy consumers. ' ++
-                                'Got demand for ~p events from ~p~n', [max, counter, pid])
-      end
-
-      {current, demands} = pop_demand(ref, demands)
-      demands = add_demand(current + counter, pid, ref, demands)
-      {:ok, counter, {demands, max}}
-    end
-
-    def dispatch(events, {demands, max}) do
-      {events, demands} = dispatch_demand(events, demands)
-      {:ok, events, {demands, max}}
-    end
-
-    defp dispatch_demand([], demands) do
-      {[], demands}
-    end
-
-    defp dispatch_demand(events, [{0, _, _} | _] = demands) do
-      {events, demands}
-    end
-
-    defp dispatch_demand(events, [{counter, pid, ref} | demands]) do
-      {deliver_now, deliver_later, deliver_count} =
-        split_events(events, counter, 0, [])
-      send(pid, {:"$gen_consumer", {self(), ref}, deliver_now})
-      demands = add_demand(counter - deliver_count, pid, ref, demands)
-      dispatch_demand(deliver_later, demands)
-    end
-
-    defp split_events(events, max, max, acc),
-      do: {Enum.reverse(acc), events, max}
-    defp split_events([], _max, counter, acc),
-      do: {Enum.reverse(acc), [], counter}
-    defp split_events([event | events], max, counter, acc),
-      do: split_events(events, max, counter + 1, [event | acc])
-
-    defp add_demand(counter, pid, ref, [{c, _, _} | _] = demands) when counter >= c,
-      do: [{counter, pid, ref} | demands]
-    defp add_demand(counter, pid, ref, [demand | demands]),
-      do: [demand | add_demand(counter, pid, ref, demands)]
-    defp add_demand(counter, pid, ref, []),
-      do: [{counter, pid, ref}]
-
-    defp pop_demand(ref, demands) do
-      case List.keytake(demands, ref, 2) do
-        {{current, _pid, ^ref}, rest} -> {current, rest}
-        nil -> {0, demands}
-      end
-    end
-
-    defp delete_demand(ref, demands) do
-      List.keydelete(demands, ref, 2)
-    end
-  end
-
-  # TODO: handle DOWN messages
-
-  ## Helpers
 
   defp noreply_callback(callback, args, %{mod: mod} = stage) do
     case apply(mod, callback, args) do
@@ -833,12 +767,19 @@ defmodule GenStage do
     :error_logger.error_msg('GenStage consumer cannot dispatch events (an empty list must be returned): ~p~n', [events])
     stage
   end
+  defp dispatch_events(events, %{consumers: consumers} = stage) when map_size(consumers) == 0 do
+    overflow_events(events, stage)
+  end
+  defp dispatch_events(events, %{dispatcher: {dispatcher_mod, dispatcher_state}} = stage) do
+    {:ok, events, dispatcher_state} = dispatcher_mod.dispatch(events, dispatcher_state)
+    overflow_events(events, %{stage | dispatcher: {dispatcher_mod, dispatcher_state}})
+  end
+
   # TODO: Support overflow
-  # TODO: what happens if there are no consumers (i.e. they were removed because of a crash)
-  defp dispatch_events(events, %{consumers: consumers} = stage) do
-    for {ref, {pid, _}} <- consumers do
-      send(pid, {:"$gen_consumer", {self(), ref}, events})
-    end
+  defp overflow_events([], stage) do
+    stage
+  end
+  defp overflow_events(_events, stage) do
     stage
   end
 
