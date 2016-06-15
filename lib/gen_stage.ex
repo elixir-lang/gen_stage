@@ -730,6 +730,7 @@ defmodule GenStage do
         {:noreply, %{stage | dispatcher_state: dispatcher_state}}
       {:ok, counter, dispatcher_state} when is_integer(counter) and counter > 0 ->
         %{state: state} = stage = %{stage | dispatcher_state: dispatcher_state}
+        # TODO: support producer_consumer
         noreply_callback(:handle_demand, [counter, state], stage)
     end
   end

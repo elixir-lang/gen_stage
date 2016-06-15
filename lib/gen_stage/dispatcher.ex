@@ -55,6 +55,6 @@ defmodule GenStage.Dispatcher do
   It is guaranteed the reference given in `from` points to a
   reference previously given in subscribe.
   """
-  @callback dispatch(events :: nonempty_list(term), from :: {pid, reference}, state :: term) ::
+  @callback dispatch(events :: nonempty_list(term), state :: term) ::
     {:ok, leftover_events :: [term], new_state} when new_state: term
 end

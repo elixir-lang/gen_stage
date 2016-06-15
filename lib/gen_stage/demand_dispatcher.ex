@@ -54,25 +54,25 @@ defmodule GenStage.DemandDispatcher do
   end
 
   defp dispatch_demand(events, [{counter, pid, ref} | demands]) do
-    {deliver_now, deliver_later, deliver_count} =
-      split_events(events, counter, 0, [])
+    {deliver_now, deliver_later, counter} =
+      split_events(events, counter, [])
     send(pid, {:"$gen_consumer", {self(), ref}, deliver_now})
-    demands = add_demand(counter - deliver_count, pid, ref, demands)
+    demands = add_demand(counter, pid, ref, demands)
     dispatch_demand(deliver_later, demands)
   end
 
-  defp split_events(events, max, max, acc),
-    do: {Enum.reverse(acc), events, max}
-  defp split_events([], _max, counter, acc),
+  defp split_events(events, 0, acc),
+    do: {Enum.reverse(acc), events, 0}
+  defp split_events([], counter, acc),
     do: {Enum.reverse(acc), [], counter}
-  defp split_events([event | events], max, counter, acc),
-    do: split_events(events, max, counter + 1, [event | acc])
+  defp split_events([event | events], counter, acc),
+    do: split_events(events, counter - 1, [event | acc])
 
   defp add_demand(counter, pid, ref, [{c, _, _} | _] = demands) when counter > c,
     do: [{counter, pid, ref} | demands]
   defp add_demand(counter, pid, ref, [demand | demands]),
     do: [demand | add_demand(counter, pid, ref, demands)]
-  defp add_demand(counter, pid, ref, []),
+  defp add_demand(counter, pid, ref, []) when is_integer(counter),
     do: [{counter, pid, ref}]
 
   defp pop_demand(ref, demands) do

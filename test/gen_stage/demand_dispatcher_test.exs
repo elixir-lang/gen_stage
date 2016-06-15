@@ -127,7 +127,7 @@ defmodule GenStage.DemandDispatcherTest do
     assert_received {:"$gen_consumer", {_, ^ref2}, [:f]}
   end
 
-  test "warns with demand mismatch" do
+  test "warns on demand mismatch" do
     pid  = self()
     ref1 = make_ref()
     ref2 = make_ref()
