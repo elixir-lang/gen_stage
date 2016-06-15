@@ -18,8 +18,8 @@ defmodule GenStage.BroadcastDispatcher do
 
   @doc false
   def cancel({_, ref}, {demands, waiting}) do
-    # Since we may have actually removed the process we were
-    # waiting on, cancellation may actually generate demand!
+    # Since we may have removed the process we were waiting on,
+    # cancellation may actually generate demand!
     demands = delete_demand(ref, demands)
     new_min = get_min(demands)
     demands = adjust_demand(new_min, demands)
