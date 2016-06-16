@@ -1,6 +1,8 @@
 defmodule GenStageTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   defmodule Counter do
     @moduledoc """
     A producer that works as a counter in batches.
@@ -12,8 +14,30 @@ defmodule GenStageTest do
       GenStage.start_link(__MODULE__, init, opts)
     end
 
+    def sync_queue(stage, events) do
+      GenStage.call(stage, {:queue, events})
+    end
+
+    def async_queue(stage, events) do
+      GenStage.cast(stage, {:queue, events})
+    end
+
+    ## Callbacks
+
     def init(init) do
       init
+    end
+
+    def handle_call({:queue, events}, _from, state) do
+      {:reply, state, events, state}
+    end
+
+    def handle_cast({:queue, events}, state) do
+      {:noreply, events, state}
+    end
+
+    def handle_info({:queue, events}, state) do
+      {:noreply, events, state}
     end
 
     def handle_demand(demand, counter) when demand > 0 do
@@ -25,11 +49,15 @@ defmodule GenStageTest do
   end
 
   defmodule Forwarder do
-    use GenStage
-
     @moduledoc """
     A consumer that forwards messages to the given process.
     """
+
+    use GenStage
+
+    def start(init, opts \\ []) do
+      GenStage.start(__MODULE__, init, opts)
+    end
 
     def start_link(init, opts \\ []) do
       GenStage.start_link(__MODULE__, init, opts)
@@ -45,7 +73,7 @@ defmodule GenStageTest do
     end
   end
 
-  describe "producer-to-consumer" do
+  describe "producer-to-consumer demand" do
     test "with default max and min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
@@ -68,15 +96,69 @@ defmodule GenStageTest do
     end
   end
 
-  # describe "producer" do
-  #   test "init/1" do
-  #     Sample.start_link({:producer, []})
-  #   end
-  # end
+  describe "overflow" do
+    test "buffers events when there is no demand" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      send producer, {:queue, [:a, :b, :c]}
+      Counter.async_queue(producer, [:d, :e])
 
-  # describe "consumer" do
-  #   test "init/1" do
-  #     Sample.start_link({:consumer, []})
-  #   end
-  # end
+      {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
+      :ok = GenStage.sync_subscribe(consumer, to: producer)
+
+      assert_receive {:consumed, [:a, :b, :c, :d]}
+      assert_receive {:consumed, [:e]}
+      assert_receive {:consumed, [0, 1, 2]}
+      assert_receive {:consumed, [3, 4, 5, 6]}
+    end
+
+    test "emits warning when it exceeds configured limit" do
+      {:ok, producer} = Counter.start_link({:producer, 0, max_overflow: 5})
+      0 = Counter.sync_queue(producer, [:a, :b, :c, :d, :e])
+      assert capture_log(fn ->
+        0 = Counter.sync_queue(producer, [:f, :g, :h])
+      end) =~ "GenStage producer has discarded 3 overflown events"
+    end
+  end
+
+  describe "producer callbacks" do
+    test "init/1", context do
+      Process.flag(:trap_exit, true)
+      assert Counter.start_link(:ignore) == :ignore
+
+      assert Counter.start_link({:stop, :oops}) == {:error, :oops}
+      assert_receive {:EXIT, _, :oops}
+      assert Counter.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
+      assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
+
+      assert Counter.start_link({:producer, 0, max_overflow: -1}) ==
+             {:error, {:bad_opts, "expected :max_overflow to be equal to or greater than 0"}}
+
+      assert {:ok, pid} =
+             Counter.start_link({:producer, 0}, name: context.test)
+      assert {:error, {:already_started, ^pid}} =
+             Counter.start_link({:producer, 0}, name: context.test)
+    end
+  end
+
+  describe "consumer callbacks" do
+    test "init/1", context do
+      Process.flag(:trap_exit, true)
+      assert Forwarder.start_link(:ignore) == :ignore
+
+      assert Forwarder.start_link({:stop, :oops}) == {:error, :oops}
+      assert_receive {:EXIT, _, :oops}
+      assert Forwarder.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
+      assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
+
+      assert Forwarder.start_link({:consumer, 0, min_demand: 200}) ==
+             {:error, {:bad_opts, "expected :min_demand to be equal to or less than 99"}}
+      assert Forwarder.start_link({:consumer, 0, max_demand: 0}) ==
+             {:error, {:bad_opts, "expected :max_demand to be equal to or greater than 1"}}
+
+      assert {:ok, pid} =
+             Forwarder.start_link({:consumer, self()}, name: context.test)
+      assert {:error, {:already_started, ^pid}} =
+             Forwarder.start_link({:consumer, self()}, name: context.test)
+    end
+  end
 end

@@ -376,8 +376,6 @@ defmodule GenStage do
   @callback init(args :: term) ::
     {type, state} |
     {type, state, options} |
-    {type, state, timeout | :hibernate} |
-    {type, state, timeout | :hibernate, options} |
     :ignore |
     {:stop, reason :: any} when state: any
 
@@ -562,7 +560,7 @@ defmodule GenStage do
       Keyword.pop_lazy(opts, :to, fn ->
         raise ArgumentError, "expected :to argument in subscribe"
       end)
-    GenServer.call(stage, {:"$subscribe", to, opts}, timeout)
+    call(stage, {:"$subscribe", to, opts}, timeout)
   end
 
   @doc """
@@ -596,7 +594,52 @@ defmodule GenStage do
       Keyword.pop_lazy(opts, :to, fn ->
         raise ArgumentError, "expected :to argument in subscribe"
       end)
-    GenServer.cast(stage, {:"$subscribe", to, opts})
+    cast(stage, {:"$subscribe", to, opts})
+  end
+
+  @doc """
+  Makes a synchronous call to the `stage` and waits for its reply.
+
+  The client sends the given `request` to the server and waits until a reply
+  arrives or a timeout occurs. `handle_call/3` will be called on the stage
+  to handle the request.
+
+  `stage` can be any of the values described in the "Name registration"
+  section of the documentation for this module.
+
+  ## Timeouts
+
+  `timeout` is an integer greater than zero which specifies how many
+  milliseconds to wait for a reply, or the atom `:infinity` to wait
+  indefinitely. The default value is `5000`. If no reply is received within
+  the specified time, the function call fails and the caller exits. If the
+  caller catches the failure and continues running, and the stage is just late
+  with the reply, it may arrive at any time later into the caller's message
+  queue. The caller must in this case be prepared for this and discard any such
+  garbage messages that are two-element tuples with a reference as the first
+  element.
+  """
+  @spec call(stage, term, timeout) :: term
+  def call(stage, request, timeout \\ 5000) do
+    GenServer.call(stage, request, timeout)
+  end
+
+  @doc """
+  Sends an asynchronous request to the `stage`.
+
+  This function always returns `:ok` regardless of whether
+  the destination `stage` (or node) exists. Therefore it
+  is unknown whether the destination `stage` successfully
+  handled the message.
+
+  `handle_cast/2` will be called on the stage to handle
+  the request. In case the `stage` is on a node which is
+  not yet connected to the caller one, the call is going to
+  block until a connection happens.
+  """
+  @spec cast(stage, term) :: :ok
+  def cast(stage, request) do
+    GenServer.cast(stage, request)
   end
 
   @doc """
@@ -663,11 +706,14 @@ defmodule GenStage do
   end
 
   defp init_producer(mod, opts, state) do
-    {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
-    {max_overflow, opts} = Keyword.pop(opts, :max_overflow, 1000)
-    {:ok, dispatcher_state} = dispatcher_mod.init(opts)
-    {:ok, %GenStage{mod: mod, state: state, type: :producer, overflow: {:queue.new, 0, max_overflow},
-                    dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
+    with {:ok, max_overflow} <- validate_integer(opts, :max_overflow, 1000, 0, :infinity) do
+      {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
+      {:ok, dispatcher_state} = dispatcher_mod.init(opts)
+      {:ok, %GenStage{mod: mod, state: state, type: :producer, overflow: {:queue.new, 0, max_overflow},
+                      dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
+    else
+      {:error, message} -> {:stop, {:bad_opts, message}}
+    end
   end
 
   defp init_consumer(mod, opts, state) do
@@ -897,7 +943,7 @@ defmodule GenStage do
     {Enum.reverse(events), queue}
   end
   defp take_from_queue(counter, events, queue) do
-    {val, queue} = :queue.out(queue)
+    {{:value, val}, queue} = :queue.out(queue)
     take_from_queue(counter - 1, [val | events], queue)
   end
 
