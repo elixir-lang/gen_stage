@@ -141,7 +141,7 @@ defmodule GenStage do
   50 seconds to be consumed by C, which will then request another
   batch of 50 items.
 
-  ## Overflown events
+  ## Buffer events
 
   Due to the concurrent nature of Elixir software, sometimes
   a producer may receive events without consumers to send those
@@ -150,9 +150,9 @@ defmodule GenStage do
   the demand upstreams. Now, if the consumer C crashes, B may
   receive the events from upstream but it no longer has a consumer
   to send those events to. In such cases, B will buffer the events
-  which have overflown from upstream.
+  which have arrived from upstream.
 
-  The overflow buffer can also be used in cases external sources
+  The buffer buffer can also be used in cases external sources
   only send events in batches larger than asked for. For example,
   if you are receiving events from an external source that only
   sends events in batches of 100 in 100 and the internal demand
@@ -160,9 +160,8 @@ defmodule GenStage do
 
   In all of those cases, if the message cannot be sent immediately,
   it is stored and sent whenever there is an opportunity to. The
-  number of overflown events that can be buffered is customized
-  via the `:max_overflow` option returned by `init/1`. The default
-  value is 1000.
+  size of the buffer is configured via the `:buffer_size` option
+  returned by `init/1`. The default value is 1000.
 
   ## Streams
 
@@ -301,7 +300,7 @@ defmodule GenStage do
 
   """
 
-  defstruct [:mod, :state, :type, :demand, :dispatcher_mod, :dispatcher_state, :overflow,
+  defstruct [:mod, :state, :type, :demand, :dispatcher_mod, :dispatcher_state, :buffer,
              monitors: %{}, producers: %{}, consumers: %{}]
 
   # TODO: Explore termination
@@ -349,19 +348,11 @@ defmodule GenStage do
   This callback may return options. Some options are specific to
   the stage type while others are shared across all types.
 
-  ### :producer options
+  ### :producer and :producer_consumer options
 
-    * `:max_overflow` - the size of the buffer to store overflown
-      events. Check the "Overflown events" section on the module
-      documentation (defaults to 1000)
-    * `:dispatcher` - the dispatcher responsible for handling demands.
-      Defaults to `GenStage.DemandDispatch`.
-
-  ### :producer_consumer options
-
-    * `:max_overflow` - the size of the buffer to store overflown
-      events. Check the "Overflown events" section on the module
-      documentation (defaults to 1000)
+    * `:buffer_size` - the size of the buffer to store events
+      without demand. Check the "Buffer events" section on the
+      module documentation (defaults to 1000)
     * `:dispatcher` - the dispatcher responsible for handling demands.
       Defaults to `GenStage.DemandDispatch`.
 
@@ -396,7 +387,8 @@ defmodule GenStage do
     {:stop, reason, new_state} when new_state: term, reason: term, event: term
 
   @doc """
-  The reply is sent after the events are dispatched.
+  The reply is sent after the events are dispatched or buffered
+  (in case there is no demand).
 
   In case you want to deliver the reply before the events, use `GenStage.reply/2`
   and return `{:noreply, [event], state}`.
@@ -706,10 +698,10 @@ defmodule GenStage do
   end
 
   defp init_producer(mod, opts, state) do
-    with {:ok, max_overflow} <- validate_integer(opts, :max_overflow, 1000, 0, :infinity) do
+    with {:ok, buffer_size} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity) do
       {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
       {:ok, dispatcher_state} = dispatcher_mod.init(opts)
-      {:ok, %GenStage{mod: mod, state: state, type: :producer, overflow: {:queue.new, 0, max_overflow},
+      {:ok, %GenStage{mod: mod, state: state, type: :producer, buffer: {:queue.new, 0, buffer_size},
                       dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
@@ -881,7 +873,7 @@ defmodule GenStage do
     {:ok, counter, dispatcher_state} = apply(dispatcher_mod, callback, args)
     stage = %{stage | dispatcher_state: dispatcher_state}
 
-    case overflow_demand(counter, stage) do
+    case buffer_demand(counter, stage) do
       {:ok, 0, stage} ->
         {:noreply, stage}
       {:ok, counter, %{state: state} = stage} when is_integer(counter) and counter > 0 ->
@@ -920,22 +912,22 @@ defmodule GenStage do
     stage
   end
   defp dispatch_events(events, %{consumers: consumers} = stage) when map_size(consumers) == 0 do
-    overflow_events(events, stage)
+    buffer_events(events, stage)
   end
   defp dispatch_events(events, stage) do
     %{dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} = stage
     {:ok, events, dispatcher_state} = dispatcher_mod.dispatch(events, dispatcher_state)
-    overflow_events(events, %{stage | dispatcher_state: dispatcher_state})
+    buffer_events(events, %{stage | dispatcher_state: dispatcher_state})
   end
 
-  defp overflow_demand(counter, %{overflow: {queue, overflow, max}} = stage) do
-    case min(counter, overflow) do
+  defp buffer_demand(counter, %{buffer: {queue, buffer, max}} = stage) do
+    case min(counter, buffer) do
       0 ->
         {:ok, counter, stage}
       allowed ->
         {events, queue} = take_from_queue(allowed, [], queue)
         stage = dispatch_events(events, stage)
-        {:ok, counter - allowed, %{stage | overflow: {queue, overflow - allowed, max}}}
+        {:ok, counter - allowed, %{stage | buffer: {queue, buffer - allowed, max}}}
     end
   end
 
@@ -947,20 +939,20 @@ defmodule GenStage do
     take_from_queue(counter - 1, [val | events], queue)
   end
 
-  defp overflow_events([], stage) do
+  defp buffer_events([], stage) do
     stage
   end
-  defp overflow_events(events, %{overflow: {queue, counter, max}} = stage) do
+  defp buffer_events(events, %{buffer: {queue, counter, max}} = stage) do
     {events, queue, counter} = queue_events(events, queue, counter, max)
 
     case length(events) do
       0 ->
         :ok
-      overflown ->
-        :error_logger.error_msg('GenStage producer has discarded ~p overflown events', [overflown])
+      excess ->
+        :error_logger.error_msg('GenStage producer has discarded ~p events from buffer', [excess])
     end
 
-    %{stage | overflow: {queue, counter, max}}
+    %{stage | buffer: {queue, counter, max}}
   end
 
   defp queue_events(events, queue, max, max),

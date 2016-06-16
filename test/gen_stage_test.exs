@@ -96,8 +96,8 @@ defmodule GenStageTest do
     end
   end
 
-  describe "overflow" do
-    test "buffers events when there is no demand" do
+  describe "buffer" do
+    test "stores events when there is no demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       send producer, {:queue, [:a, :b, :c]}
       Counter.async_queue(producer, [:d, :e])
@@ -111,12 +111,12 @@ defmodule GenStageTest do
       assert_receive {:consumed, [3, 4, 5, 6]}
     end
 
-    test "emits warning when it exceeds configured limit" do
-      {:ok, producer} = Counter.start_link({:producer, 0, max_overflow: 5})
+    test "emits warning when it exceeds configured size" do
+      {:ok, producer} = Counter.start_link({:producer, 0, buffer_size: 5})
       0 = Counter.sync_queue(producer, [:a, :b, :c, :d, :e])
       assert capture_log(fn ->
         0 = Counter.sync_queue(producer, [:f, :g, :h])
-      end) =~ "GenStage producer has discarded 3 overflown events"
+      end) =~ "GenStage producer has discarded 3 events from buffer"
     end
   end
 
@@ -130,8 +130,8 @@ defmodule GenStageTest do
       assert Counter.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
       assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
 
-      assert Counter.start_link({:producer, 0, max_overflow: -1}) ==
-             {:error, {:bad_opts, "expected :max_overflow to be equal to or greater than 0"}}
+      assert Counter.start_link({:producer, 0, buffer_size: -1}) ==
+             {:error, {:bad_opts, "expected :buffer_size to be equal to or greater than 0"}}
 
       assert {:ok, pid} =
              Counter.start_link({:producer, 0}, name: context.test)
