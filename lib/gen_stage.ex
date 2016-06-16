@@ -664,8 +664,9 @@ defmodule GenStage do
 
   defp init_producer(mod, opts, state) do
     {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
+    {max_overflow, opts} = Keyword.pop(opts, :max_overflow, 1000)
     {:ok, dispatcher_state} = dispatcher_mod.init(opts)
-    {:ok, %GenStage{mod: mod, state: state, type: :producer,
+    {:ok, %GenStage{mod: mod, state: state, type: :producer, overflow: {:queue.new, 0, max_overflow},
                     dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
   end
 
@@ -831,11 +832,13 @@ defmodule GenStage do
   ## Helpers
 
   defp dispatcher_callback(callback, args, %{dispatcher_mod: dispatcher_mod} = stage) do
-    case apply(dispatcher_mod, callback, args) do
-      {:ok, 0, dispatcher_state} ->
-        {:noreply, %{stage | dispatcher_state: dispatcher_state}}
-      {:ok, counter, dispatcher_state} when is_integer(counter) and counter > 0 ->
-        %{state: state} = stage = %{stage | dispatcher_state: dispatcher_state}
+    {:ok, counter, dispatcher_state} = apply(dispatcher_mod, callback, args)
+    stage = %{stage | dispatcher_state: dispatcher_state}
+
+    case overflow_demand(counter, stage) do
+      {:ok, 0, stage} ->
+        {:noreply, stage}
+      {:ok, counter, %{state: state} = stage} when is_integer(counter) and counter > 0 ->
         # TODO: support producer_consumer
         noreply_callback(:handle_demand, [counter, state], stage)
     end
@@ -879,13 +882,47 @@ defmodule GenStage do
     overflow_events(events, %{stage | dispatcher_state: dispatcher_state})
   end
 
-  # TODO: Support overflow
+  defp overflow_demand(counter, %{overflow: {queue, overflow, max}} = stage) do
+    case min(counter, overflow) do
+      0 ->
+        {:ok, counter, stage}
+      allowed ->
+        {events, queue} = take_from_queue(allowed, [], queue)
+        stage = dispatch_events(events, stage)
+        {:ok, counter - allowed, %{stage | overflow: {queue, overflow - allowed, max}}}
+    end
+  end
+
+  defp take_from_queue(0, events, queue) do
+    {Enum.reverse(events), queue}
+  end
+  defp take_from_queue(counter, events, queue) do
+    {val, queue} = :queue.out(queue)
+    take_from_queue(counter - 1, [val | events], queue)
+  end
+
   defp overflow_events([], stage) do
     stage
   end
-  defp overflow_events(_events, stage) do
-    stage
+  defp overflow_events(events, %{overflow: {queue, counter, max}} = stage) do
+    {events, queue, counter} = queue_events(events, queue, counter, max)
+
+    case length(events) do
+      0 ->
+        :ok
+      overflown ->
+        :error_logger.error_msg('GenStage producer has discarded ~p overflown events', [overflown])
+    end
+
+    %{stage | overflow: {queue, counter, max}}
   end
+
+  defp queue_events(events, queue, max, max),
+    do: {events, queue, max}
+  defp queue_events([], queue, counter, _max),
+    do: {[], queue, counter}
+  defp queue_events([event | events], queue, counter, max),
+    do: queue_events(events, :queue.in(event, queue), counter + 1, max)
 
   defp consumer_receive(ref, {producer_id, persistent?, demand}, events, %{demand: {min, max}} = stage) do
     {demand, events} = consumer_check_excess(ref, producer_id, demand, events)
