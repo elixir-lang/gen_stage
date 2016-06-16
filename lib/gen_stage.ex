@@ -353,8 +353,10 @@ defmodule GenStage do
     * `:buffer_size` - the size of the buffer to store events
       without demand. Check the "Buffer events" section on the
       module documentation (defaults to 1000)
+    * `:buffer_keep` - returns if the `:first` or `:last` entries
+      should be kept on the buffer in case we exceed the buffer size
     * `:dispatcher` - the dispatcher responsible for handling demands.
-      Defaults to `GenStage.DemandDispatch`.
+      Defaults to `GenStage.DemandDispatch`
 
   ### :consumer options
 
@@ -698,10 +700,12 @@ defmodule GenStage do
   end
 
   defp init_producer(mod, opts, state) do
-    with {:ok, buffer_size} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity) do
+    with {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity) do
+      {buffer_keep, opts} = Keyword.pop(opts, :buffer_keep, :last)
       {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
       {:ok, dispatcher_state} = dispatcher_mod.init(opts)
-      {:ok, %GenStage{mod: mod, state: state, type: :producer, buffer: {:queue.new, 0, buffer_size},
+      {:ok, %GenStage{mod: mod, state: state, type: :producer,
+                      buffer: {:queue.new, 0, buffer_size, buffer_keep},
                       dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
@@ -709,8 +713,8 @@ defmodule GenStage do
   end
 
   defp init_consumer(mod, opts, state) do
-    with {:ok, max_demand} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
-         {:ok, min_demand} <- validate_integer(opts, :min_demand, div(max_demand, 2), 0, max_demand - 1) do
+    with {:ok, max_demand, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
+         {:ok, min_demand, _} <- validate_integer(opts, :min_demand, div(max_demand, 2), 0, max_demand - 1) do
       {:ok, %GenStage{mod: mod, state: state, type: :consumer, demand: {min_demand, max_demand}}}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
@@ -718,7 +722,7 @@ defmodule GenStage do
   end
 
   defp validate_integer(opts, key, default, min, max) do
-    value = Keyword.get(opts, key, default)
+    {value, opts} = Keyword.pop(opts, key, default)
 
     cond do
       not is_integer(value) ->
@@ -728,7 +732,7 @@ defmodule GenStage do
       value > max ->
         {:error, "expected #{inspect key} to be equal to or less than #{max}"}
       true ->
-        {:ok, value}
+        {:ok, value, opts}
     end
   end
 
@@ -920,14 +924,14 @@ defmodule GenStage do
     buffer_events(events, %{stage | dispatcher_state: dispatcher_state})
   end
 
-  defp buffer_demand(counter, %{buffer: {queue, buffer, max}} = stage) do
+  defp buffer_demand(counter, %{buffer: {queue, buffer, max, keep}} = stage) do
     case min(counter, buffer) do
       0 ->
         {:ok, counter, stage}
       allowed ->
         {events, queue} = take_from_queue(allowed, [], queue)
         stage = dispatch_events(events, stage)
-        {:ok, counter - allowed, %{stage | buffer: {queue, buffer - allowed, max}}}
+        {:ok, counter - allowed, %{stage | buffer: {queue, buffer - allowed, max, keep}}}
     end
   end
 
@@ -942,25 +946,37 @@ defmodule GenStage do
   defp buffer_events([], stage) do
     stage
   end
-  defp buffer_events(events, %{buffer: {queue, counter, max}} = stage) do
-    {events, queue, counter} = queue_events(events, queue, counter, max)
+  defp buffer_events(events, %{buffer: {queue, counter, max, keep}} = stage) do
+    {excess, queue, counter} = queue_events(keep, events, queue, counter, max)
 
-    case length(events) do
+    case excess do
       0 ->
         :ok
       excess ->
         :error_logger.error_msg('GenStage producer has discarded ~p events from buffer', [excess])
     end
 
-    %{stage | buffer: {queue, counter, max}}
+    %{stage | buffer: {queue, counter, max, keep}}
   end
 
-  defp queue_events(events, queue, max, max),
-    do: {events, queue, max}
-  defp queue_events([], queue, counter, _max),
-    do: {[], queue, counter}
-  defp queue_events([event | events], queue, counter, max),
-    do: queue_events(events, :queue.in(event, queue), counter + 1, max)
+  defp queue_events(:first, events, queue, counter, max),
+    do: queue_first(events, queue, counter, max)
+  defp queue_events(:last, events, queue, counter, max),
+    do: queue_last(events, queue, 0, counter, max)
+
+  defp queue_first([], queue, counter, _max),
+    do: {0, queue, counter}
+  defp queue_first(events, queue, max, max),
+    do: {length(events), queue, max}
+  defp queue_first([event | events], queue, counter, max),
+    do: queue_first(events, :queue.in(event, queue), counter + 1, max)
+
+  defp queue_last([], queue, excess, counter, _max),
+    do: {excess, queue, counter}
+  defp queue_last([event | events], queue, excess, max, max),
+    do: queue_last(events, :queue.in(event, :queue.drop(queue)), excess + 1, max, max)
+  defp queue_last([event | events], queue, excess, counter, max),
+    do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max)
 
   defp consumer_receive(ref, {producer_id, persistent?, demand}, events, %{demand: {min, max}} = stage) do
     {demand, events} = consumer_check_excess(ref, producer_id, demand, events)
