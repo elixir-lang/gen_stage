@@ -53,7 +53,7 @@ defmodule DynamicSupervisorTest do
     {:ok, pid} = DynamicSupervisor.start_link(Simple, spec, name: __MODULE__)
 
     # Sets up a link
-    {:links, links} = Process.info(self, :links)
+    {:links, links} = Process.info(self(), :links)
     assert pid in links
 
     # A name
