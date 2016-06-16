@@ -725,8 +725,6 @@ defmodule GenStage do
     noreply_callback(:handle_cast, [msg, state], stage)
   end
 
-  # TODO: code_change/terminate
-
   @doc false
   def handle_info({:DOWN, ref, _, _, reason} = msg,
                   %{producers: producers, monitors: monitors, state: state} = stage) do
@@ -815,6 +813,19 @@ defmodule GenStage do
 
   def handle_info(msg, %{state: state} = stage) do
     noreply_callback(:handle_info, [msg, state], stage)
+  end
+
+  @doc false
+  def terminate(reason, %{mod: mod, state: state}) do
+    mod.terminate(reason, state)
+  end
+
+  @doc false
+  def code_change(old_vsn, %{mod: mod, state: state} = stage, extra) do
+    case mod.code_change(old_vsn, state, extra) do
+      {:ok, state} -> {:ok, %{stage | state: state}}
+      other -> other
+    end
   end
 
   ## Helpers
@@ -930,9 +941,11 @@ defmodule GenStage do
       {nil, _consumers} ->
         {:noreply, stage}
       {{pid, mon_ref}, consumers} ->
-        Process.demonitor(mon_ref, [:flush])
         send pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}}
-        {:noreply, %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}}
+        Process.demonitor(mon_ref, [:flush])
+        stage = %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}
+        %{dispatcher_state: dispatcher_state} = stage
+        dispatcher_callback(:cancel, [{pid, ref}, dispatcher_state], stage)
     end
   end
 end
