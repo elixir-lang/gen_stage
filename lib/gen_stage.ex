@@ -300,8 +300,8 @@ defmodule GenStage do
 
   """
 
-  defstruct [:mod, :state, :type, :demand, :dispatcher_mod, :dispatcher_state, :buffer,
-             monitors: %{}, producers: %{}, consumers: %{}]
+  defstruct [:mod, :state, :type, :demand, :dispatcher_mod, :dispatcher_state,
+             :buffer, :buffer_config, monitors: %{}, producers: %{}, consumers: %{}]
 
   # TODO: Explore termination
 
@@ -355,6 +355,8 @@ defmodule GenStage do
       module documentation (defaults to 1000)
     * `:buffer_keep` - returns if the `:first` or `:last` entries
       should be kept on the buffer in case we exceed the buffer size
+    * `:without_consumers` - configures if we should `:buffer` events (default)
+      or `:discard` them when there are no consumers
     * `:dispatcher` - the dispatcher responsible for handling demands.
       Defaults to `GenStage.DemandDispatch`
 
@@ -717,9 +719,10 @@ defmodule GenStage do
     with {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity) do
       {buffer_keep, opts} = Keyword.pop(opts, :buffer_keep, :last)
       {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
+      {without_consumers, opts} = Keyword.pop(opts, :without_consumers, :buffer)
       {:ok, dispatcher_state} = dispatcher_mod.init(opts)
-      {:ok, %GenStage{mod: mod, state: state, type: :producer,
-                      buffer: {:queue.new, 0, buffer_size, buffer_keep},
+      {:ok, %GenStage{mod: mod, state: state, type: :producer, buffer: {:queue.new, 0},
+                      buffer_config: {buffer_size, buffer_keep, without_consumers},
                       dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
@@ -938,14 +941,15 @@ defmodule GenStage do
     buffer_events(events, %{stage | dispatcher_state: dispatcher_state})
   end
 
-  defp buffer_demand(counter, %{buffer: {queue, buffer, max, keep}} = stage) do
+  defp buffer_demand(counter, %{buffer: {queue, buffer}} = stage) do
     case min(counter, buffer) do
       0 ->
         {:ok, counter, stage}
       allowed ->
+        %{buffer_config: {max, _keep, _without_consumers}} = stage
         {events, queue} = take_from_queue(allowed, [], queue)
         stage = dispatch_events(events, stage)
-        {:ok, counter - allowed, %{stage | buffer: {queue, buffer - allowed, max, keep}}}
+        {:ok, counter - allowed, %{stage | buffer: {queue, buffer - allowed}}}
     end
   end
 
@@ -960,17 +964,24 @@ defmodule GenStage do
   defp buffer_events([], stage) do
     stage
   end
-  defp buffer_events(events, %{buffer: {queue, counter, max, keep}} = stage) do
-    {excess, queue, counter} = queue_events(keep, events, queue, counter, max)
+  defp buffer_events(events, %{buffer: {queue, counter}} = stage) do
+    %{buffer_config: {max, keep, without_consumers}, consumers: consumers} = stage
 
-    case excess do
-      0 ->
-        :ok
-      excess ->
-        :error_logger.error_msg('GenStage producer has discarded ~p events from buffer', [excess])
+    case without_consumers do
+      :discard when map_size(consumers) == 0 ->
+        stage
+      _ ->
+        {excess, queue, counter} = queue_events(keep, events, queue, counter, max)
+
+        case excess do
+          0 ->
+            :ok
+          excess ->
+            :error_logger.error_msg('GenStage producer has discarded ~p events from buffer', [excess])
+        end
+
+        %{stage | buffer: {queue, counter}}
     end
-
-    %{stage | buffer: {queue, counter, max, keep}}
   end
 
   defp queue_events(:first, events, queue, counter, max),
@@ -1052,8 +1063,18 @@ defmodule GenStage do
         send pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}}
         Process.demonitor(mon_ref, [:flush])
         stage = %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}
+        stage = reset_buffer_without_consumers(stage, consumers)
         %{dispatcher_state: dispatcher_state} = stage
         dispatcher_callback(:cancel, [{pid, ref}, dispatcher_state], stage)
     end
+  end
+
+  defp reset_buffer_without_consumers(%{buffer_config: {_, _, :discard}} = stage, consumers)
+       when map_size(consumers) == 0 do
+    %{stage | buffer: {:queue.new, 0}}
+  end
+
+  defp reset_buffer_without_consumers(stage, _consumers) do
+    stage
   end
 end

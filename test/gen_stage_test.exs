@@ -129,6 +129,18 @@ defmodule GenStageTest do
       assert_receive {:consumed, [3, 4, 5, 6]}
     end
 
+    test "does not store events if configured to discard them" do
+      {:ok, producer} = Counter.start_link({:producer, 0, without_consumers: :discard})
+      send producer, {:queue, [:a, :b, :c]}
+      Counter.async_queue(producer, [:d, :e])
+
+      {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
+      :ok = GenStage.async_subscribe(consumer, to: producer)
+
+      assert_receive {:consumed, [0, 1, 2, 3]}
+      assert_receive {:consumed, [4, 5, 6, 7]}
+    end
+
     test "emits warning and keeps first when it exceeds configured size" do
       {:ok, producer} = Counter.start_link({:producer, 0, buffer_size: 5, buffer_keep: :first})
       0 = Counter.sync_queue(producer, [:a, :b, :c, :d, :e])
