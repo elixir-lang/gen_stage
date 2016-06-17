@@ -539,10 +539,10 @@ defmodule GenStage do
 
   ## Options
 
-    * `:persistent` - when true, any cancel message or crash from the
-      producer stage will lead the downstream stage to exit. In case
-      of crashes, the same reason is used. In case of cancellations,
-      the error is wrapped in a `:cancel` tuple.
+    * `:cancel` - `:permanent` (default) or `:temporary`. When permanent,
+      the consumer exits when the producer cancels or exits. In case
+      of exits, the same reason is used to exit the consumer. In case of
+      cancellations, the reason is wrapped in a `:cancel` tuple.
 
   All other options are sent as is to the producer stage.
   """
@@ -561,22 +561,21 @@ defmodule GenStage do
 
   This call returns `:ok` regardless if the subscription
   effectively happened or not. It is typically called from
-  a stage own's `init/1` callback using the `persisted: true`
-  option.
+  a stage own's `init/1` callback.
 
   ## Options
 
-    * `:persistent` - when true, any cancel message or crash from the
-      producer stage will lead the downstream stage to exit. In case
-      of crashes, the same reason is used. In case of cancellations,
-      the error is wrapped in a `:cancel` tuple.
+    * `:cancel` - `:permanent` (default) or `:temporary`. When permanent,
+      the consumer exits when the producer cancels or exits. In case
+      of exits, the same reason is used to exit the consumer. In case of
+      cancellations, the reason is wrapped in a `:cancel` tuple.
 
   All other options are sent as is to the producer stage.
 
   ## Examples
 
       def init(producer) do
-        GenStage.async_subscribe(self(), to: producer, persistent: true)
+        GenStage.async_subscribe(self(), to: producer)
         {:consumer, []}
       end
 
@@ -993,10 +992,10 @@ defmodule GenStage do
   defp queue_last([event | events], queue, excess, counter, max),
     do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max)
 
-  defp consumer_receive(ref, {producer_id, persistent?, demand}, events, %{demand: {min, max}} = stage) do
+  defp consumer_receive(ref, {producer_id, cancel, demand}, events, %{demand: {min, max}} = stage) do
     {demand, events} = consumer_check_excess(ref, producer_id, demand, events)
     new_demand = if demand <= min, do: max, else: demand
-    stage = put_in stage.producers[ref], {producer_id, persistent?, new_demand}
+    stage = put_in stage.producers[ref], {producer_id, cancel, new_demand}
     {events, new_demand - demand, stage}
   end
 
@@ -1018,17 +1017,17 @@ defmodule GenStage do
   end
 
   defp consumer_subscribe(to, opts, %{demand: {_, max}} = stage) do
-    {persistent?, opts} = Keyword.pop(opts, :persistent, true)
+    {cancel, opts} = Keyword.pop(opts, :cancel, :permanent)
 
     if producer_pid = GenServer.whereis(to) do
       ref = Process.monitor(producer_pid)
       send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
       send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, max}}
-      stage = put_in stage.producers[ref], {producer_pid, persistent?, max}
+      stage = put_in stage.producers[ref], {producer_pid, cancel, max}
       {{:ok, ref}, stage}
     else
       ref = make_ref()
-      stage = put_in stage.producers[ref], {to, persistent?, max}
+      stage = put_in stage.producers[ref], {to, cancel, max}
       send self(), {:DOWN, ref, :process, to, :noproc}
       {{:ok, ref}, stage}
     end
@@ -1038,9 +1037,9 @@ defmodule GenStage do
     case Map.pop(producers, ref) do
       {nil, _producers} ->
         {:noreply, stage}
-      {{_, false, _}, producers} ->
+      {{_, :temporary, _}, producers} ->
         {:noreply, %{stage | producers: producers}}
-      {{_, true, _}, producers} ->
+      {{_, :permanent, _}, producers} ->
         {:stop, reason, %{stage | producers: producers}}
     end
   end

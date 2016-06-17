@@ -167,7 +167,7 @@ defmodule GenStageTest do
     end
 
     @tag :capture_log
-    test "consumer exits when there is no named producer and subscription is persistent" do
+    test "consumer exits when there is no named producer and subscription is permanent" do
       Process.flag(:trap_exit, true)
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown)
@@ -175,7 +175,7 @@ defmodule GenStageTest do
     end
 
     @tag :capture_log
-    test "consumer exits when producer is dead and subscription is persistent" do
+    test "consumer exits when producer is dead and subscription is permanent" do
       Process.flag(:trap_exit, true)
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
@@ -185,17 +185,17 @@ defmodule GenStageTest do
     end
 
     @tag :capture_log
-    test "consumer does not exit when there is no named producer and subscription is not persistent" do
+    test "consumer does not exit when there is no named producer and subscription is temporary" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown, persistent: false)
+      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown, cancel: :temporary)
     end
 
     @tag :capture_log
-    test "consumer does not exit when producer is dead and subscription is persistent is not persistent" do
+    test "consumer does not exit when producer is dead and subscription is persistent is temporary" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer, persistent: false)
+      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
     end
 
     test "caller exits when the consumer is dead" do
