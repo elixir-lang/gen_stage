@@ -533,10 +533,9 @@ defmodule GenStage do
   refuse the subscription or exit before or after receiving the
   message.
 
-  This function will return `:ok` as long as the subscription message
-  is sent. It may return `{:error, :not_a_consumer}` in case the stage
-  is not a consumer or `{:error, :noproc}` in case the process we are
-  trying to subscribe to no longer exists.
+  This function will return `{:ok, ref}` as long as the subscription
+  message is sent. It may return `{:error, :not_a_consumer}` in case
+  the stage is not a consumer.
 
   ## Options
 
@@ -548,7 +547,7 @@ defmodule GenStage do
   All other options are sent as is to the producer stage.
   """
   @spec sync_subscribe(stage, opts :: keyword(), timeout) ::
-        :ok | {:error, :producer} | {:error, :noproc}
+        {:ok, reference()} | {:error, :not_a_consumer}
   def sync_subscribe(stage, opts, timeout \\ 5_000) do
     {to, opts} =
       Keyword.pop_lazy(opts, :to, fn ->
@@ -675,6 +674,22 @@ defmodule GenStage do
     catch
       _, _ -> :ok
     end
+  end
+
+  @doc """
+  Stops the stage with the given `reason`.
+
+  The `terminate/2` callback of the given `stage` will be invoked before
+  exiting. This function returns `:ok` if the server terminates with the
+  given reason; if it terminates with another reason, the call exits.
+
+  This function keeps OTP semantics regarding error reporting.
+  If the reason is any other than `:normal`, `:shutdown` or
+  `{:shutdown, _}`, an error report is logged.
+  """
+  @spec stop(stage, reason :: term, timeout) :: :ok
+  def stop(stage, reason \\ :normal, timeout \\ :infinity) do
+    :gen.stop(stage, reason, timeout)
   end
 
   ## Callbacks
@@ -1010,9 +1025,12 @@ defmodule GenStage do
       send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
       send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, max}}
       stage = put_in stage.producers[ref], {producer_pid, persistent?, max}
-      {:ok, stage}
+      {{:ok, ref}, stage}
     else
-      {{:error, :noproc}, stage}
+      ref = make_ref()
+      stage = put_in stage.producers[ref], {to, persistent?, max}
+      send self(), {:DOWN, ref, :process, to, :noproc}
+      {{:ok, ref}, stage}
     end
   end
 

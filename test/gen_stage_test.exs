@@ -71,13 +71,17 @@ defmodule GenStageTest do
       send recipient, {:consumed, events}
       {:noreply, [], recipient}
     end
+
+    def terminate(reason, state) do
+      send state, {:terminate, reason}
+    end
   end
 
   describe "producer-to-consumer demand" do
     test "with default max and min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      :ok = GenStage.sync_subscribe(consumer, to: producer)
+      :ok = GenStage.async_subscribe(consumer, to: producer)
 
       batch = Enum.to_list(0..99)
       assert_receive {:consumed, ^batch}
@@ -88,11 +92,25 @@ defmodule GenStageTest do
     test "with 1 max and 0 min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 1, min_demand: 0})
-      :ok = GenStage.sync_subscribe(consumer, to: producer)
+      :ok = GenStage.async_subscribe(consumer, to: producer)
 
       assert_receive {:consumed, [0]}
       assert_receive {:consumed, [1]}
       assert_receive {:consumed, [2]}
+    end
+
+    test "with shared (broadcast) demand" do
+      {:ok, producer} = Counter.start_link({:producer, 0, dispatcher: GenStage.BroadcastDispatcher})
+      {:ok, consumer1} = Forwarder.start_link({:consumer, self(), max_demand: 10, min_demand: 0})
+      {:ok, consumer2} = Forwarder.start_link({:consumer, self(), max_demand: 20, min_demand: 0})
+
+      :ok = GenStage.async_subscribe(consumer1, to: producer)
+      :ok = GenStage.async_subscribe(consumer2, to: producer)
+
+      # Because there is a race condition between subscriptions
+      # we will assert for events just later on.
+      assert_receive {:consumed, [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]}
+      assert_receive {:consumed, [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]}
     end
   end
 
@@ -103,7 +121,7 @@ defmodule GenStageTest do
       Counter.async_queue(producer, [:d, :e])
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
-      :ok = GenStage.sync_subscribe(consumer, to: producer)
+      :ok = GenStage.async_subscribe(consumer, to: producer)
 
       assert_receive {:consumed, [:a, :b, :c, :d]}
       assert_receive {:consumed, [:e]}
@@ -120,7 +138,7 @@ defmodule GenStageTest do
       end) =~ "GenStage producer has discarded 3 events from buffer"
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
-      :ok = GenStage.sync_subscribe(consumer, to: producer)
+      :ok = GenStage.async_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b, :c, :d]}
       assert_receive {:consumed, [:e]}
     end
@@ -134,9 +152,57 @@ defmodule GenStageTest do
       end) =~ "GenStage producer has discarded 3 events from buffer"
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
-      :ok = GenStage.sync_subscribe(consumer, to: producer)
+      :ok = GenStage.async_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:d, :e, :f, :g]}
       assert_receive {:consumed, [:h]}
+    end
+  end
+
+  describe "sync_subscribe" do
+    test "returns ok with reference" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      assert is_reference(ref)
+    end
+
+    @tag :capture_log
+    test "consumer exits when there is no named producer and subscription is persistent" do
+      Process.flag(:trap_exit, true)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown)
+      assert_receive {:EXIT, ^consumer, :noproc}
+    end
+
+    @tag :capture_log
+    test "consumer exits when producer is dead and subscription is persistent" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      GenStage.stop(producer)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer)
+      assert_receive {:EXIT, ^consumer, :noproc}
+    end
+
+    @tag :capture_log
+    test "consumer does not exit when there is no named producer and subscription is not persistent" do
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown, persistent: false)
+    end
+
+    @tag :capture_log
+    test "consumer does not exit when producer is dead and subscription is persistent is not persistent" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      GenStage.stop(producer)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer, persistent: false)
+    end
+
+    test "caller exits when the consumer is dead" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      GenStage.stop(consumer)
+      assert {:noproc, _} = catch_exit(GenStage.sync_subscribe(consumer, to: producer))
     end
   end
 
@@ -179,6 +245,12 @@ defmodule GenStageTest do
              Forwarder.start_link({:consumer, self()}, name: context.test)
       assert {:error, {:already_started, ^pid}} =
              Forwarder.start_link({:consumer, self()}, name: context.test)
+    end
+
+    test "terminate/1" do
+      {:ok, pid} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.stop(pid)
+      assert_receive {:terminate, :normal}
     end
   end
 end
