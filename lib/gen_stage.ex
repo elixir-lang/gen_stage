@@ -86,7 +86,7 @@ defmodule GenStage do
           {:producer_consumer, number}
         end
 
-        def handle_events(events, from, number) do
+        def handle_events(events, _from, number) do
           events = Enum.map(events, & &1 * number)
           {:noreply, events, number}
         end
