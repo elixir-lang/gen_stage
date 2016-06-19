@@ -706,6 +706,10 @@ defmodule GenStage do
         init_consumer(mod, [], state)
       {:consumer, state, opts} when is_list(opts) ->
         init_consumer(mod, opts, state)
+      {:producer_consumer, state} ->
+        init_producer_consumer(mod, [], state)
+      {:producer_consumer, state, opts} when is_list(opts) ->
+        init_producer_consumer(mod, opts, state)
       {:stop, _} = stop ->
         stop
       :ignore ->
@@ -733,6 +737,20 @@ defmodule GenStage do
     with {:ok, max_demand, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
          {:ok, min_demand, _} <- validate_integer(opts, :min_demand, div(max_demand, 2), 0, max_demand - 1) do
       {:ok, %GenStage{mod: mod, state: state, type: :consumer, demand: {min_demand, max_demand}}}
+    else
+      {:error, message} -> {:stop, {:bad_opts, message}}
+    end
+  end
+
+  defp init_producer_consumer(mod, opts, state) do
+    with {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity) do
+      {buffer_keep, opts} = Keyword.pop(opts, :buffer_keep, :last)
+      {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
+      {without_consumers, opts} = Keyword.pop(opts, :without_consumers, :buffer)
+      {:ok, dispatcher_state} = dispatcher_mod.init(opts)
+      {:ok, %GenStage{mod: mod, state: state, type: :producer_consumer, buffer: {:queue.new, 0},
+                      buffer_config: {buffer_size, buffer_keep, without_consumers},
+                      dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
@@ -901,6 +919,12 @@ defmodule GenStage do
         # TODO: support producer_consumer
         noreply_callback(:handle_demand, [counter, state], stage)
     end
+  end
+
+  defp noreply_callback(:handle_demand, [demand, state], %{mod: mod, type: :producer_consumer} = stage) do
+    min_demand = div(demand, 2)
+    max_demand = demand
+    {:noreply, %{stage | demand: { min_demand, max_demand}} }
   end
 
   defp noreply_callback(callback, args, %{mod: mod} = stage) do
