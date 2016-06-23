@@ -111,8 +111,8 @@ defmodule GenStageTest do
 
     test "with 1 max and 0 min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 1, min_demand: 0})
-      :ok = GenStage.async_subscribe(consumer, to: producer)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 1, min_demand: 0)
 
       assert_receive {:consumed, [0]}
       assert_receive {:consumed, [1]}
@@ -121,11 +121,11 @@ defmodule GenStageTest do
 
     test "with shared (broadcast) demand" do
       {:ok, producer} = Counter.start_link({:producer, 0, dispatcher: GenStage.BroadcastDispatcher})
-      {:ok, consumer1} = Forwarder.start_link({:consumer, self(), max_demand: 10, min_demand: 0})
-      {:ok, consumer2} = Forwarder.start_link({:consumer, self(), max_demand: 20, min_demand: 0})
+      {:ok, consumer1} = Forwarder.start_link({:consumer, self()})
+      {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
 
-      :ok = GenStage.async_subscribe(consumer1, to: producer)
-      :ok = GenStage.async_subscribe(consumer2, to: producer)
+      :ok = GenStage.async_subscribe(consumer1, to: producer, max_demand: 10, min_demand: 0)
+      :ok = GenStage.async_subscribe(consumer2, to: producer, max_demand: 20, min_demand: 0)
 
       # Because there is a race condition between subscriptions
       # we will assert for events just later on.
@@ -140,8 +140,8 @@ defmodule GenStageTest do
       send producer, {:queue, [:a, :b, :c]}
       Counter.async_queue(producer, [:d, :e])
 
-      {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
-      :ok = GenStage.async_subscribe(consumer, to: producer)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
 
       assert_receive {:consumed, [:a, :b, :c, :d]}
       assert_receive {:consumed, [:e]}
@@ -154,8 +154,8 @@ defmodule GenStageTest do
       send producer, {:queue, [:a, :b, :c]}
       Counter.async_queue(producer, [:d, :e])
 
-      {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
-      :ok = GenStage.async_subscribe(consumer, to: producer)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
 
       assert_receive {:consumed, [0, 1, 2, 3]}
       assert_receive {:consumed, [4, 5, 6, 7]}
@@ -177,8 +177,8 @@ defmodule GenStageTest do
         0 = Counter.sync_queue(producer, [:f, :g, :h])
       end) =~ "GenStage producer has discarded 3 events from buffer"
 
-      {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
-      :ok = GenStage.async_subscribe(consumer, to: producer)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
       assert_receive {:consumed, [:a, :b, :c, :d]}
       assert_receive {:consumed, [:e]}
     end
@@ -191,8 +191,8 @@ defmodule GenStageTest do
         0 = Counter.sync_queue(producer, [:f, :g, :h])
       end) =~ "GenStage producer has discarded 3 events from buffer"
 
-      {:ok, consumer} = Forwarder.start_link({:consumer, self(), max_demand: 4, min_demand: 0})
-      :ok = GenStage.async_subscribe(consumer, to: producer)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
       assert_receive {:consumed, [:d, :e, :f, :g]}
       assert_receive {:consumed, [:h]}
     end
@@ -204,6 +204,18 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       assert {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
       assert is_reference(ref)
+    end
+
+    @tag :capture_log
+    test "returns errors on bad options" do
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:error, {:bad_opts, message}} =
+             GenStage.sync_subscribe(consumer, to: :whatever, max_demand: 0)
+      assert message == "expected :max_demand to be equal to or greater than 1, got: 0"
+
+      assert {:error, {:bad_opts, message}} =
+             GenStage.sync_subscribe(consumer, to: :whatever, min_demand: 200)
+      assert message == "expected :min_demand to be equal to or less than 99, got: 200"
     end
 
     @tag :capture_log
@@ -257,7 +269,7 @@ defmodule GenStageTest do
       assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
 
       assert Counter.start_link({:producer, 0, buffer_size: -1}) ==
-             {:error, {:bad_opts, "expected :buffer_size to be equal to or greater than 0"}}
+             {:error, {:bad_opts, "expected :buffer_size to be equal to or greater than 0, got: -1"}}
 
       assert {:ok, pid} =
              Counter.start_link({:producer, 0}, name: context.test)
@@ -326,11 +338,6 @@ defmodule GenStageTest do
       assert_receive {:EXIT, _, :oops}
       assert Forwarder.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
       assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
-
-      assert Forwarder.start_link({:consumer, 0, min_demand: 200}) ==
-             {:error, {:bad_opts, "expected :min_demand to be equal to or less than 99"}}
-      assert Forwarder.start_link({:consumer, 0, max_demand: 0}) ==
-             {:error, {:bad_opts, "expected :max_demand to be equal to or greater than 1"}}
 
       assert {:ok, pid} =
              Forwarder.start_link({:consumer, self()}, name: context.test)

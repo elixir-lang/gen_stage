@@ -130,16 +130,15 @@ defmodule GenStage do
   upstream and events downstream. Because C blocks for one
   second, the demand will eventually be adjusted to C needs.
   When implementing consumers, we often set the `:max_demand` and
-  `:min_demand` options on initialization. The `:max_demand`
-  specifies the maximum amount of events that must be in flow
-  while the `:min_demand` specifies the minimum threshold to
-  trigger for more demand. For example, if `:max_demand` is 100
-  and `:min_demand` is 50 (the default values), the consumer will
-  ask for 100 events initially and ask for more only after it
-  receives at least 50.
+  `:min_demand` on subscription. The `:max_demand` specifies the
+  maximum amount of events that must be in flow while the `:min_demand`
+  specifies the minimum threshold to trigger for more demand. For
+  example, if `:max_demand` is 100 and `:min_demand` is 50
+  (the default values), the consumer will ask for 100 events initially
+  and ask for more only after it receives at least 50.
 
   When such values are applied to the stages above, it is easy
-  to see the producer works in bursts. The producer A ends-up
+  to see the producer works in batches. The producer A ends-up
   emitting batches of 50 items which will take approximately
   50 seconds to be consumed by C, which will then request another
   batch of 50 items.
@@ -296,7 +295,7 @@ defmodule GenStage do
 
   """
 
-  defstruct [:mod, :state, :type, :demand, :dispatcher_mod, :dispatcher_state,
+  defstruct [:mod, :state, :type, :dispatcher_mod, :dispatcher_state,
              :buffer, :buffer_config, monitors: %{}, producers: %{}, consumers: %{}]
 
   # TODO: Explore termination
@@ -355,13 +354,6 @@ defmodule GenStage do
       or `:discard` them when there are no consumers
     * `:dispatcher` - the dispatcher responsible for handling demands.
       Defaults to `GenStage.DemandDispatch`
-
-  ### :consumer options
-
-    * `:max_demand` - the maximum demand desired to send upstream
-      (defaults to 100)
-    * `:min_demand` - the minimum demand that when reached triggers
-      more demand upstream (defaults to half of `:max_demand`)
 
   """
   @callback init(args :: term) ::
@@ -541,11 +533,15 @@ defmodule GenStage do
       the consumer exits when the producer cancels or exits. In case
       of exits, the same reason is used to exit the consumer. In case of
       cancellations, the reason is wrapped in a `:cancel` tuple.
+    * `:min_demand` - the minimum demand for this subscription. It overrides
+      the value configured in the consumer initializer
+    * `:max_demand` - the maximum demand for this subscription. It overrides
+      the value configured in the consumer initializer
 
   All other options are sent as is to the producer stage.
   """
   @spec sync_subscribe(stage, opts :: keyword(), timeout) ::
-        {:ok, reference()} | {:error, :not_a_consumer}
+        {:ok, reference()} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
   def sync_subscribe(stage, opts, timeout \\ 5_000) do
     {to, opts} =
       Keyword.pop_lazy(opts, :to, fn ->
@@ -567,13 +563,17 @@ defmodule GenStage do
       the consumer exits when the producer cancels or exits. In case
       of exits, the same reason is used to exit the consumer. In case of
       cancellations, the reason is wrapped in a `:cancel` tuple.
+    * `:min_demand` - the minimum demand for this subscription. It overrides
+      the value configured in the consumer initializer
+    * `:max_demand` - the maximum demand for this subscription. It overrides
+      the value configured in the consumer initializer
 
   All other options are sent as is to the producer stage.
 
   ## Examples
 
       def init(producer) do
-        GenStage.async_subscribe(self(), to: producer)
+        GenStage.async_subscribe(self(), to: producer, min_demand: 10, max_demand: 100)
         {:consumer, []}
       end
 
@@ -712,10 +712,10 @@ defmodule GenStage do
   end
 
   defp init_producer(mod, opts, state) do
-    with {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity) do
-      {buffer_keep, opts} = Keyword.pop(opts, :buffer_keep, :last)
+    with {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity),
+         {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
+         {:ok, without_consumers, opts} <- validate_in(opts, :without_consumers, :buffer, [:buffer, :discard]) do
       {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
-      {without_consumers, opts} = Keyword.pop(opts, :without_consumers, :buffer)
       {:ok, dispatcher_state} = dispatcher_mod.init(opts)
       {:ok, %GenStage{mod: mod, state: state, type: :producer, buffer: {:queue.new, 0},
                       buffer_config: {buffer_size, buffer_keep, without_consumers},
@@ -725,12 +725,17 @@ defmodule GenStage do
     end
   end
 
-  defp init_consumer(mod, opts, state) do
-    with {:ok, max_demand, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
-         {:ok, min_demand, _} <- validate_integer(opts, :min_demand, div(max_demand, 2), 0, max_demand - 1) do
-      {:ok, %GenStage{mod: mod, state: state, type: :consumer, demand: {min_demand, max_demand}}}
+  defp init_consumer(mod, _opts, state) do
+    {:ok, %GenStage{mod: mod, state: state, type: :consumer}}
+  end
+
+  defp validate_in(opts, key, default, values) do
+    {value, opts} = Keyword.pop(opts, key, default)
+
+    if value in values do
+      {:ok, value, opts}
     else
-      {:error, message} -> {:stop, {:bad_opts, message}}
+      {:error, "expected #{inspect key} to be one of #{inspect values}, got: #{inspect value}"}
     end
   end
 
@@ -739,11 +744,11 @@ defmodule GenStage do
 
     cond do
       not is_integer(value) ->
-        {:error, "expected #{inspect key} to be an integer"}
+        {:error, "expected #{inspect key} to be an integer, got: #{inspect value}"}
       value < min ->
-        {:error, "expected #{inspect key} to be equal to or greater than #{min}"}
+        {:error, "expected #{inspect key} to be equal to or greater than #{min}, got: #{inspect value}"}
       value > max ->
-        {:error, "expected #{inspect key} to be equal to or less than #{max}"}
+        {:error, "expected #{inspect key} to be equal to or less than #{max}, got: #{inspect value}"}
       true ->
         {:ok, value, opts}
     end
@@ -1001,10 +1006,10 @@ defmodule GenStage do
   defp queue_last([event | events], queue, excess, counter, max),
     do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max)
 
-  defp consumer_receive(ref, {producer_id, cancel, demand}, events, %{demand: {min, max}} = stage) do
+  defp consumer_receive(ref, {producer_id, cancel, demand, min, max}, events, stage) do
     {demand, events} = consumer_check_excess(ref, producer_id, demand, events)
     new_demand = if demand <= min, do: max, else: demand
-    stage = put_in stage.producers[ref], {producer_id, cancel, new_demand}
+    stage = put_in stage.producers[ref], {producer_id, cancel, new_demand, min, max}
     {events, new_demand - demand, stage}
   end
 
@@ -1025,20 +1030,26 @@ defmodule GenStage do
     {{:error, :not_a_consumer}, stage}
   end
 
-  defp consumer_subscribe(to, opts, %{demand: {_, max}} = stage) do
-    {cancel, opts} = Keyword.pop(opts, :cancel, :permanent)
-
-    if producer_pid = GenServer.whereis(to) do
-      ref = Process.monitor(producer_pid)
-      send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
-      send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, max}}
-      stage = put_in stage.producers[ref], {producer_pid, cancel, max}
-      {{:ok, ref}, stage}
+  defp consumer_subscribe(to, opts, stage) do
+    with {:ok, cancel, opts} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
+         {:ok, max, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
+         {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1) do
+      if producer_pid = GenServer.whereis(to) do
+        ref = Process.monitor(producer_pid)
+        send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
+        send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, max}}
+        stage = put_in stage.producers[ref], {producer_pid, cancel, max, min, max}
+        {{:ok, ref}, stage}
+      else
+        ref = make_ref()
+        stage = put_in stage.producers[ref], {to, cancel, max, min, max}
+        send self(), {:DOWN, ref, :process, to, :noproc}
+        {{:ok, ref}, stage}
+      end
     else
-      ref = make_ref()
-      stage = put_in stage.producers[ref], {to, cancel, max}
-      send self(), {:DOWN, ref, :process, to, :noproc}
-      {{:ok, ref}, stage}
+      {:error, message} ->
+        :error_logger.error_msg('GenStage subscribe received invalid option: ~ts~n', [message])
+        {{:error, {:bad_opts, message}}, stage}
     end
   end
 
@@ -1046,9 +1057,11 @@ defmodule GenStage do
     case Map.pop(producers, ref) do
       {nil, _producers} ->
         {:noreply, stage}
-      {{_, :temporary, _}, producers} ->
+      {{_, :temporary, _, _, _}, producers} ->
+        Process.demonitor(ref, [:flush])
         {:noreply, %{stage | producers: producers}}
-      {{_, :permanent, _}, producers} ->
+      {{_, :permanent, _, _, _}, producers} ->
+        Process.demonitor(ref, [:flush])
         {:stop, reason, %{stage | producers: producers}}
     end
   end
@@ -1058,8 +1071,8 @@ defmodule GenStage do
       {nil, _consumers} ->
         {:noreply, stage}
       {{pid, mon_ref}, consumers} ->
-        send pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}}
         Process.demonitor(mon_ref, [:flush])
+        send pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}}
         stage = %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}
         stage = reset_buffer_without_consumers(stage, consumers)
         %{dispatcher_state: dispatcher_state} = stage
