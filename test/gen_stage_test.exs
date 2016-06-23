@@ -6,6 +6,9 @@ defmodule GenStageTest do
   defmodule Counter do
     @moduledoc """
     A producer that works as a counter in batches.
+    It also supports events to be queued via sync
+    and async calls. A negative counter disables
+    the counting behaviour.
     """
 
     use GenStage
@@ -22,10 +25,23 @@ defmodule GenStageTest do
       GenStage.cast(stage, {:queue, events})
     end
 
+    def stop(stage) do
+      GenStage.call(stage, :stop)
+    end
+
     ## Callbacks
 
     def init(init) do
       init
+    end
+
+    def handle_call(:stop, _from, state) do
+      {:stop, :shutdown, :ok, state}
+    end
+
+    def handle_call({:early_reply_queue, events}, from, state) do
+      GenStage.reply(from, state)
+      {:noreply, events, state}
     end
 
     def handle_call({:queue, events}, _from, state) do
@@ -38,6 +54,10 @@ defmodule GenStageTest do
 
     def handle_info({:queue, events}, state) do
       {:noreply, events, state}
+    end
+
+    def handle_demand(demand, -1) when demand > 0 do
+      {:noreply, [], -1}
     end
 
     def handle_demand(demand, counter) when demand > 0 do
@@ -129,7 +149,7 @@ defmodule GenStageTest do
       assert_receive {:consumed, [3, 4, 5, 6]}
     end
 
-    test "does not store events if configured to discard them" do
+    test "does not store events without consumers if configured to discard them" do
       {:ok, producer} = Counter.start_link({:producer, 0, without_consumers: :discard})
       send producer, {:queue, [:a, :b, :c]}
       Counter.async_queue(producer, [:d, :e])
@@ -139,6 +159,14 @@ defmodule GenStageTest do
 
       assert_receive {:consumed, [0, 1, 2, 3]}
       assert_receive {:consumed, [4, 5, 6, 7]}
+    end
+
+    test "emits warning if trying to emit events from a consumer" do
+      {:ok, consumer} = Counter.start_link({:consumer, 0})
+
+      assert capture_log(fn ->
+        0 = Counter.sync_queue(consumer, [:f, :g, :h])
+      end) =~ "GenStage consumer cannot dispatch events"
     end
 
     test "emits warning and keeps first when it exceeds configured size" do
@@ -235,6 +263,57 @@ defmodule GenStageTest do
              Counter.start_link({:producer, 0}, name: context.test)
       assert {:error, {:already_started, ^pid}} =
              Counter.start_link({:producer, 0}, name: context.test)
+    end
+
+    test "handle_call/3 sends events before reply" do
+      {:ok, producer} = Counter.start_link({:producer, -1})
+
+      # Subscribe
+      stage_ref = make_ref()
+      send producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), stage_ref}, {:ask, 3}}
+
+      # Emulate a call
+      call_ref = make_ref()
+      send producer, {:"$gen_call", {self(), call_ref}, {:queue, [1, 2, 3]}}
+
+      # Do a blocking call
+      GenStage.stop(producer)
+
+      {:messages, messages} = Process.info(self(), :messages)
+      assert messages == [
+        {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
+        {call_ref, -1},
+      ]
+    end
+
+    test "handle_call/3 allows replies before sending events" do
+      {:ok, producer} = Counter.start_link({:producer, -1})
+
+      # Subscribe
+      stage_ref = make_ref()
+      send producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), stage_ref}, {:ask, 3}}
+
+      # Emulate a call
+      call_ref = make_ref()
+      send producer, {:"$gen_call", {self(), call_ref}, {:early_reply_queue, [1, 2, 3]}}
+
+      # Do a blocking call
+      GenStage.stop(producer)
+
+      {:messages, messages} = Process.info(self(), :messages)
+      assert messages == [
+        {call_ref, -1},
+        {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
+      ]
+    end
+
+    test "handle_call/3 may shut stage down" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Counter.start_link({:producer, -1})
+      assert Counter.stop(producer) == :ok
+      assert_received {:EXIT, ^producer, :shutdown}
     end
   end
 

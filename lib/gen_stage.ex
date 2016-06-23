@@ -766,6 +766,8 @@ defmodule GenStage do
       {:reply, reply, events, state, timeout} when is_list(events) and is_integer(timeout) and timeout >= 0 ->
         stage = dispatch_events(events, stage)
         {:reply, reply, %{stage | state: state}, timeout}
+      {:stop, reason, reply, state} ->
+        {:stop, reason, reply, %{stage | state: state}}
       return ->
         handle_noreply_callback(return, stage)
     end
