@@ -349,7 +349,7 @@ defmodule GenStage do
     * `:buffer_size` - the size of the buffer to store events
       without demand. Check the "Buffer events" section on the
       module documentation (defaults to 1000)
-    * `:buffer_keep` - returns if the `:first` or `:last` entries
+    * `:buffer_keep` - returns if the `:first` or `:last` (default) entries
       should be kept on the buffer in case we exceed the buffer size
     * `:without_consumers` - configures if we should `:buffer` events (default)
       or `:discard` them when there are no consumers
