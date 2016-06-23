@@ -165,6 +165,14 @@ defmodule DynamicSupervisorTest do
            DynamicSupervisor.start_child(pid, [:exit])
   end
 
+  test "start_child/2 with max_children" do
+    children = [worker(__MODULE__, [])]
+    opts = [strategy: :one_for_one, max_children: 0]
+    {:ok, pid} = DynamicSupervisor.start_link(children, opts)
+
+    assert {:error, :max_children} = DynamicSupervisor.start_child(pid, [:ok2])
+  end
+
   test "temporary child is not restarted regardless of reason" do
     children = [worker(__MODULE__, [], restart: :temporary)]
     {:ok, pid} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
@@ -253,6 +261,18 @@ defmodule DynamicSupervisorTest do
             DynamicSupervisor.which_children(pid)
     assert_kill child5, :shutdown
     assert %{workers: 4, active: 2} = DynamicSupervisor.count_children(pid)
+  end
+
+  test "restarting children counted in max_children" do
+    children = [worker(__MODULE__, [:restart], restart: :permanent)]
+    opts = [strategy: :one_for_one, max_children: 1, max_restarts: 100_000]
+    {:ok, pid} = DynamicSupervisor.start_link(children, opts)
+
+    assert {:ok, child1} = DynamicSupervisor.start_child(pid, [:error])
+    assert_kill child1, :shutdown
+    assert %{workers: 1, active: 0} = DynamicSupervisor.count_children(pid)
+
+    assert {:error, :max_children} = DynamicSupervisor.start_child(pid, [:ok2])
   end
 
   test "child is restarted when trying again" do

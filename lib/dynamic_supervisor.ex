@@ -197,7 +197,8 @@ defmodule DynamicSupervisor do
                     name: Supervisor.name,
                     strategy: Supervisor.Spec.strategy,
                     max_restarts: non_neg_integer,
-                    max_seconds: non_neg_integer]
+                    max_seconds: non_neg_integer,
+                    max_children: non_neg_integer | :infinity]
 
   @doc """
   Callback invoked to start the supervisor and during hot code upgrades.
@@ -213,12 +214,15 @@ defmodule DynamicSupervisor do
     * `:max_seconds` - the time frame in which `:max_restarts` applies
       in seconds. Defaults to 5 seconds.
 
+    * `:max_children` - the maximum number of children started under the
+      supervisor. Default to infinity children.
+
   """
   @callback init(args :: term) ::
     {:ok, [Supervisor.Spec.spec], options :: Keyword.t} | :ignore
 
   defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
-             children: %{}, restarts: [], restarting: 0]
+             :max_children, children: %{}, restarts: [], restarting: 0]
 
   @doc false
   defmacro __using__(_) do
@@ -229,7 +233,6 @@ defmodule DynamicSupervisor do
   end
 
   # TODO: Add max_demand / min_demand (pull)
-  # TODO: Add max_children (push)
 
   @doc """
   Starts a supervisor with the given children.
@@ -392,12 +395,15 @@ defmodule DynamicSupervisor do
     strategy     = opts[:strategy]
     max_restarts = Keyword.get(opts, :max_restarts, 3)
     max_seconds  = Keyword.get(opts, :max_seconds, 5)
+    max_children = Keyword.get(opts, :max_children, :infinity)
 
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
-         :ok <- validate_seconds(max_seconds) do
+         :ok <- validate_seconds(max_seconds),
+         :ok <- validate_children(max_children) do
       {:ok, %{state | template: child, strategy: strategy,
-                      max_restarts: max_restarts, max_seconds: max_seconds}}
+                      max_restarts: max_restarts, max_seconds: max_seconds,
+                      max_children: max_children}}
     end
   end
   defp init(_state, [_], _opts) do
@@ -420,6 +426,10 @@ defmodule DynamicSupervisor do
 
   defp validate_seconds(seconds) when is_integer(seconds), do: :ok
   defp validate_seconds(_), do: {:error, "max_seconds must be an integer"}
+
+  defp validate_children(:infinity), do: :ok
+  defp validate_children(children) when is_integer(children), do: :ok
+  defp validate_children(_), do: {:error, "max_children must be an integer or :infinity"}
 
   @doc false
   def handle_call(:which_children, _from, state) do
@@ -467,10 +477,17 @@ defmodule DynamicSupervisor do
   end
 
   def handle_call({:start_child, extra}, _from, state) do
-    %{template: child} = state
-    {_, {m, f, args}, restart, _, _, _} = child
-    args = args ++ extra
+    %{children: children, max_children: max_children,
+      restarting: restarting, template: child} = state
+    if map_size(children) + restarting < max_children do
+      handle_start_child(child, extra, state)
+    else
+      {:reply, {:error, :max_children}, state}
+    end
+  end
 
+  defp handle_start_child({_, {m, f, args}, restart, _, _, _}, extra, state) do
+    args = args ++ extra
     case reply = start_child(m, f, args) do
       {:ok, pid, _} ->
         {:reply, reply, save_child(restart, pid, args, state)}
