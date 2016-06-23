@@ -6,16 +6,16 @@ Coming soon.
 
 GenBroker requires Erlang 18 and Elixir v1.2.
 
-  1. Add `:gen_broker` to your list of dependencies in mix.exs:
+  1. Add `:gen_stage` to your list of dependencies in mix.exs:
 
         def deps do
-          [{:gen_broker, "~> 0.0.1"}]
+          [{:gen_stage, "~> 0.0.1"}]
         end
 
-  2. Ensure `:gen_broker` is started before your application:
+  2. Ensure `:gen_stage` is started before your application:
 
         def application do
-          [applications: [:gen_broker]]
+          [applications: [:gen_stage]]
         end
 
 ## Further topics

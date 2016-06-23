@@ -2,9 +2,9 @@ defmodule GenRouter.Mixfile do
   use Mix.Project
 
   def project do
-    [app: :gen_broker,
-     version: "0.0.1",
-     elixir: "~> 1.3-rc",
+    [app: :gen_stage,
+     version: "0.1.0",
+     elixir: "~> 1.3",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      deps: deps()]
@@ -27,7 +27,7 @@ defmodule GenRouter.Mixfile do
   #
   # Type `mix help deps` for more examples and options
   defp deps do
-    [{:ex_doc, "~> 0.8", only: :docs},
+    [{:ex_doc, "~> 0.12", only: :docs},
      {:inch_ex, only: :docs},]
   end
 end
