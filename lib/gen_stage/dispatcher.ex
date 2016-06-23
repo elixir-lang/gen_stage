@@ -2,6 +2,16 @@ defmodule GenStage.Dispatcher do
   @moduledoc """
   This module defines the behaviour used by `:producer` and
   `:producer_consumer` to dispatch events.
+
+  Elixir ships with two dispatcher implementations:
+
+    * `GenStage.DemandDispatcher` - dispatches the given batch of
+      events to the consumer with the biggest demand in a FIFO
+      ordering. This is the default dispatcher.
+
+    * `GenStage.BroadcastDispatcher` - dispatches all events to all
+      consumers. The demand is only sent upstream once all consumers
+      ask for data.
   """
 
   @doc """
@@ -12,7 +22,7 @@ defmodule GenStage.Dispatcher do
   @doc """
   Called every time the producer gets a new subscriber.
   """
-  @callback subscribe(from :: {pid, reference}, state :: term) ::
+  @callback subscribe(opts :: Keyword.t, from :: {pid, reference}, state :: term) ::
     {:ok, demand :: non_neg_integer, new_state} when new_state: term
 
   @doc """

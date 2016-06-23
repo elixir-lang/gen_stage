@@ -15,7 +15,7 @@ defmodule GenStage.DemandDispatcher do
   end
 
   @doc false
-  def subscribe({_, _ref}, state) do
+  def subscribe(_opts, {_, _ref}, state) do
     {:ok, 0, state}
   end
 

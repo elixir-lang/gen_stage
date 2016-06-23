@@ -12,7 +12,7 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   @doc false
-  def subscribe({pid, ref}, {demands, waiting}) do
+  def subscribe(_opts, {pid, ref}, {demands, waiting}) do
     {:ok, 0, {add_demand(-waiting, pid, ref, demands), waiting}}
   end
 

@@ -35,10 +35,13 @@ defmodule GenStage do
   emitting more items than the consumer asked for. This provides
   a back-pressure mechanism.
 
-  Typically, a consumer may subscribe only to a single producer
-  which by default establishes a one-to-one relationship.
-  GenBroker lifts this restriction by allowing M producers to
-  connect N consumers using different strategies.
+  A consumer may have multiple producers and a producer may have
+  multiple consumers. When a consumer asks for data, each producer
+  is handled separately, with its own demand. When a producer sends
+  receives demand and sends data to multiple consumers, the demand
+  is tracked and the events are sent by a dispatcher. This allows
+  producers to send data using different "strategies". See
+  `GenStage.Dispatcher` for more information.
 
   ## Example
 
@@ -147,25 +150,28 @@ defmodule GenStage do
   a producer may receive events without consumers to send those
   events to. For example, imagine a consumer C subscribes to
   producer B. Next, the consumer C sends demand to B, which sends
-  the demand upstreams. Now, if the consumer C crashes, B may
+  the demand upstream. Now, if the consumer C crashes, B may
   receive the events from upstream but it no longer has a consumer
   to send those events to. In such cases, B will buffer the events
   which have arrived from upstream.
 
-  The buffer buffer can also be used in cases external sources
-  only send events in batches larger than asked for. For example,
-  if you are receiving events from an external source that only
-  sends events in batches of 100 in 100 and the internal demand
-  is smaller than that.
+  The buffer can also be used in cases external sources only send
+  events in batches larger than asked for. For example, if you are
+  receiving events from an external source that only sends events
+  in batches of 100 in 100 and the internal demand is smaller than
+  that.
 
   In all of those cases, if the message cannot be sent immediately,
   it is stored and sent whenever there is an opportunity to. The
   size of the buffer is configured via the `:buffer_size` option
-  returned by `init/1`. The default value is 1000.
+  returned by `init/1`. The default value is 1000. Options like
+  `:buffer_keep` and `:without_consumers` allow developers to further
+  customize the buffer behaviour and how the stage should act when
+  there are no consumers.
 
   ## Streams
 
-  After exploring the example above, you may be thinking that's
+  After exploring the example above, you may be thinking it is
   a lot of code for something that could be expressed with streams.
   For example:
 
@@ -176,21 +182,11 @@ defmodule GenStage do
 
   The example above would print the same values as our stages with
   the difference the stream above is not leveraging concurrency.
-  We can, however, break the stream into multiple stages too:
+  One of the goals of this project is exactly how to explore the
+  interfaces between streams and stages. Meanwhile, it is worth
+  reiterating the advantage of using stages:
 
-      Stream.iterate(0, fn i -> i + 1 end)
-      |> Stream.async_stage()
-      |> Stream.map(fn i -> i * 2 end)
-      |> Stream.async_stage()
-      |> Stream.each(&IO.inspect/1)
-      |> Stream.run()
-
-  Now each step runs into its own stage, using the same primitives
-  as we have discussed above. While using streams may be helpful in
-  many occasions, there are many reasons why someone would use
-  GenStage, some being:
-
-    * Stages provide a more structured approach by breaking into
+    * Stages provide a more structured approach by breaking each
       stage into a separate module
     * Stages provide all callbacks necessary for process management
       (init, terminate, etc)
@@ -808,7 +804,7 @@ defmodule GenStage do
     {:noreply, stage}
   end
 
-  def handle_info({:"$gen_producer", {consumer_pid, ref} = from, {:subscribe, _opts}},
+  def handle_info({:"$gen_producer", {consumer_pid, ref} = from, {:subscribe, opts}},
                   %{consumers: consumers} = stage) do
     case consumers do
       %{^ref => _} ->
@@ -820,7 +816,7 @@ defmodule GenStage do
         stage = put_in stage.monitors[mon_ref], ref
         stage = put_in stage.consumers[ref], {consumer_pid, mon_ref}
         %{dispatcher_state: dispatcher_state} = stage
-        dispatcher_callback(:subscribe, [from, dispatcher_state], stage)
+        dispatcher_callback(:subscribe, [opts, from, dispatcher_state], stage)
     end
   end
 

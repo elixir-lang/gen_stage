@@ -13,7 +13,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     ref  = make_ref()
     disp = dispatcher([])
 
-    {:ok, 0, disp} = D.subscribe({pid, ref}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
     assert disp == {[{0, pid, ref}], 0}
 
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
@@ -26,13 +26,13 @@ defmodule GenStage.BroadcastDispatcherTest do
     ref2 = make_ref()
     disp = dispatcher([])
 
-    {:ok, 0, disp} = D.subscribe({pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     assert disp == {[{0, pid, ref1}], 0}
 
     {:ok, 10, disp} = D.ask(10, {pid, ref1}, disp)
     assert disp == {[{0, pid, ref1}], 10}
 
-    {:ok, 0, disp} = D.subscribe({pid, ref2}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
     assert disp == {[{-10, pid, ref2}, {0, pid, ref1}], 10}
 
     {:ok, 0, disp} = D.cancel({pid, ref1}, disp)
@@ -45,10 +45,10 @@ defmodule GenStage.BroadcastDispatcherTest do
     ref2 = make_ref()
     disp = dispatcher([])
 
-    {:ok, 0, disp} = D.subscribe({pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     assert disp == {[{0, pid, ref1}], 0}
 
-    {:ok, 0, disp} = D.subscribe({pid, ref2}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
     assert disp == {[{0, pid, ref2}, {0, pid, ref1}], 0}
 
     {:ok, 0, disp} = D.ask(10, {pid, ref1}, disp)
@@ -68,8 +68,8 @@ defmodule GenStage.BroadcastDispatcherTest do
     ref3 = make_ref()
     disp = dispatcher([])
 
-    {:ok, 0, disp} = D.subscribe({pid, ref1}, disp)
-    {:ok, 0, disp} = D.subscribe({pid, ref2}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
 
     {:ok, 0, disp} = D.ask(3, {pid, ref1}, disp)
     {:ok, 2, disp} = D.ask(2, {pid, ref2}, disp)
@@ -95,7 +95,7 @@ defmodule GenStage.BroadcastDispatcherTest do
 
     # Add a late subscriber
     {:ok, 1, disp} = D.ask(1, {pid, ref1}, disp)
-    {:ok, 0, disp} = D.subscribe({pid, ref3}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref3}, disp)
     assert disp == {[{-1, pid, ref3}, {0, pid, ref1}, {0, pid, ref2}], 1}
     {:ok, [:e], disp} = D.dispatch([:d, :e], disp)
     assert_received {:"$gen_consumer", {_, ^ref1}, [:d]}

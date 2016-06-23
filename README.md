@@ -1,10 +1,10 @@
-# GenBroker
+# GenStage
 
 Coming soon.
 
 ## Installation
 
-GenBroker requires Erlang 18 and Elixir v1.2.
+GenStage requires Elixir v1.3.
 
   1. Add `:gen_stage` to your list of dependencies in mix.exs:
 
