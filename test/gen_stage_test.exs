@@ -83,13 +83,32 @@ defmodule GenStageTest do
       GenStage.start_link(__MODULE__, init, opts)
     end
 
+    def ask(forwarder, to, n) do
+      GenStage.call(forwarder, {:ask, to, n})
+    end
+
     def init(init) do
       init
+    end
+
+    def handle_call({:ask, to, n}, _, state) do
+      GenStage.ask(to, n)
+      {:reply, :ok, [], state}
+    end
+
+    def handle_subscribe(opts, from, recipient) do
+      send recipient, {:subscribe, from}
+      {Keyword.get(opts, :demand, :automatic), recipient}
     end
 
     def handle_events(events, _from, recipient) do
       send recipient, {:consumed, events}
       {:noreply, [], recipient}
+    end
+
+    def handle_cancel(reason, _from, recipient) do
+      send recipient, {:cancel, reason}
+      {:noreply, recipient}
     end
 
     def terminate(reason, state) do
@@ -147,6 +166,20 @@ defmodule GenStageTest do
       assert_receive {:consumed, [:e]}
       assert_receive {:consumed, [0, 1, 2]}
       assert_receive {:consumed, [3, 4, 5, 6]}
+    end
+
+    test "stores events when there is manual demand" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.async_subscribe(consumer, to: producer, demand: :manual)
+
+      assert_receive {:subscribe, sub}
+      Forwarder.ask(consumer, sub, 50)
+      batch = Enum.to_list(0..49)
+      assert_receive {:consumed, ^batch}
+      Forwarder.ask(consumer, sub, 50)
+      batch = Enum.to_list(50..99)
+      assert_receive {:consumed, ^batch}
     end
 
     test "does not store events without consumers if configured to discard them" do
@@ -325,7 +358,7 @@ defmodule GenStageTest do
       Process.flag(:trap_exit, true)
       {:ok, producer} = Counter.start_link({:producer, -1})
       assert Counter.stop(producer) == :ok
-      assert_received {:EXIT, ^producer, :shutdown}
+      assert_receive {:EXIT, ^producer, :shutdown}
     end
   end
 

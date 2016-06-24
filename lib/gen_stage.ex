@@ -371,6 +371,29 @@ defmodule GenStage do
     {:stop, reason, new_state} when new_state: term, reason: term, event: term
 
   @doc """
+  Used by :consumer types.
+
+  The subscription is setup to automatically handle demand with
+  `{:automatic, new_state}`, otherwise the callback module must manually send
+  demand by returning `{:manual, new_state}` and calling `ask/2`. When a
+  temporary manual subscription is cancelled `handle_cancel/3` is called.
+  """
+  @callback handle_subscribe(opts :: [options], GenServer.from, state :: term) ::
+    {:automatic | :manual, new_state} |
+    {:automatic | :manual, new_state, timeout | :hibernate} |
+    {:stop, reason, new_state} when new_state: term, reason: term
+
+  @doc """
+  Use by :consumer types
+
+  Handle the cleanup when a temporary manual subscription is cancelled
+  """
+  @callback handle_cancel(cancel_reason :: term, GenServer.from, state :: term) ::
+    {:noreply, [event], new_state} |
+    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:stop, reason, new_state} when event: term, new_state: term, reason: term
+
+  @doc """
   Used by :producer_consumer and :consumer types.
   """
   @callback handle_events([event], GenServer.from, state :: term) ::
@@ -413,7 +436,8 @@ defmodule GenStage do
   @callback format_status(:normal | :terminate, [pdict :: {term, term} | state :: term, ...]) ::
     status :: term
 
-  @optional_callbacks [handle_demand: 2, handle_events: 3, format_status: 2]
+  @optional_callbacks [handle_demand: 2,handle_subscribe: 3, handle_cancel: 3,
+                       handle_events: 3, format_status: 2]
 
   @doc false
   defmacro __using__(_) do
@@ -590,6 +614,11 @@ defmodule GenStage do
     cast(stage, {:"$subscribe", to, opts})
   end
 
+  def ask({pid, ref}, demand) when is_integer(demand) and demand > 0 do
+    send pid, {:"$gen_producer", {self(), ref}, {:ask, demand}}
+    :ok
+  end
+
   @doc """
   Makes a synchronous call to the `stage` and waits for its reply.
 
@@ -759,8 +788,7 @@ defmodule GenStage do
 
   @doc false
   def handle_call({:"$subscribe", to, opts}, _from, stage) do
-    {reply, stage} = consumer_subscribe(to, opts, stage)
-    {:reply, reply, stage}
+    consumer_subscribe(to, opts, stage)
   end
 
   def handle_call(msg, from, %{mod: mod, state: state} = stage) do
@@ -783,8 +811,11 @@ defmodule GenStage do
 
   @doc false
   def handle_cast({:"$subscribe", to, opts}, stage) do
-    {_reply, stage} = consumer_subscribe(to, opts, stage)
-    {:noreply, stage}
+    case consumer_subscribe(to, opts, stage) do
+      {:reply, _, stage, timeout} -> {:noreply, stage, timeout}
+      {:stop, reason, _, stage}   -> {:stop, reason, stage}
+      {:stop, _, _} = stop        -> stop
+    end
   end
 
   def handle_cast(msg, %{state: state} = stage) do
@@ -862,7 +893,7 @@ defmodule GenStage do
             noreply_callback(:handle_events, [events, from, state], stage)
           {events, ask, stage} when is_integer(ask) and ask > 0 ->
             return = noreply_callback(:handle_events, [events, from, state], stage)
-            send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, ask}}
+            ask(from, ask)
             return
         end
       _ ->
@@ -1032,11 +1063,14 @@ defmodule GenStage do
   defp queue_last([event | events], queue, excess, counter, max),
     do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max)
 
-  defp consumer_receive(ref, {producer_id, cancel, demand, min, max}, events, stage) do
+  defp consumer_receive(ref, {producer_id, cancel, {demand, min, max}}, events, stage) do
     {demand, events} = consumer_check_excess(ref, producer_id, demand, events)
     new_demand = if demand <= min, do: max, else: demand
-    stage = put_in stage.producers[ref], {producer_id, cancel, new_demand, min, max}
+    stage = put_in stage.producers[ref], {producer_id, cancel, {new_demand, min, max}}
     {events, new_demand - demand, stage}
+  end
+  defp consumer_receive(_, {_, _, :manual}, events, stage) do
+    {events, 0, stage}
   end
 
   defp consumer_check_excess(ref, producer_id, demand, events) do
@@ -1053,29 +1087,55 @@ defmodule GenStage do
 
   defp consumer_subscribe(to, _opts, %{type: :producer} = stage) do
     :error_logger.error_msg('GenStage producer cannot be subscribed to another stage: ~p~n', [to])
-    {{:error, :not_a_consumer}, stage}
+    {:reply, {:error, :not_a_consumer}, stage, :infinity}
   end
 
   defp consumer_subscribe(to, opts, stage) do
     with {:ok, cancel, opts} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
          {:ok, max, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
          {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1) do
-      if producer_pid = GenServer.whereis(to) do
-        ref = Process.monitor(producer_pid)
-        send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
-        send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, max}}
-        stage = put_in stage.producers[ref], {producer_pid, cancel, max, min, max}
-        {{:ok, ref}, stage}
-      else
-        ref = make_ref()
-        stage = put_in stage.producers[ref], {to, cancel, max, min, max}
-        send self(), {:DOWN, ref, :process, to, :noproc}
-        {{:ok, ref}, stage}
-      end
+      producer_pid = GenServer.whereis(to)
+      cond do
+        producer_pid != nil ->
+          ref = Process.monitor(producer_pid)
+          send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
+          handle_subscribe(opts, ref, producer_pid, cancel, {max, min, max}, stage)
+        cancel == :temporary ->
+          {:reply, {:ok, make_ref()}, stage, :infinity}
+        cancel == :permanent ->
+          {:stop, :noproc, {:ok, make_ref()}, stage}
+       end
     else
       {:error, message} ->
         :error_logger.error_msg('GenStage subscribe received invalid option: ~ts~n', [message])
-        {{:error, {:bad_opts, message}}, stage}
+        {:reply, {:error, {:bad_opts, message}}, stage, :infinity}
+    end
+  end
+
+  defp handle_subscribe(opts, ref, producer_pid, cancel, demand, stage) do
+    to = {producer_pid, ref}
+    case handle_subscribe(opts, to, stage) do
+      {:automatic, stage, timeout} ->
+        {ask, _, _} = demand
+        ask(to, ask)
+        stage = put_in stage.producers[ref], {producer_pid, cancel, demand}
+        {:reply, {:ok, ref}, stage, timeout}
+      {:manual, stage, timeout} ->
+        stage = put_in stage.producers[ref], {producer_pid, cancel, :manual}
+        {:reply, {:ok, ref}, stage, timeout}
+      {:stop, _, _} = stop ->
+        stop
+    end
+  end
+
+  defp handle_subscribe(opts, to, %{mod: mod, state: state} = stage) do
+    case apply(mod, :handle_subscribe, [opts, to, state]) do
+      {mode, state} when mode in [:automatic, :manual] ->
+        {mode, %{stage | state: state}, :infinity}
+      {mode, state, timeout} when mode in [:automatic, :manual] ->
+        {mode, %{stage | state: state}, timeout}
+      {:stop, reason, state} ->
+        {:stop, reason, %{stage | state: state}}
     end
   end
 
@@ -1083,12 +1143,22 @@ defmodule GenStage do
     case Map.pop(producers, ref) do
       {nil, _producers} ->
         {:noreply, stage}
-      {{_, :temporary, _, _, _}, producers} ->
+      {{_, :temporary, {_, _, _}}, producers} ->
         Process.demonitor(ref, [:flush])
         {:noreply, %{stage | producers: producers}}
-      {{_, :permanent, _, _, _}, producers} ->
+      {{producer_pid, :temporary, :manual}, producers} ->
+        handle_cancel(reason, {producer_pid, ref}, %{stage | producers: producers})
+      {{_, :permanent, _}, producers} ->
         Process.demonitor(ref, [:flush])
         {:stop, reason, %{stage | producers: producers}}
+    end
+  end
+
+  defp handle_cancel(reason, to, %{mod: mod, state: state} = stage) do
+    case apply(mod, :handle_cancel, [reason, to, state]) do
+      {:noreply, state}          -> {:noreply, %{stage | state: state}}
+      {:noreply, state, timeout} -> {:noreply, %{stage | state: state}, timeout}
+      {:stop, reason, state}     -> {:stop, reason, %{stage | state: state}}
     end
   end
 
