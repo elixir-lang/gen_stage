@@ -188,6 +188,18 @@ defmodule DynamicSupervisor do
 
   A supervisor is bound to the same name registration rules as a `GenServer`.
   Read more about it in the `GenServer` docs.
+
+  ## GenStage consumer
+
+  A `DynamicSupervisor` can be used as the consumer in a `GenStage` pipeline.
+  Each event must be a list of arguments (possibly empty) to append to the
+  arguments in the child specification - as with `start_child/2`.
+
+  A `DynamicSupervisor` can be attached to a producer with
+  `GenStage.sync_subscribe/3` and `GenStage.async_subscribe/2`. Each producer
+  will be limit to starting `max_demand` concurrent children. Therefore the
+  number of concurrent children from an individual producer must fall below
+  `max_demand` before more arguments will be demanded from that producer.
   """
 
   @behaviour GenServer
@@ -198,7 +210,7 @@ defmodule DynamicSupervisor do
                     strategy: Supervisor.Spec.strategy,
                     max_restarts: non_neg_integer,
                     max_seconds: non_neg_integer,
-                    max_children: non_neg_integer | :infinity]
+                    max_dynamic: non_neg_integer | :infinity]
 
   @doc """
   Callback invoked to start the supervisor and during hot code upgrades.
@@ -214,15 +226,17 @@ defmodule DynamicSupervisor do
     * `:max_seconds` - the time frame in which `:max_restarts` applies
       in seconds. Defaults to 5 seconds.
 
-    * `:max_children` - the maximum number of children started under the
-      supervisor. Default to infinity children.
-
+    * `:max_dynamic` - the maximum number of children started under the
+      supervisor by dynamic requests. Default to infinity children. The
+      maximum number is limited by max_dynamic plus the max_demand for
+      each producer.
   """
   @callback init(args :: term) ::
     {:ok, [Supervisor.Spec.spec], options :: Keyword.t} | :ignore
 
   defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
-             :max_children, children: %{}, restarts: [], restarting: 0]
+             :max_dynamic, :demand, children: %{}, restarts: [], restarting: 0,
+             dynamic: 0, producers: %{}]
 
   @doc false
   defmacro __using__(_) do
@@ -231,8 +245,6 @@ defmodule DynamicSupervisor do
       import Supervisor.Spec
     end
   end
-
-  # TODO: Add max_demand / min_demand (pull)
 
   @doc """
   Starts a supervisor with the given children.
@@ -395,15 +407,15 @@ defmodule DynamicSupervisor do
     strategy     = opts[:strategy]
     max_restarts = Keyword.get(opts, :max_restarts, 3)
     max_seconds  = Keyword.get(opts, :max_seconds, 5)
-    max_children = Keyword.get(opts, :max_children, :infinity)
+    max_dynamic  = Keyword.get(opts, :max_dynamic, :infinity)
 
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
          :ok <- validate_seconds(max_seconds),
-         :ok <- validate_children(max_children) do
+         :ok <- validate_dynamic(max_dynamic) do
       {:ok, %{state | template: child, strategy: strategy,
                       max_restarts: max_restarts, max_seconds: max_seconds,
-                      max_children: max_children}}
+                      max_dynamic: max_dynamic}}
     end
   end
   defp init(_state, [_], _opts) do
@@ -427,11 +439,16 @@ defmodule DynamicSupervisor do
   defp validate_seconds(seconds) when is_integer(seconds), do: :ok
   defp validate_seconds(_), do: {:error, "max_seconds must be an integer"}
 
-  defp validate_children(:infinity), do: :ok
-  defp validate_children(children) when is_integer(children), do: :ok
-  defp validate_children(_), do: {:error, "max_children must be an integer or :infinity"}
+  defp validate_dynamic(:infinity), do: :ok
+  defp validate_dynamic(dynamic) when is_integer(dynamic), do: :ok
+  defp validate_dynamic(_), do: {:error, "max_dynamic must be an integer or :infinity"}
 
   @doc false
+  def handle_call({:"$subscribe", to, opts}, _from, state) do
+    {reply, state} = consumer_subscribe(to, opts, state)
+    {:reply, reply, state}
+  end
+
   def handle_call(:which_children, _from, state) do
     %{children: children, template: child} = state
     {_, _, _, _, type, mods} = child
@@ -468,21 +485,23 @@ defmodule DynamicSupervisor do
 
   def handle_call({:terminate_child, pid}, _from, %{children: children} = state) do
     case children do
-      %{^pid => args} ->
-        :ok = terminate_children(%{pid => args}, state)
-        {:reply, :ok, delete_child(pid, state)}
+      %{^pid => [producer | _] = info} ->
+        :ok = terminate_children(%{pid => info}, state)
+        {:reply, :ok, delete_child(producer, pid, state)}
+      %{^pid => {:restarting, [producer | _]} = info} ->
+        :ok = terminate_children(%{pid => info}, state)
+        {:reply, :ok, delete_child(producer, pid, state)}
       %{} ->
         {:reply, {:error, :not_found}, state}
     end
   end
 
   def handle_call({:start_child, extra}, _from, state) do
-    %{children: children, max_children: max_children,
-      restarting: restarting, template: child} = state
-    if map_size(children) + restarting < max_children do
-      handle_start_child(child, extra, state)
+    %{dynamic: dynamic, max_dynamic: max_dynamic, template: child} = state
+    if dynamic < max_dynamic do
+      handle_start_child(child, extra, %{state | dynamic: dynamic + 1})
     else
-      {:reply, {:error, :max_children}, state}
+      {:reply, {:error, :max_dynamic}, state}
     end
   end
 
@@ -490,11 +509,11 @@ defmodule DynamicSupervisor do
     args = args ++ extra
     case reply = start_child(m, f, args) do
       {:ok, pid, _} ->
-        {:reply, reply, save_child(restart, pid, args, state)}
+        {:reply, reply, save_child(restart, :dynamic, pid, args, state)}
       {:ok, pid} ->
-        {:reply, reply, save_child(restart, pid, args, state)}
+        {:reply, reply, save_child(restart, :dynamic, pid, args, state)}
       _ ->
-        {:reply, reply, state}
+        {:reply, reply, update_in(state.dynamic, & &1 - 1)}
     end
   end
 
@@ -513,17 +532,18 @@ defmodule DynamicSupervisor do
     end
   end
 
-  defp save_child(:temporary, pid, _, state),
-    do: put_in(state.children[pid], :undefined)
-  defp save_child(_, pid, args, state),
-    do: put_in(state.children[pid], args)
+  defp save_child(:temporary, producer, pid, _, state),
+    do: put_in(state.children[pid], [producer | :undefined])
+  defp save_child(_, producer, pid, args, state),
+    do: put_in(state.children[pid], [producer | args])
 
   defp exit_reason(:exit, reason, _),      do: reason
   defp exit_reason(:error, reason, stack), do: {reason, stack}
   defp exit_reason(:throw, value, stack),  do: {{:nocatch, value}, stack}
 
   @doc false
-  def handle_cast(_msg, state) do
+  def handle_cast({:"$subscribe", to, opts}, state) do
+    {_reply, state} = consumer_subscribe(to, opts, state)
     {:noreply, state}
   end
 
@@ -543,9 +563,9 @@ defmodule DynamicSupervisor do
 
     case children do
       %{^pid => restarting_args} ->
-        {:restarting, args} = restarting_args
+        {:restarting, [producer | args]} = restarting_args
 
-        case restart_child(pid, args, child, state) do
+        case restart_child(producer, pid, args, child, state) do
           {:ok, state} ->
             {:noreply, state}
           {:shutdown, state} ->
@@ -559,7 +579,42 @@ defmodule DynamicSupervisor do
     end
   end
 
+  def handle_info({:"$gen_consumer", {producer_pid, ref} = from, events}, state)
+      when is_list(events) do
+    %{producers: producers} = state
+    case producers do
+      %{^ref => entry} ->
+        case consumer_receive(ref, entry, events, state) do
+          {events, 0, state} ->
+            start_children(from, events, state)
+          {events, ask, state} when is_integer(ask) and ask > 0 ->
+            return = start_children(from, events, state)
+            send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, ask}}
+            return
+        end
+      _ ->
+        send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:"$gen_consumer", {_, ref}, {:cancel, _} = reason}, state) do
+    cancel_producer(ref, reason, state)
+  end
+
+  def handle_info({:DOWN, ref, _, _, reason} = msg, state) do
+    %{producers: producers} = state
+    case producers do
+      %{^ref => _} -> cancel_producer(ref, reason, state)
+      %{}          -> unexpected_info(msg, state)
+    end
+  end
+
   def handle_info(msg, state) do
+    unexpected_info(msg, state)
+  end
+
+  defp unexpected_info(msg, state) do
     :error_logger.error_msg('Supervisor received unexpected message: ~p~n', [msg])
     {:noreply, state}
   end
@@ -690,41 +745,67 @@ defmodule DynamicSupervisor do
     {_, _, restart, _, _, _} = child
 
     case children do
-      %{^pid => args} -> maybe_restart_child(restart, reason, pid, args, child, state)
-      %{} -> {:ok, state}
+      %{^pid => [producer | args]} ->
+        maybe_restart_child(restart, reason, producer, pid, args, child, state)
+      %{} ->
+        {:ok, state}
     end
   end
 
-  defp maybe_restart_child(:permanent, reason, pid, args, child, state) do
+  defp maybe_restart_child(:permanent, reason, producer, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
-    restart_child(pid, args, child, state)
+    restart_child(producer, pid, args, child, state)
   end
-  defp maybe_restart_child(_, :normal, pid, _args, _child, state) do
-    {:ok, delete_child(pid, state)}
+  defp maybe_restart_child(_, :normal, producer, pid, _args, _child, state) do
+    {:ok, delete_child(producer, pid, state)}
   end
-  defp maybe_restart_child(_, :shutdown, pid, _args, _child, state) do
-    {:ok, delete_child(pid, state)}
+  defp maybe_restart_child(_, :shutdown, producer, pid, _args, _child, state) do
+    {:ok, delete_child(producer, pid, state)}
   end
-  defp maybe_restart_child(_, {:shutdown, _}, pid, _args, _child, state) do
-    {:ok, delete_child(pid, state)}
+  defp maybe_restart_child(_, {:shutdown, _}, producer, pid, _args, _child, state) do
+    {:ok, delete_child(producer, pid, state)}
   end
-  defp maybe_restart_child(:transient, reason, pid, args, child, state) do
+  defp maybe_restart_child(:transient, reason, producer, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
-    restart_child(pid, args, child, state)
+    restart_child(producer, pid, args, child, state)
   end
-  defp maybe_restart_child(:temporary, reason, pid, args, child, state) do
+  defp maybe_restart_child(:temporary, reason, producer, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
-    {:ok, delete_child(pid, state)}
+    {:ok, delete_child(producer, pid, state)}
   end
 
-  defp delete_child(pid, %{children: children} = state) do
-    %{state | children: Map.delete(children, pid)}
+  defp delete_child(:dynamic, pid, state) do
+    %{children: children, dynamic: dynamic} = state
+    %{state | children: Map.delete(children, pid), dynamic: dynamic - 1}
+  end
+  defp delete_child(ref, pid, %{children: children} = state) do
+    children = Map.delete(children, pid)
+    reduce_child_count(ref, 1, children, state)
   end
 
-  defp restart_child(pid, args, child, state) do
+  defp reduce_child_count(ref, n, children, state) do
+    %{producers: producers} = state
+    case producers do
+      %{^ref => {producer_pid, cancel, count, demand, min, max}} when demand <= min ->
+        new_count = count - n
+        ask = (max - new_count) - demand
+        new_demand = demand + ask
+        new_entry = {producer_pid, cancel, new_count, new_demand, min, max}
+        producers = Map.put(producers, ref, new_entry)
+        send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, ask}}
+        %{state | children: children, producers: producers}
+      %{^ref => {_producer_pid, _cancel, count, _demand, _min, _max} = entry} ->
+        new_entry = put_elem(entry, 2, count-n)
+        %{state | children: children, producers: Map.put(producers, ref, new_entry)}
+      %{} ->
+        %{state | children: children}
+    end
+  end
+
+  defp restart_child(producer, pid, args, child, state) do
     case add_restart(state) do
       {:ok, %{strategy: strategy} = state} ->
-        case restart_child(strategy, pid, args, child, state) do
+        case restart_child(strategy, producer, pid, args, child, state) do
           {:ok, state} ->
             {:ok, state}
           {:try_again, state} ->
@@ -733,7 +814,7 @@ defmodule DynamicSupervisor do
         end
       {:shutdown, state} ->
         report_error(:shutdown, :reached_max_restart_intensity, pid, args, child, state)
-        {:shutdown, delete_child(pid, state)}
+        {:shutdown, delete_child(producer, pid, state)}
     end
   end
 
@@ -754,16 +835,16 @@ defmodule DynamicSupervisor do
     for then <- restarts, now <= then + period, do: then
   end
 
-  defp restart_child(:one_for_one, current_pid, args, child, state) do
+  defp restart_child(:one_for_one, producer, current_pid, args, child, state) do
     {_, {m, f, _}, restart, _, _, _} = child
 
     case start_child(m, f, args) do
       {:ok, pid, _} ->
-        {:ok, save_child(restart, pid, args, delete_child(current_pid, state))}
+        {:ok, save_child(restart, producer, pid, args, delete_child(producer, current_pid, state))}
       {:ok, pid} ->
-        {:ok, save_child(restart, pid, args, delete_child(current_pid, state))}
+        {:ok, save_child(restart, producer, pid, args, delete_child(producer, current_pid, state))}
       :ignore ->
-        {:ok, delete_child(current_pid, state)}
+        {:ok, delete_child(producer, current_pid, state)}
       {:error, reason} ->
         report_error(:start_error, reason, {:restarting, current_pid}, args, child, state)
         state = restart_child(current_pid, state)
@@ -775,8 +856,8 @@ defmodule DynamicSupervisor do
     case children do
       %{^pid => {:restarting, _}} ->
         state
-      %{^pid => args} ->
-        %{state | children: Map.put(children, pid, {:restarting, args})}
+      %{^pid => info} ->
+        %{state | children: Map.put(children, pid, {:restarting, info})}
     end
   end
 
@@ -806,4 +887,121 @@ defmodule DynamicSupervisor do
     [data: [{~c"State", state}],
      supervisor: [{~c"Callback", mod}]]
   end
+
+  defp consumer_subscribe(to, opts, stage) do
+    with {:ok, cancel, opts} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
+         {:ok, max, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
+         {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1) do
+      if producer_pid = GenServer.whereis(to) do
+        ref = Process.monitor(producer_pid)
+        send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
+        send producer_pid, {:"$gen_producer", {self(), ref}, {:ask, max}}
+        stage = put_in stage.producers[ref], {producer_pid, cancel, 0, max, min, max}
+        {{:ok, ref}, stage}
+      else
+        ref = make_ref()
+        stage = put_in stage.producers[ref], {to, cancel, 0, max, min, max}
+        send self(), {:DOWN, ref, :process, to, :noproc}
+        {{:ok, ref}, stage}
+      end
+    else
+      {:error, message} ->
+        :error_logger.error_msg('DynamicSupervisor subscribe received invalid option: ~ts~n', [message])
+        {{:error, {:bad_opts, message}}, stage}
+    end
+  end
+
+  defp validate_in(opts, key, default, values) do
+    {value, opts} = Keyword.pop(opts, key, default)
+
+    if value in values do
+      {:ok, value, opts}
+    else
+      {:error, "expected #{inspect key} to be one of #{inspect values}, got: #{inspect value}"}
+    end
+  end
+
+  defp validate_integer(opts, key, default, min, max) do
+    {value, opts} = Keyword.pop(opts, key, default)
+
+    cond do
+      not is_integer(value) ->
+        {:error, "expected #{inspect key} to be an integer, got: #{inspect value}"}
+      value < min ->
+        {:error, "expected #{inspect key} to be equal to or greater than #{min}, got: #{inspect value}"}
+      value > max ->
+        {:error, "expected #{inspect key} to be equal to or less than #{max}, got: #{inspect value}"}
+      true ->
+        {:ok, value, opts}
+    end
+  end
+
+  defp consumer_receive(ref, entry, events, state) do
+    {producer_id, cancel, handling, demand, min, max} = entry
+    {demand, len, events} = consumer_check_excess(ref, producer_id, demand, events)
+    new_handling = handling + len
+    ask = if demand <= min, do: (max-new_handling) - demand, else: 0
+    new_demand = demand + ask
+    new_entry = {producer_id, cancel, new_handling, new_demand, min, max}
+    state = put_in state.producers[ref], new_entry
+    {events, ask, state}
+  end
+
+  defp consumer_check_excess(ref, producer_id, demand, events) do
+    len = length(events)
+    remaining = demand - len
+
+    if remaining < 0 do
+      :error_logger.error_msg('DynamicSupervisor has discarded ~p events in excess from: ~p~n',
+                              [abs(remaining), {producer_id, ref}])
+      {0, demand, Enum.take(events, demand)}
+    else
+      {remaining, len, events}
+    end
+  end
+
+  defp start_children(from, events, state) do
+    start_children(state.template, from, events, 0, state)
+  end
+
+  defp start_children(child, {_, ref} = from, [extra | extras], reduce, state) do
+    {_, {m, f, args}, restart, _, _, _} = child
+    args = args ++ extra
+    case start_child(m, f, args) do
+      {:ok, pid, _} ->
+        state = save_child(restart, ref, pid, args, state)
+        start_children(child, from, extras, reduce, state)
+      {:ok, pid} ->
+        state = save_child(restart, ref, pid, args, state)
+        start_children(child, from, extras, reduce, state)
+      :ignore ->
+        start_children(child, from, extras, reduce+1, state)
+      {:error, reason} ->
+        :error_logger.error_msg('DynamicSupervisor failed to start child from: ~p with reason: ~p~n',
+          [from, reason])
+        report_error(:start_error, reason, :undefined, args, child, state)
+        start_children(child, from, extras, reduce+1, state)
+    end
+  end
+  defp start_children(_, _, [], 0, state) do
+    {:noreply, state}
+  end
+  defp start_children(_, {_, ref}, [], reduce, state) do
+    {:noreply, reduce_child_count(ref, reduce, state.children, state)}
+  end
+
+  defp cancel_producer(ref, reason, %{producers: producers} = stage) do
+    case Map.pop(producers, ref) do
+      {nil, _producers} ->
+        {:noreply, stage}
+      {{_, :temporary, _, _, _, _}, producers} ->
+        Process.demonitor(ref, [:flush])
+        {:noreply, %{stage | producers: producers}}
+      {{_, :permanent, _, _, _, _}, producers} ->
+        Process.demonitor(ref, [:flush])
+        {:stop, reason, %{stage | producers: producers}}
+    end
+  end
+
+
 end

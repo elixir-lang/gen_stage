@@ -410,7 +410,10 @@ defmodule GenStage do
     {:ok, new_state :: term} |
     {:error, reason :: term} when old_vsn: term | {:down, term}
 
-  @optional_callbacks [handle_demand: 2, handle_events: 3]
+  @callback format_status(:normal | :terminate, [pdict :: {term, term} | state :: term, ...]) ::
+    status :: term
+
+  @optional_callbacks [handle_demand: 2, handle_events: 3, format_status: 2]
 
   @doc false
   defmacro __using__(_) do
@@ -888,6 +891,29 @@ defmodule GenStage do
     case mod.code_change(old_vsn, state, extra) do
       {:ok, state} -> {:ok, %{stage | state: state}}
       other -> other
+    end
+  end
+
+  @doc false
+  def format_status(opt, [pdict, %{mod: mod, state: state}]) do
+    case function_exported?(mod, :format_status, 2) do
+      true when opt == :normal ->
+        format_status(mod, opt, pdict, state, [data: {~c(State), state}])
+      true when opt == :terminate ->
+        format_status(mod, opt, pdict, state, state)
+      false when opt == :normal ->
+        [data: {~c(State), state}]
+      false when opt == :terminate ->
+        state
+    end
+  end
+
+  defp format_status(mod, opt, pdict, state, default) do
+    try do
+      mod.format_status(opt, [pdict, state])
+    catch
+      _, _ ->
+        default
     end
   end
 
