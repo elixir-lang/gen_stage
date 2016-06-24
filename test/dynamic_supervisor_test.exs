@@ -555,30 +555,14 @@ defmodule DynamicSupervisorTest do
       GenStage.call(stage, {:queue, events})
     end
 
-    def async_queue(stage, events) do
-      GenStage.cast(stage, {:queue, events})
-    end
-
-    def stop(stage) do
-      GenStage.call(stage, :stop)
-    end
-
     ## Callbacks
 
     def init(state) do
       {:producer, state}
     end
 
-    def handle_call(:stop, _from, state) do
-      {:stop, :shutdown, :ok, state}
-    end
-
     def handle_call({:queue, events}, _from, state) do
       {:reply, state, events, state}
-    end
-
-    def handle_cast({:queue, events}, state) do
-      {:noreply, events, state}
     end
 
     def handle_demand(_, state) do
@@ -778,6 +762,36 @@ defmodule DynamicSupervisorTest do
       assert DynamicSupervisor.terminate_child(sup, child2) == :ok
       assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(sup)
       assert [] = DynamicSupervisor.which_children(sup)
+    end
+
+    test "ask for more events when count shrinks below or equal to min" do
+      _ = Process.flag(:trap_exit, true)
+      {:ok, producer} = Producer.start_link()
+      {:ok, sup} = Consumer.start_link()
+      opts = [to: producer, cancel: :temporary, max_demand: 3, min_demand: 2]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+
+      Producer.sync_queue(producer, [[:ok2], [:ok2], [:ok2]])
+      assert_receive {:child_started, child1}
+      assert_receive {:child_started, child2}
+      assert_receive {:child_started, _child3}
+      assert %{workers: 3, active: 3} = DynamicSupervisor.count_children(sup)
+
+      assert_kill child1, :shutdown
+      assert_kill child2, :shutdown
+
+      assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(sup)
+
+      Producer.sync_queue(producer, [[:ok2]])
+      assert_receive {:child_started, _child4}
+
+      Producer.sync_queue(producer, [[:ok2]])
+      assert_receive {:child_started, _child5}
+
+      assert %{workers: 3, active: 3} = DynamicSupervisor.count_children(sup)
+
+      Producer.sync_queue(producer, [[:ok2]])
+      refute_received {:child_started, _child6}
     end
   end
 

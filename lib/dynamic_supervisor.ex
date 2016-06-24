@@ -788,7 +788,7 @@ defmodule DynamicSupervisor do
     case producers do
       %{^ref => {producer_pid, cancel, count, demand, min, max}} when demand <= min ->
         new_count = count - n
-        ask = max - new_count
+        ask = (max - new_count) - demand
         new_demand = demand + ask
         new_entry = {producer_pid, cancel, new_count, new_demand, min, max}
         producers = Map.put(producers, ref, new_entry)
@@ -940,10 +940,11 @@ defmodule DynamicSupervisor do
     {producer_id, cancel, handling, demand, min, max} = entry
     {demand, len, events} = consumer_check_excess(ref, producer_id, demand, events)
     new_handling = handling + len
-    new_demand = if demand <= min, do: demand+(max-new_handling), else: demand
+    ask = if demand <= min, do: (max-new_handling) - demand, else: 0
+    new_demand = demand + ask
     new_entry = {producer_id, cancel, new_handling, new_demand, min, max}
     state = put_in state.producers[ref], new_entry
-    {events, new_demand - demand, state}
+    {events, ask, state}
   end
 
   defp consumer_check_excess(ref, producer_id, demand, events) do
@@ -981,6 +982,9 @@ defmodule DynamicSupervisor do
         report_error(:start_error, reason, :undefined, args, child, state)
         start_children(child, from, extras, reduce+1, state)
     end
+  end
+  defp start_children(_, _, [], 0, state) do
+    {:noreply, state}
   end
   defp start_children(_, {_, ref}, [], reduce, state) do
     {:noreply, reduce_child_count(ref, reduce, state.children, state)}
