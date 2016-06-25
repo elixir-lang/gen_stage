@@ -103,7 +103,7 @@ defmodule DynamicSupervisorTest do
 
   defp fake_upgrade(pid, args) do
     :ok = :sys.suspend(pid)
-    :sys.replace_state(pid, fn state -> %{state | args: args} end)
+    :sys.replace_state(pid, fn stage -> put_in(stage.state.args, args) end)
     res = :sys.change_code(pid, :gen_server, 123, :extra)
     :ok = :sys.resume(pid)
     res
@@ -496,6 +496,305 @@ defmodule DynamicSupervisorTest do
     assert {:error, :not_found} = DynamicSupervisor.terminate_child(sup, child)
     assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(sup)
   end
+
+  defmodule Consumer do
+
+    def start_link(opts \\ []) do
+      children = [worker(__MODULE__, [self()],
+        opts ++ [function: :start_child, restart: :temporary])]
+      opts = opts ++ [strategy: :one_for_one, max_restarts: 0]
+      DynamicSupervisor.start_link(children, opts)
+    end
+
+    def start_child(pid, :ok2) do
+      child = spawn_link(:timer, :sleep, [:infinity])
+      send(pid, {:child_started, child})
+      {:ok, child}
+    end
+    def start_child(pid, :ok3) do
+      child = spawn_link(:timer, :sleep, [:infinity])
+      send(pid, {:child_started, child})
+      {:ok, child, :extra}
+    end
+    def start_child(pid, :error) do
+      send(pid, :child_start_error)
+      {:error, :found}
+    end
+    def start_child(pid, :ignore) do
+      send(pid, :child_ignore)
+      :ignore
+    end
+    def start_child(pid, :unknown) do
+      send(pid, :child_start_unknown)
+      :unknown
+    end
+
+    def start_child(pid, :non_local, class) do
+      send(pid, {:child_non_local, class})
+      stack = try do throw(:oops) catch :oops -> System.stacktrace() end
+      :erlang.raise(class, :oops, stack)
+    end
+    def start_child(pid, :restart, value) do
+      if Process.get({:restart, value}) do
+        start_child(pid, value)
+      else
+        Process.put({:restart, value}, true)
+        start_child(pid, :ok2)
+      end
+    end
+  end
+
+  defmodule Producer do
+    use GenStage
+
+    def start_link(state \\ nil) do
+      GenStage.start_link(__MODULE__, state)
+    end
+
+    def sync_queue(stage, events) do
+      GenStage.call(stage, {:queue, events})
+    end
+
+    ## Callbacks
+
+    def init(state) do
+      {:producer, state}
+    end
+
+    def handle_call({:queue, events}, _from, state) do
+      {:reply, state, events, state}
+    end
+
+    def handle_demand(_, state) do
+      {:noreply, [], state}
+    end
+  end
+
+  describe "sync_subscribe" do
+    test "returns ok with reference" do
+      {:ok, sup} = Consumer.start_link()
+      {:ok, producer} = Producer.start_link()
+      assert {:ok, ref} = GenStage.sync_subscribe(sup, to: producer)
+      assert is_reference(ref)
+    end
+
+    @tag :capture_log
+    test "returns errors on bad options" do
+       {:ok, sup} = Consumer.start_link()
+
+      assert {:error, {:bad_opts, message}} =
+             GenStage.sync_subscribe(sup, to: :whatever, max_demand: 0)
+      assert message == "expected :max_demand to be equal to or greater than 1, got: 0"
+
+      assert {:error, {:bad_opts, message}} =
+             GenStage.sync_subscribe(sup, to: :whatever, min_demand: 200)
+      assert message == "expected :min_demand to be equal to or less than 99, got: 200"
+    end
+
+    @tag :capture_log
+    test "supervisor exits when there is no named producer and subscription is permanent" do
+      Process.flag(:trap_exit, true)
+      {:ok, sup} = Consumer.start_link()
+      assert {:ok, _} = GenStage.sync_subscribe(sup, to: :unknown)
+      assert_receive {:EXIT, ^sup, :noproc}
+    end
+
+    @tag :capture_log
+    test "supevisor exits when producer is dead and subscription is permanent" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Producer.start_link()
+      GenStage.stop(producer)
+      {:ok, sup} = Consumer.start_link()
+      assert {:ok, _} = GenStage.sync_subscribe(sup, to: producer)
+      assert_receive {:EXIT, ^sup, :noproc}
+    end
+
+    @tag :capture_log
+    test "supervisor does not exit when there is no named producer and subscription is temporary" do
+      {:ok, sup} = Consumer.start_link()
+      assert {:ok, _} = GenStage.sync_subscribe(sup, to: :unknown, cancel: :temporary)
+      _ = :sys.get_state(sup)
+    end
+
+    @tag :capture_log
+    test "supervisor does not exit when producer is dead and subscription is temporary" do
+      {:ok, producer} = Producer.start_link()
+      GenStage.stop(producer)
+      {:ok, sup} = Consumer.start_link()
+      assert {:ok, _} = GenStage.sync_subscribe(sup, to: producer, cancel: :temporary)
+      _ = :sys.get_state(sup)
+    end
+  end
+
+  describe "supervisor consuming start args" do
+    @tag :capture_log
+    test "start child" do
+      {:ok, producer} = Producer.start_link()
+      {:ok, sup} = Consumer.start_link()
+      opts = [to: producer, cancel: :temporary]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+
+      Producer.sync_queue(producer, [[:ok2]])
+      assert_receive {:child_started, ok2}
+      assert [{:undefined, ^ok2, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+
+      Producer.sync_queue(producer, [[:ok3]])
+      assert_receive {:child_started, _}
+      assert %{active: 2} = DynamicSupervisor.count_children(sup)
+
+      Producer.sync_queue(producer, [[:error]])
+      assert_receive :child_start_error
+      assert [{:undefined, _, :worker, [Consumer]},
+              {:undefined, _, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+      assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
+
+      Producer.sync_queue(producer, [[:ignore]])
+      assert_receive :child_ignore
+      assert [{:undefined, _, :worker, [Consumer]},
+              {:undefined, _, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+      assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
+
+      Producer.sync_queue(producer, [[:unknown]])
+      assert_receive :child_start_unknown
+      assert [{:undefined, _, :worker, [Consumer]},
+              {:undefined, _, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+      assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
+    end
+
+    @tag :capture_log
+    test "start child with throw/error/exit" do
+      {:ok, producer} = Producer.start_link()
+      {:ok, sup} = Consumer.start_link()
+      opts = [to: producer, cancel: :temporary]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+
+      Producer.sync_queue(producer, [[:non_local, :throw]])
+      assert_receive {:child_non_local, :throw}
+      assert [] = DynamicSupervisor.which_children(sup)
+
+      Producer.sync_queue(producer, [[:non_local, :error]])
+      assert_receive {:child_non_local, :error}
+      assert [] = DynamicSupervisor.which_children(sup)
+
+      Producer.sync_queue(producer, [[:non_local, :exit]])
+      assert_receive {:child_non_local, :exit}
+      assert [] = DynamicSupervisor.which_children(sup)
+    end
+
+    @tag :capture_log
+    test "start child limited by max_demand" do
+      {:ok, producer} = Producer.start_link()
+      {:ok, sup} = Consumer.start_link()
+      opts = [to: producer, cancel: :temporary, max_demand: 1, min_demand: 0]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+
+      Producer.sync_queue(producer,
+        [[:ok2], [:error], [:ignore], [:ok2], [:ok2], [:ok2]])
+      assert_receive {:child_started, child1}
+      assert [{:undefined, ^child1, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+      assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(sup)
+      refute_received :child_start_error
+
+      assert_kill(child1, :shutdown)
+      assert_receive :child_start_error
+      assert_receive :child_ignore
+      assert_receive {:child_started, child2}
+      assert [{:undefined, ^child2, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+      assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(sup)
+      refute_received {:child_started, _}
+
+      assert DynamicSupervisor.terminate_child(sup, child2) == :ok
+      assert_receive {:child_started, child3}
+      assert [{:undefined, ^child3, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+      assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(sup)
+      refute_received {:child_started, _}
+    end
+
+    test "restarting children counted in max_demand" do
+      {:ok, producer} = Producer.start_link()
+      {:ok, sup} = Consumer.start_link([restart: :permanent, max_restarts: 100_000])
+      opts = [to: producer, cancel: :temporary, max_demand: 1, min_demand: 0]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+
+      Producer.sync_queue(producer, [[:restart, :error], [:ok2], [:ok2]])
+      assert_receive {:child_started, child1}
+      assert_kill child1, :shutdown
+      assert %{workers: 1, active: 0} = DynamicSupervisor.count_children(sup)
+      assert [{:undefined, :restarting, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+      refute_received {:child_started, _}
+
+      assert DynamicSupervisor.terminate_child(sup, child1) == :ok
+      assert_receive {:child_started, child2}
+      assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(sup)
+      assert [{:undefined, ^child2, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+
+      refute_receive {:child_started, _}
+    end
+
+    test "children remain after producer down" do
+      _ = Process.flag(:trap_exit, true)
+      {:ok, producer} = Producer.start_link()
+      {:ok, sup} = Consumer.start_link()
+      opts = [to: producer, cancel: :temporary, max_demand: 2, min_demand: 0]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+
+      Producer.sync_queue(producer, [[:ok2], [:ok2]])
+      assert_receive {:child_started, child1}
+      assert_receive {:child_started, child2}
+      assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
+
+      assert_kill producer, :shutdown
+
+      assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
+      assert_kill child1, :shutdown
+      assert [{:undefined, ^child2, :worker, [Consumer]}] =
+        DynamicSupervisor.which_children(sup)
+
+      assert DynamicSupervisor.terminate_child(sup, child2) == :ok
+      assert %{workers: 0, active: 0} = DynamicSupervisor.count_children(sup)
+      assert [] = DynamicSupervisor.which_children(sup)
+    end
+
+    test "ask for more events when count shrinks below or equal to min" do
+      _ = Process.flag(:trap_exit, true)
+      {:ok, producer} = Producer.start_link()
+      {:ok, sup} = Consumer.start_link()
+      opts = [to: producer, cancel: :temporary, max_demand: 3, min_demand: 2]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+
+      Producer.sync_queue(producer, [[:ok2], [:ok2], [:ok2]])
+      assert_receive {:child_started, child1}
+      assert_receive {:child_started, child2}
+      assert_receive {:child_started, _child3}
+      assert %{workers: 3, active: 3} = DynamicSupervisor.count_children(sup)
+
+      assert_kill child1, :shutdown
+      assert_kill child2, :shutdown
+
+      assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(sup)
+
+      Producer.sync_queue(producer, [[:ok2]])
+      assert_receive {:child_started, _child4}
+
+      Producer.sync_queue(producer, [[:ok2]])
+      assert_receive {:child_started, _child5}
+
+      assert %{workers: 3, active: 3} = DynamicSupervisor.count_children(sup)
+
+      Producer.sync_queue(producer, [[:ok2]])
+      refute_received {:child_started, _child6}
+    end
+  end
+
 
   defp assert_kill(pid, reason) do
     ref = Process.monitor(pid)

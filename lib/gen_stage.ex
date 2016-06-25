@@ -1090,8 +1090,8 @@ defmodule GenStage do
     {:reply, {:error, :not_a_consumer}, stage, :infinity}
   end
 
-  defp consumer_subscribe(to, opts, stage) do
-    with {:ok, cancel, opts} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
+  defp consumer_subscribe(to, full_opts, stage) do
+    with {:ok, cancel, opts} <- validate_in(full_opts, :cancel, :permanent, [:temporary, :permanent]),
          {:ok, max, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
          {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1) do
       producer_pid = GenServer.whereis(to)
@@ -1099,7 +1099,7 @@ defmodule GenStage do
         producer_pid != nil ->
           ref = Process.monitor(producer_pid)
           send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
-          handle_subscribe(opts, ref, producer_pid, cancel, {max, min, max}, stage)
+          handle_subscribe(full_opts, ref, producer_pid, cancel, {max, min, max}, stage)
         cancel == :temporary ->
           {:reply, {:ok, make_ref()}, stage, :infinity}
         cancel == :permanent ->
