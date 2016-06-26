@@ -260,7 +260,7 @@ defmodule GenStage do
       call `dispatcher.subscribe(from, state)`. However, if the subscription
       reference is known, it must send a `:cancel` message to the consumer.
 
-    * `{:"$gen_producer", from :: {consumer_pid, subscription_ref}, {:cancel, reason}}` -
+    * `{:"$gen_producer", from :: {pid, subscription_ref}, {:cancel, reason}}` -
       sent by the consumer to cancel a given subscription.
 
       Once received, the producer MUST call `dispatcher.cancel(from, state)`
@@ -268,7 +268,7 @@ defmodule GenStage do
       from the producer to the registered consumer (although there is no
       guarantee such message can be delivered).
 
-    * `{:"$gen_producer", from :: {consumer_pid, subscription_ref}, {:ask, count}}` -
+    * `{:"$gen_producer", from :: {pid, subscription_ref}, {:ask, count}}` -
       sent by consumers to ask data in a given subscription.
 
       Once received, the producer MUST call `dispatcher.ask(count, from, state)`
@@ -384,7 +384,7 @@ defmodule GenStage do
     {:stop, reason, new_state} when new_state: term, reason: term
 
   @doc """
-  Use by :consumer types
+  Used by :consumer types
 
   Handle the cleanup when a temporary manual subscription is cancelled
   """
@@ -696,7 +696,7 @@ defmodule GenStage do
   @spec reply(GenServer.from, term) :: :ok
   def reply(client, reply)
 
-  def reply({to, tag}, reply) do
+  def reply({to, tag}, reply) when is_pid(to) do
     try do
       send(to, {tag, reply})
       :ok
@@ -1064,7 +1064,7 @@ defmodule GenStage do
     do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max)
 
   defp consumer_receive(ref, {producer_id, cancel, {demand, min, max}}, events, stage) do
-    {demand, events} = consumer_check_excess(ref, producer_id, demand, events)
+    demand = consumer_check_excess(ref, producer_id, demand - length(events))
     new_demand = if demand <= min, do: max, else: demand
     stage = put_in stage.producers[ref], {producer_id, cancel, {new_demand, min, max}}
     {events, new_demand - demand, stage}
@@ -1073,15 +1073,13 @@ defmodule GenStage do
     {events, 0, stage}
   end
 
-  defp consumer_check_excess(ref, producer_id, demand, events) do
-    remaining = demand - length(events)
-
+  defp consumer_check_excess(ref, producer_id, remaining) do
     if remaining < 0 do
-      :error_logger.error_msg('GenStage consumer has discarded ~p events in excess from: ~p~n',
+      :error_logger.error_msg('GenStage consumer has received ~p events in excess from: ~p~n',
                               [abs(remaining), {producer_id, ref}])
-      {0, Enum.take(events, demand)}
+      0
     else
-      {remaining, events}
+      remaining
     end
   end
 
@@ -1139,7 +1137,7 @@ defmodule GenStage do
     end
   end
 
-  defp cancel_producer(ref, reason, %{producers: producers} = stage) do
+  defp cancel_producer(ref, reason, %{producers: producers, state: state} = stage) do
     case Map.pop(producers, ref) do
       {nil, _producers} ->
         {:noreply, stage}
@@ -1147,18 +1145,11 @@ defmodule GenStage do
         Process.demonitor(ref, [:flush])
         {:noreply, %{stage | producers: producers}}
       {{producer_pid, :temporary, :manual}, producers} ->
-        handle_cancel(reason, {producer_pid, ref}, %{stage | producers: producers})
+        stage = %{stage | producers: producers}
+        noreply_callback(:handle_cancel, [reason, {producer_pid, ref}, state], stage)
       {{_, :permanent, _}, producers} ->
         Process.demonitor(ref, [:flush])
         {:stop, reason, %{stage | producers: producers}}
-    end
-  end
-
-  defp handle_cancel(reason, to, %{mod: mod, state: state} = stage) do
-    case apply(mod, :handle_cancel, [reason, to, state]) do
-      {:noreply, state}          -> {:noreply, %{stage | state: state}}
-      {:noreply, state, timeout} -> {:noreply, %{stage | state: state}, timeout}
-      {:stop, reason, state}     -> {:stop, reason, %{stage | state: state}}
     end
   end
 

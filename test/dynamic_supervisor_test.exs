@@ -795,7 +795,6 @@ defmodule DynamicSupervisorTest do
     end
   end
 
-
   defp assert_kill(pid, reason) do
     ref = Process.monitor(pid)
     Process.exit(pid, reason)

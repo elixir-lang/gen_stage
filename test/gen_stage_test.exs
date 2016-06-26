@@ -362,6 +362,8 @@ defmodule GenStageTest do
     end
   end
 
+  # TODO: Test third-party cancellation
+
   describe "consumer callbacks" do
     test "init/1", context do
       Process.flag(:trap_exit, true)

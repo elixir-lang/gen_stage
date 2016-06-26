@@ -455,16 +455,16 @@ defmodule DynamicSupervisor do
 
   @doc false
   def handle_cancel(_, {_, ref}, state) do
-    {:noreply, update_in(state.producers, &Map.delete(&1, ref))}
+    {:noreply, [], update_in(state.producers, &Map.delete(&1, ref))}
   end
 
   @doc false
-  def handle_events(events, {_, ref} = from, state) do
+  def handle_events(events, {pid, ref} = from, state) do
     %{template: child, children: children} = state
     {new, errors} = start_children(events, from, child, 0, [], state)
     new_children = Enum.into(new, children)
     started = map_size(new_children) - map_size(children)
-    {:noreply, [], maybe_ask(ref, started+errors, errors, new_children, state)}
+    {:noreply, [], maybe_ask(ref, pid, started + errors, errors, new_children, state)}
   end
 
   defp start_children([extra | extras], from, child, errors, acc, state) do
@@ -497,26 +497,30 @@ defmodule DynamicSupervisor do
     {acc, errors}
   end
 
-  defp maybe_ask(ref, events, down, children, state) do
+  defp maybe_ask(ref, pid, events, down, children, state) do
     %{producers: producers} = state
     case producers do
-      %{^ref => {to, count, demand, min, max}} when demand - events <= min ->
+      %{^ref => {to, count, demand, min, max}} ->
         new_count = count + events - down
-        demand = demand - events
+        demand = check_excess(ref, pid, demand - events)
         ask = (max - new_count) - demand
         _ = if ask > 0, do: GenStage.ask(to, ask)
         new_demand = demand + ask
         new_entry = {to, new_count, new_demand, min, max}
         producers = Map.put(producers, ref, new_entry)
         %{state | children: children, producers: producers}
-      %{^ref => {to, count, demand, min, max}} ->
-        new_count = count + events - down
-        new_demand = demand - events
-        new_entry = {to, new_count, new_demand, min, max}
-        producers = Map.put(producers, ref, new_entry)
-        %{state | children: children, producers: producers}
       %{} ->
         %{state | children: children}
+    end
+  end
+
+  defp check_excess(ref, producer_id, remaining) do
+    if remaining < 0 do
+      :error_logger.error_msg('DynamicSupervisor has received ~p events in excess from: ~p~n',
+                              [abs(remaining), {producer_id, ref}])
+      0
+    else
+      remaining
     end
   end
 
@@ -589,7 +593,7 @@ defmodule DynamicSupervisor do
     end
   end
 
-  defp start_child(m, f, a) do
+  defp start_child(m, f, a) when is_list(a) do
     try do
       apply(m, f, a)
     catch
@@ -602,6 +606,9 @@ defmodule DynamicSupervisor do
       {:error, _} = error -> error
       other -> {:error, other}
     end
+  end
+  defp start_child(_m, _f, a) do
+    {:error, {:bad_args, a}}
   end
 
   defp save_child(:temporary, producer, pid, _, state),
@@ -816,7 +823,7 @@ defmodule DynamicSupervisor do
   end
   defp delete_child(ref, pid, %{children: children} = state) do
     children = Map.delete(children, pid)
-    maybe_ask(ref, 0, 1, children, state)
+    maybe_ask(ref, pid, 0, 1, children, state)
   end
 
   defp restart_child(producer, pid, args, child, state) do
