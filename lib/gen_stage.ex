@@ -1162,10 +1162,8 @@ defmodule GenStage do
     case Map.pop(producers, ref) do
       {nil, _producers} ->
         {:noreply, stage}
-      {{_, :temporary, {_, _, _}}, producers} ->
+      {{producer_pid, :temporary, _}, producers} ->
         Process.demonitor(ref, [:flush])
-        {:noreply, %{stage | producers: producers}}
-      {{producer_pid, :temporary, :manual}, producers} ->
         stage = %{stage | producers: producers}
         noreply_callback(:handle_cancel, [reason, {producer_pid, ref}, state], stage)
       {{_, :permanent, _}, producers} ->
