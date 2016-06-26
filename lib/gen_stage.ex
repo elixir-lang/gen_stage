@@ -327,8 +327,8 @@ defmodule GenStage do
       end
 
   The returned tuple may also contain 3 or 4 elements. The third
-  element may be a timeout value as integer, the `:hibernate` atom
-  or a set of options defined below.
+  element may be the `:hibernate` atom or a set of options defined
+  below.
 
   Returning `:ignore` will cause `start_link/3` to return `:ignore`
   and the process will exit normally without entering the loop or
@@ -373,7 +373,7 @@ defmodule GenStage do
   """
   @callback handle_demand(demand :: pos_integer, state :: term) ::
     {:noreply, [event], new_state} |
-    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, new_state} when new_state: term, reason: term, event: term
 
   @doc """
@@ -395,7 +395,7 @@ defmodule GenStage do
   """
   @callback handle_cancel(cancel_reason :: term, GenServer.from, state :: term) ::
     {:noreply, [event], new_state} |
-    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, new_state} when event: term, new_state: term, reason: term
 
   @doc """
@@ -403,7 +403,7 @@ defmodule GenStage do
   """
   @callback handle_events([event], GenServer.from, state :: term) ::
     {:noreply, [event], new_state} |
-    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, new_state} when new_state: term, reason: term, event: term
 
   @doc """
@@ -415,20 +415,20 @@ defmodule GenStage do
   """
   @callback handle_call(request :: term, GenServer.from, state :: term) ::
     {:reply, reply, [event], new_state} |
-    {:reply, reply, [event], new_state, timeout | :hibernate} |
+    {:reply, reply, [event], new_state, :hibernate} |
     {:noreply, [event], new_state} |
-    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, reply, new_state} |
     {:stop, reason, new_state} when reply: term, new_state: term, reason: term, event: term
 
   @callback handle_cast(request :: term, state :: term) ::
     {:noreply, [event], new_state} |
-    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:noreply, [event], new_state, :hibernate} |
     {:stop, reason :: term, new_state} when new_state: term, event: term
 
-  @callback handle_info(msg :: :timeout | term, state :: term) ::
+  @callback handle_info(msg :: term, state :: term) ::
     {:noreply, [event], new_state} |
-    {:noreply, [event], new_state, timeout | :hibernate} |
+    {:noreply, [event], new_state, :hibernate} |
     {:stop, reason :: term, new_state} when new_state: term, event: term
 
   @callback terminate(reason, state :: term) ::
@@ -829,9 +829,6 @@ defmodule GenStage do
       {:reply, reply, events, state, :hibernate} when is_list(events) ->
         stage = dispatch_events(events, stage)
         {:reply, reply, %{stage | state: state}, :hibernate}
-      {:reply, reply, events, state, timeout} when is_list(events) and is_integer(timeout) and timeout >= 0 ->
-        stage = dispatch_events(events, stage)
-        {:reply, reply, %{stage | state: state}, timeout}
       {:stop, reason, reply, state} ->
         {:stop, reason, reply, %{stage | state: state}}
       return ->
@@ -1005,9 +1002,6 @@ defmodule GenStage do
       {:noreply, events, state, :hibernate} when is_list(events) ->
         stage = dispatch_events(events, stage)
         {:noreply, %{stage | state: state}, :hibernate}
-      {:noreply, events, state, timeout} when is_list(events) and is_integer(timeout) and timeout >= 0 ->
-        stage = dispatch_events(events, stage)
-        {:noreply, %{stage | state: state}, timeout}
       {:stop, reason, state} ->
         {:stop, reason, %{stage | state: state}}
       other ->
