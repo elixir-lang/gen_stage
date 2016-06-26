@@ -436,8 +436,7 @@ defmodule GenStage do
   @callback format_status(:normal | :terminate, [pdict :: {term, term} | state :: term, ...]) ::
     status :: term
 
-  @optional_callbacks [handle_demand: 2,handle_subscribe: 3, handle_cancel: 3,
-                       handle_events: 3, format_status: 2]
+  @optional_callbacks [handle_demand: 2, handle_events: 3, format_status: 2]
 
   @doc false
   defmacro __using__(_) do
@@ -470,6 +469,16 @@ defmodule GenStage do
       end
 
       @doc false
+      def handle_subscribe(_opts, _from, state) do
+        {:automatic, state}
+      end
+
+      @doc false
+      def handle_cancel(_reason, _from, state) do
+        {:noreply, [], state}
+      end
+
+      @doc false
       def terminate(_reason, _state) do
         :ok
       end
@@ -479,8 +488,8 @@ defmodule GenStage do
         {:ok, state}
       end
 
-      defoverridable [handle_call: 3, handle_info: 2,
-                      handle_cast: 2, terminate: 2, code_change: 3]
+      defoverridable [handle_call: 3, handle_info: 2, handle_subscribe: 3,
+                      handle_cancel: 3, handle_cast: 2, terminate: 2, code_change: 3]
     end
   end
 

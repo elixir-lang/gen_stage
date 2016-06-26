@@ -24,6 +24,8 @@ Here is a list of potential topics to be explored by this project (in no particu
 
   * Provide examples with delivery guarantees
 
+  * Consider integrating dynamic supervisors with task supervisors (as consumers)
+
   * TCP and UDP acceptors producers
 
   * Ability to attach filtering to producers - today, if we need to filter events from a producer, we need an intermediary process which incurs extra copying

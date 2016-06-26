@@ -35,8 +35,7 @@ defmodule Broadcaster do
   def init(:ok) do
     {:producer, :ok,
       dispatcher: GenStage.BroadcastDispatcher, # We want to broadcast events
-      buffer_size: 1000, # The size of the buffer for leftover events
-      without_consumers: :discard} # If events should be buffered or discarded without consumers
+      buffer_size: 1000} # The size of the buffer for when there are no consumers
   end
 
   def handle_call({:notify, events}, _from, state) do
@@ -54,9 +53,9 @@ defmodule Broadcaster do
   end
 end
 
-defmodule Handler do
+defmodule Consumer do
   @moduledoc """
-  The GenEvent handler implementation.
+  The GenEvent handler implementation is a simple consumer.
   """
 
   use GenStage
