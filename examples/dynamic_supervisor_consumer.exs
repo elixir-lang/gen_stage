@@ -21,8 +21,8 @@ defmodule Counter do
 
   def handle_demand(demand, counter) when demand > 0 do
     # If the counter is 3 and we ask for 2 items, we will
-    # emit the items [3] and [4], and set the state to 5.
-    events = Enum.map(counter..counter+demand-1, fn x -> [x] end)
+    # emit the items 3 and 4, and set the state to 5.
+    events = Enum.to_list(counter..counter+demand-1)
     {:noreply, events, counter + demand}
   end
 end
@@ -42,13 +42,11 @@ defmodule Consumer do
   # Callbacks
 
   def init(:ok) do
-    GenStage.async_subscribe(self(), to: Counter)
-
     children = [
       worker(Printer, [], restart: :temporary)
     ]
 
-    {:ok, children, strategy: :one_for_one}
+    {:ok, children, strategy: :one_for_one, subscribe_to: [Counter]}
   end
 end
 

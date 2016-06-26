@@ -355,6 +355,12 @@ defmodule GenStage do
     * `:dispatcher` - the dispatcher responsible for handling demands.
       Defaults to `GenStage.DemandDispatch`
 
+  ### :consumer and :producer_consumer options
+
+    * `:subscribe_to` - a list of producers to subscribe to. Each element
+      represents the producer or a tuple with the producer and the subscription
+      options
+
   """
   @callback init(args :: term) ::
     {type, state} |
@@ -380,7 +386,6 @@ defmodule GenStage do
   """
   @callback handle_subscribe(opts :: [options], GenServer.from, state :: term) ::
     {:automatic | :manual, new_state} |
-    {:automatic | :manual, new_state, timeout | :hibernate} |
     {:stop, reason, new_state} when new_state: term, reason: term
 
   @doc """
@@ -753,10 +758,11 @@ defmodule GenStage do
   end
 
   defp init_producer(mod, opts, state) do
-    with {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity),
+    with {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher),
+         {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity),
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
-         {:ok, without_consumers, opts} <- validate_in(opts, :without_consumers, :buffer, [:buffer, :discard]) do
-      {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher)
+         {:ok, without_consumers, opts} <- validate_in(opts, :without_consumers, :buffer, [:buffer, :discard]),
+         :ok <- validate_no_opts(opts) do
       {:ok, dispatcher_state} = dispatcher_mod.init(opts)
       {:ok, %GenStage{mod: mod, state: state, type: :producer, buffer: {:queue.new, 0},
                       buffer_config: {buffer_size, buffer_keep, without_consumers},
@@ -766,8 +772,15 @@ defmodule GenStage do
     end
   end
 
-  defp init_consumer(mod, _opts, state) do
-    {:ok, %GenStage{mod: mod, state: state, type: :consumer}}
+  defp init_consumer(mod, opts, state) do
+    {producers, opts} = Keyword.pop(opts, :subscribe_to, [])
+
+    with :ok <- validate_no_opts(opts) do
+      stage = %GenStage{mod: mod, state: state, type: :consumer}
+      consumer_init_subscribe(producers, stage)
+    else
+      {:error, message} -> {:stop, {:bad_opts, message}}
+    end
   end
 
   defp validate_in(opts, key, default, values) do
@@ -792,6 +805,14 @@ defmodule GenStage do
         {:error, "expected #{inspect key} to be equal to or less than #{max}, got: #{inspect value}"}
       true ->
         {:ok, value, opts}
+    end
+  end
+
+  defp validate_no_opts(opts) do
+    if opts == [] do
+      :ok
+    else
+      {:error, "unknown options #{inspect opts}"}
     end
   end
 
@@ -821,9 +842,9 @@ defmodule GenStage do
   @doc false
   def handle_cast({:"$subscribe", to, opts}, stage) do
     case consumer_subscribe(to, opts, stage) do
-      {:reply, _, stage, timeout} -> {:noreply, stage, timeout}
-      {:stop, reason, _, stage}   -> {:stop, reason, stage}
-      {:stop, _, _} = stop        -> stop
+      {:reply, _, stage}        -> {:noreply, stage}
+      {:stop, reason, _, stage} -> {:stop, reason, stage}
+      {:stop, _, _} = stop      -> stop
     end
   end
 
@@ -1092,9 +1113,28 @@ defmodule GenStage do
     end
   end
 
+  defp consumer_init_subscribe(producers, stage) do
+    Enum.reduce producers, {:ok, stage}, fn
+      to, {:ok, stage} ->
+        case consumer_subscribe(to, stage) do
+          {:reply, _, stage}    -> {:ok, stage}
+          {:stop, reason, _, _} -> {:stop, reason}
+          {:stop, reason, _}    -> {:stop, reason}
+        end
+      _, {:stop, reason} ->
+        {:stop, reason}
+    end
+  end
+
+  defp consumer_subscribe({to, opts}, stage),
+    do: consumer_subscribe(to, opts, stage)
+
+  defp consumer_subscribe(to, stage),
+    do: consumer_subscribe(to, [], stage)
+
   defp consumer_subscribe(to, _opts, %{type: :producer} = stage) do
     :error_logger.error_msg('GenStage producer cannot be subscribed to another stage: ~p~n', [to])
-    {:reply, {:error, :not_a_consumer}, stage, :infinity}
+    {:reply, {:error, :not_a_consumer}, stage}
   end
 
   defp consumer_subscribe(to, full_opts, stage) do
@@ -1108,39 +1148,30 @@ defmodule GenStage do
           send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
           handle_subscribe(full_opts, ref, producer_pid, cancel, {max, min, max}, stage)
         cancel == :temporary ->
-          {:reply, {:ok, make_ref()}, stage, :infinity}
+          {:reply, {:ok, make_ref()}, stage}
         cancel == :permanent ->
           {:stop, :noproc, {:ok, make_ref()}, stage}
        end
     else
       {:error, message} ->
         :error_logger.error_msg('GenStage subscribe received invalid option: ~ts~n', [message])
-        {:reply, {:error, {:bad_opts, message}}, stage, :infinity}
+        {:reply, {:error, {:bad_opts, message}}, stage}
     end
   end
 
   defp handle_subscribe(opts, ref, producer_pid, cancel, demand, stage) do
+    %{mod: mod, state: state} = stage
     to = {producer_pid, ref}
-    case handle_subscribe(opts, to, stage) do
-      {:automatic, stage, timeout} ->
+
+    case apply(mod, :handle_subscribe, [opts, to, state]) do
+      {:automatic, state} ->
         {ask, _, _} = demand
         ask(to, ask)
         stage = put_in stage.producers[ref], {producer_pid, cancel, demand}
-        {:reply, {:ok, ref}, stage, timeout}
-      {:manual, stage, timeout} ->
+        {:reply, {:ok, ref}, %{stage | state: state}}
+      {:manual, state} ->
         stage = put_in stage.producers[ref], {producer_pid, cancel, :manual}
-        {:reply, {:ok, ref}, stage, timeout}
-      {:stop, _, _} = stop ->
-        stop
-    end
-  end
-
-  defp handle_subscribe(opts, to, %{mod: mod, state: state} = stage) do
-    case apply(mod, :handle_subscribe, [opts, to, state]) do
-      {mode, state} when mode in [:automatic, :manual] ->
-        {mode, %{stage | state: state}, :infinity}
-      {mode, state, timeout} when mode in [:automatic, :manual] ->
-        {mode, %{stage | state: state}, timeout}
+        {:reply, {:ok, ref}, %{stage | state: state}}
       {:stop, reason, state} ->
         {:stop, reason, %{stage | state: state}}
     end

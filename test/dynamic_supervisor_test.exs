@@ -498,7 +498,6 @@ defmodule DynamicSupervisorTest do
   end
 
   defmodule Consumer do
-
     def start_link(opts \\ []) do
       children = [worker(__MODULE__, [self()],
         opts ++ [function: :start_child, restart: :temporary])]
@@ -529,12 +528,12 @@ defmodule DynamicSupervisorTest do
       :unknown
     end
 
-    def start_child(pid, :non_local, class) do
+    def start_child(pid, {:non_local, class}) do
       send(pid, {:child_non_local, class})
       stack = try do throw(:oops) catch :oops -> System.stacktrace() end
       :erlang.raise(class, :oops, stack)
     end
-    def start_child(pid, :restart, value) do
+    def start_child(pid, {:restart, value}) do
       if Process.get({:restart, value}) do
         start_child(pid, value)
       else
@@ -634,30 +633,30 @@ defmodule DynamicSupervisorTest do
       opts = [to: producer, cancel: :temporary]
       assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
 
-      Producer.sync_queue(producer, [[:ok2]])
+      Producer.sync_queue(producer, [:ok2])
       assert_receive {:child_started, ok2}
       assert [{:undefined, ^ok2, :worker, [Consumer]}] =
         DynamicSupervisor.which_children(sup)
 
-      Producer.sync_queue(producer, [[:ok3]])
+      Producer.sync_queue(producer, [:ok3])
       assert_receive {:child_started, _}
       assert %{active: 2} = DynamicSupervisor.count_children(sup)
 
-      Producer.sync_queue(producer, [[:error]])
+      Producer.sync_queue(producer, [:error])
       assert_receive :child_start_error
       assert [{:undefined, _, :worker, [Consumer]},
               {:undefined, _, :worker, [Consumer]}] =
         DynamicSupervisor.which_children(sup)
       assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
 
-      Producer.sync_queue(producer, [[:ignore]])
+      Producer.sync_queue(producer, [:ignore])
       assert_receive :child_ignore
       assert [{:undefined, _, :worker, [Consumer]},
               {:undefined, _, :worker, [Consumer]}] =
         DynamicSupervisor.which_children(sup)
       assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
 
-      Producer.sync_queue(producer, [[:unknown]])
+      Producer.sync_queue(producer, [:unknown])
       assert_receive :child_start_unknown
       assert [{:undefined, _, :worker, [Consumer]},
               {:undefined, _, :worker, [Consumer]}] =
@@ -672,15 +671,15 @@ defmodule DynamicSupervisorTest do
       opts = [to: producer, cancel: :temporary]
       assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
 
-      Producer.sync_queue(producer, [[:non_local, :throw]])
+      Producer.sync_queue(producer, [{:non_local, :throw}])
       assert_receive {:child_non_local, :throw}
       assert [] = DynamicSupervisor.which_children(sup)
 
-      Producer.sync_queue(producer, [[:non_local, :error]])
+      Producer.sync_queue(producer, [{:non_local, :error}])
       assert_receive {:child_non_local, :error}
       assert [] = DynamicSupervisor.which_children(sup)
 
-      Producer.sync_queue(producer, [[:non_local, :exit]])
+      Producer.sync_queue(producer, [{:non_local, :exit}])
       assert_receive {:child_non_local, :exit}
       assert [] = DynamicSupervisor.which_children(sup)
     end
@@ -692,8 +691,7 @@ defmodule DynamicSupervisorTest do
       opts = [to: producer, cancel: :temporary, max_demand: 1, min_demand: 0]
       assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
 
-      Producer.sync_queue(producer,
-        [[:ok2], [:error], [:ignore], [:ok2], [:ok2], [:ok2]])
+      Producer.sync_queue(producer, [:ok2, :error, :ignore, :ok2, :ok2, :ok2])
       assert_receive {:child_started, child1}
       assert [{:undefined, ^child1, :worker, [Consumer]}] =
         DynamicSupervisor.which_children(sup)
@@ -723,7 +721,7 @@ defmodule DynamicSupervisorTest do
       opts = [to: producer, cancel: :temporary, max_demand: 1, min_demand: 0]
       assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
 
-      Producer.sync_queue(producer, [[:restart, :error], [:ok2], [:ok2]])
+      Producer.sync_queue(producer, [{:restart, :error}, :ok2, :ok2])
       assert_receive {:child_started, child1}
       assert_kill child1, :shutdown
       assert %{workers: 1, active: 0} = DynamicSupervisor.count_children(sup)
@@ -747,7 +745,7 @@ defmodule DynamicSupervisorTest do
       opts = [to: producer, cancel: :temporary, max_demand: 2, min_demand: 0]
       assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
 
-      Producer.sync_queue(producer, [[:ok2], [:ok2]])
+      Producer.sync_queue(producer, [:ok2, :ok2])
       assert_receive {:child_started, child1}
       assert_receive {:child_started, child2}
       assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
@@ -771,7 +769,7 @@ defmodule DynamicSupervisorTest do
       opts = [to: producer, cancel: :temporary, max_demand: 3, min_demand: 2]
       assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
 
-      Producer.sync_queue(producer, [[:ok2], [:ok2], [:ok2]])
+      Producer.sync_queue(producer, [:ok2, :ok2, :ok2])
       assert_receive {:child_started, child1}
       assert_receive {:child_started, child2}
       assert_receive {:child_started, _child3}
@@ -782,15 +780,15 @@ defmodule DynamicSupervisorTest do
 
       assert %{workers: 1, active: 1} = DynamicSupervisor.count_children(sup)
 
-      Producer.sync_queue(producer, [[:ok2]])
+      Producer.sync_queue(producer, [:ok2])
       assert_receive {:child_started, _child4}
 
-      Producer.sync_queue(producer, [[:ok2]])
+      Producer.sync_queue(producer, [:ok2])
       assert_receive {:child_started, _child5}
 
       assert %{workers: 3, active: 3} = DynamicSupervisor.count_children(sup)
 
-      Producer.sync_queue(producer, [[:ok2]])
+      Producer.sync_queue(producer, [:ok2])
       refute_received {:child_started, _child6}
     end
   end

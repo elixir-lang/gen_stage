@@ -192,14 +192,14 @@ defmodule DynamicSupervisor do
   ## GenStage consumer
 
   A `DynamicSupervisor` can be used as the consumer in a `GenStage` pipeline.
-  Each event must be a list of arguments (possibly empty) to append to the
-  arguments in the child specification - as with `start_child/2`.
+  Each event will be appended to the arguments in the child specification.
 
-  A `DynamicSupervisor` can be attached to a producer with
-  `GenStage.sync_subscribe/3` and `GenStage.async_subscribe/2`. Each producer
-  will be limit to starting `max_demand` concurrent children. Therefore the
-  number of concurrent children from an individual producer must fall below
-  `max_demand` before more arguments will be demanded from that producer.
+  A `DynamicSupervisor` can be attached to a producer by returning
+  `:subscribe_to` from `init/1` or explicitly with `GenStage.sync_subscribe/3`
+  and `GenStage.async_subscribe/2`. Each producer will be limit to starting
+  `max_demand` concurrent children. Therefore the number of concurrent children
+  from an individual producer must fall below `max_demand` before more arguments
+  will be demanded from that producer.
   """
 
   @behaviour GenStage
@@ -229,6 +229,9 @@ defmodule DynamicSupervisor do
     * `:max_dynamic` - the maximum number of children started under the
       supervisor. Default to infinity children.
 
+    * `:subscribe_to` - a list of producers to subscribe to. Each element
+      represents the producer or a tuple with the producer and the subscription
+      options
   """
   @callback init(args :: term) ::
     {:ok, [Supervisor.Spec.spec], options :: Keyword.t} | :ignore
@@ -245,14 +248,13 @@ defmodule DynamicSupervisor do
     end
   end
 
-  # TODO: Add max_demand / min_demand (pull)
-
   @doc """
   Starts a supervisor with the given children.
 
   A strategy is required to be given as an option. Furthermore,
-  the `:max_restarts` and `:max_seconds` value can be configured
-  as described in the documentation for the `c:init/1` callback.
+  the `:max_restarts`, `:max_seconds`, `:max_dynamic` and `:subscribe_to`
+  values can be configured as described in the documentation for the
+  `c:init/1` callback.
 
   The options can also be used to register a supervisor name.
   The supported values are described under the `Name Registration`
@@ -266,7 +268,9 @@ defmodule DynamicSupervisor do
   def start_link(children, options) when is_list(children) do
     # TODO: Do not call supervise but the shared spec validation logic
     {:ok, {_, spec}} = Supervisor.Spec.supervise(children, options)
-    start_link(Supervisor.Default, {:ok, spec, options}, options)
+    # TODO: Validate options in the regular Supervisor too
+    spec_options = Keyword.take(options, [:strategy, :max_restarts, :max_seconds, :max_dynamic, :subscribe_to])
+    start_link(Supervisor.Default, {:ok, spec, spec_options}, options)
   end
 
   @doc """
@@ -391,7 +395,7 @@ defmodule DynamicSupervisor do
           :ok ->
             state = %DynamicSupervisor{mod: mod, args: args, name: name || {self(), mod}}
             case init(state, children, opts) do
-              {:ok, state} -> {:consumer, state}
+              {:ok, state, opts} -> {:consumer, state, opts}
               {:error, message} -> {:stop, {:bad_opts, message}}
             end
           {:error, message} ->
@@ -405,10 +409,10 @@ defmodule DynamicSupervisor do
   end
 
   defp init(state, [child], opts) when is_list(opts) do
-    strategy     = opts[:strategy]
-    max_restarts = Keyword.get(opts, :max_restarts, 3)
-    max_seconds  = Keyword.get(opts, :max_seconds, 5)
-    max_dynamic  = Keyword.get(opts, :max_dynamic, :infinity)
+    {strategy, opts}     = Keyword.pop(opts, :strategy)
+    {max_restarts, opts} = Keyword.pop(opts, :max_restarts, 3)
+    {max_seconds, opts}  = Keyword.pop(opts, :max_seconds, 5)
+    {max_dynamic, opts}  = Keyword.pop(opts, :max_dynamic, :infinity)
 
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
@@ -416,7 +420,7 @@ defmodule DynamicSupervisor do
          :ok <- validate_dynamic(max_dynamic) do
       {:ok, %{state | template: child, strategy: strategy,
                       max_restarts: max_restarts, max_seconds: max_seconds,
-                      max_dynamic: max_dynamic}}
+                      max_dynamic: max_dynamic}, opts}
     end
   end
   defp init(_state, [_], _opts) do
@@ -461,39 +465,39 @@ defmodule DynamicSupervisor do
   @doc false
   def handle_events(events, {pid, ref} = from, state) do
     %{template: child, children: children} = state
-    {new, errors} = start_children(events, from, child, 0, [], state)
+    {new, errors} = start_events(events, from, child, 0, [], state)
     new_children = Enum.into(new, children)
     started = map_size(new_children) - map_size(children)
     {:noreply, [], maybe_ask(ref, pid, started + errors, errors, new_children, state)}
   end
 
-  defp start_children([extra | extras], from, child, errors, acc, state) do
+  defp start_events([extra | extras], from, child, errors, acc, state) do
     {_, ref} = from
     {_, {m, f, args}, restart, _, _, _} = child
-    args = args ++ extra
+    args = args ++ [extra]
     case start_child(m, f, args) do
       {:ok, pid, _} when restart == :temporary ->
         acc = [{pid, [ref | :undefined]} | acc]
-        start_children(extras, from, child, errors, acc, state)
+        start_events(extras, from, child, errors, acc, state)
       {:ok, pid, _}  ->
         acc = [{pid, [ref | args]} | acc]
-        start_children(extras, from, child, errors, acc, state)
+        start_events(extras, from, child, errors, acc, state)
       {:ok, pid} when restart == :temporary ->
         acc = [{pid, [ref | :undefined]} | acc]
-        start_children(extras, from, child, errors, acc, state)
+        start_events(extras, from, child, errors, acc, state)
       {:ok, pid} ->
         acc = [{pid, [ref | args]} | acc]
-        start_children(extras, from, child, errors, acc, state)
+        start_events(extras, from, child, errors, acc, state)
       :ignore ->
-        start_children(extras, from, child, errors+1, acc, state)
+        start_events(extras, from, child, errors+1, acc, state)
       {:error, reason} ->
         :error_logger.error_msg('DynamicSupervisor failed to start child from: ~p with reason: ~p~n',
           [from, reason])
         report_error(:start_error, reason, :undefined, args, child, state)
-        start_children(extras, from , child, errors+1, acc, state)
+        start_events(extras, from , child, errors+1, acc, state)
     end
   end
-  defp start_children([], _, _, errors, acc, _) do
+  defp start_events([], _, _, errors, acc, _) do
     {acc, errors}
   end
 
@@ -593,7 +597,7 @@ defmodule DynamicSupervisor do
     end
   end
 
-  defp start_child(m, f, a) when is_list(a) do
+  defp start_child(m, f, a) do
     try do
       apply(m, f, a)
     catch
@@ -606,9 +610,6 @@ defmodule DynamicSupervisor do
       {:error, _} = error -> error
       other -> {:error, other}
     end
-  end
-  defp start_child(_m, _f, a) do
-    {:error, {:bad_args, a}}
   end
 
   defp save_child(:temporary, producer, pid, _, state),
@@ -669,7 +670,7 @@ defmodule DynamicSupervisor do
         case validate_specs(children) do
           :ok ->
             case init(state, children, opts) do
-              {:ok, state} -> {:ok, state}
+              {:ok, state, _} -> {:ok, state}
               {:error, message} -> {:error, {:bad_opts, message}}
             end
           {:error, message} ->

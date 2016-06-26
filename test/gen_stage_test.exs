@@ -119,8 +119,7 @@ defmodule GenStageTest do
   describe "producer-to-consumer demand" do
     test "with default max and min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      :ok = GenStage.async_subscribe(consumer, to: producer)
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
       batch = Enum.to_list(0..99)
       assert_receive {:consumed, ^batch}
@@ -172,6 +171,19 @@ defmodule GenStageTest do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.async_subscribe(consumer, to: producer, demand: :manual)
+
+      assert_receive {:subscribe, sub}
+      Forwarder.ask(consumer, sub, 50)
+      batch = Enum.to_list(0..49)
+      assert_receive {:consumed, ^batch}
+      Forwarder.ask(consumer, sub, 50)
+      batch = Enum.to_list(50..99)
+      assert_receive {:consumed, ^batch}
+    end
+
+  test "stores events when there is manual demand on init" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [{producer, demand: :manual}]})
 
       assert_receive {:subscribe, sub}
       Forwarder.ask(consumer, sub, 50)
@@ -304,6 +316,9 @@ defmodule GenStageTest do
       assert Counter.start_link({:producer, 0, buffer_size: -1}) ==
              {:error, {:bad_opts, "expected :buffer_size to be equal to or greater than 0, got: -1"}}
 
+      assert Counter.start_link({:producer, 0, unknown: :value}) ==
+             {:error, {:bad_opts, "unknown options [unknown: :value]"}}
+
       assert {:ok, pid} =
              Counter.start_link({:producer, 0}, name: context.test)
       assert {:error, {:already_started, ^pid}} =
@@ -373,6 +388,9 @@ defmodule GenStageTest do
       assert_receive {:EXIT, _, :oops}
       assert Forwarder.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
       assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
+
+      assert Forwarder.start_link({:consumer, self(), unknown: :value}) ==
+             {:error, {:bad_opts, "unknown options [unknown: :value]"}}
 
       assert {:ok, pid} =
              Forwarder.start_link({:consumer, self()}, name: context.test)

@@ -69,8 +69,7 @@ defmodule Consumer do
   def init(:ok) do
     # Starts a permanent subscription to the broadcaster,
     # demand will automatically flow upstream.
-    GenStage.async_subscribe(self(), to: Broadcaster)
-    {:consumer, :ok}
+    {:consumer, :ok, subscribe_to: [Broadcaster]}
   end
 
   def handle_events(events, _from, state) do
@@ -93,10 +92,10 @@ defmodule App do
 
     children = [
       worker(Broadcaster, []),
-      worker(Handler, [], id: 1),
-      worker(Handler, [], id: 2),
-      worker(Handler, [], id: 3),
-      worker(Handler, [], id: 4)
+      worker(Consumer, [], id: 1),
+      worker(Consumer, [], id: 2),
+      worker(Consumer, [], id: 3),
+      worker(Consumer, [], id: 4)
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one)
