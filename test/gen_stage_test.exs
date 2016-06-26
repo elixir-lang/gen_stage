@@ -97,7 +97,7 @@ defmodule GenStageTest do
     end
 
     def handle_subscribe(opts, from, recipient) do
-      send recipient, {:subscribe, from}
+      send recipient, {:subscribed, from}
       {Keyword.get(opts, :demand, :automatic), recipient}
     end
 
@@ -107,12 +107,12 @@ defmodule GenStageTest do
     end
 
     def handle_cancel(reason, _from, recipient) do
-      send recipient, {:cancel, reason}
+      send recipient, {:cancelled, reason}
       {:noreply, [], recipient}
     end
 
     def terminate(reason, state) do
-      send state, {:terminate, reason}
+      send state, {:terminated, reason}
     end
   end
 
@@ -172,7 +172,7 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.async_subscribe(consumer, to: producer, demand: :manual)
 
-      assert_receive {:subscribe, sub}
+      assert_receive {:subscribed, sub}
       Forwarder.ask(consumer, sub, 50)
       batch = Enum.to_list(0..49)
       assert_receive {:consumed, ^batch}
@@ -181,11 +181,11 @@ defmodule GenStageTest do
       assert_receive {:consumed, ^batch}
     end
 
-  test "stores events when there is manual demand on init" do
+    test "stores events when there is manual demand on init" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [{producer, demand: :manual}]})
 
-      assert_receive {:subscribe, sub}
+      assert_receive {:subscribed, sub}
       Forwarder.ask(consumer, sub, 50)
       batch = Enum.to_list(0..49)
       assert_receive {:consumed, ^batch}
@@ -389,7 +389,7 @@ defmodule GenStageTest do
     test "terminate/1" do
       {:ok, pid} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.stop(pid)
-      assert_receive {:terminate, :normal}
+      assert_receive {:terminated, :normal}
     end
   end
 end
