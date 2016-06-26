@@ -108,7 +108,7 @@ defmodule GenStageTest do
 
     def handle_cancel(reason, _from, recipient) do
       send recipient, {:cancel, reason}
-      {:noreply, recipient}
+      {:noreply, [], recipient}
     end
 
     def terminate(reason, state) do
@@ -276,7 +276,7 @@ defmodule GenStageTest do
     end
 
     @tag :capture_log
-    test "consumer does not exit when producer is dead and subscription is persistent is temporary" do
+    test "consumer does not exit when producer is dead and subscription is temporary" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
