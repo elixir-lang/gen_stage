@@ -194,18 +194,6 @@ defmodule GenStageTest do
       assert_receive {:consumed, ^batch}
     end
 
-    test "does not store events without consumers if configured to discard them" do
-      {:ok, producer} = Counter.start_link({:producer, 0, without_consumers: :discard})
-      send producer, {:queue, [:a, :b, :c]}
-      Counter.async_queue(producer, [:d, :e])
-
-      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
-
-      assert_receive {:consumed, [0, 1, 2, 3]}
-      assert_receive {:consumed, [4, 5, 6, 7]}
-    end
-
     test "emits warning if trying to emit events from a consumer" do
       {:ok, consumer} = Counter.start_link({:consumer, 0})
 
