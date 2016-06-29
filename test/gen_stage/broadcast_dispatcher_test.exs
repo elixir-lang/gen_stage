@@ -37,6 +37,9 @@ defmodule GenStage.BroadcastDispatcherTest do
 
     {:ok, 0, disp} = D.cancel({pid, ref1}, disp)
     assert disp == {[{-10, pid, ref2}], 10}
+
+    {:ok, 0, disp} = D.ask(10, {pid, ref2}, disp)
+    assert disp == {[{0, pid, ref2}], 10}
   end
 
   test "multiple subscriptions with late demand" do

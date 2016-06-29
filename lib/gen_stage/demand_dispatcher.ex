@@ -11,7 +11,7 @@ defmodule GenStage.DemandDispatcher do
 
   @doc false
   def init(_opts) do
-    {:ok, {[], nil}}
+    {:ok, {[], 0, nil}}
   end
 
   @doc false
@@ -20,12 +20,13 @@ defmodule GenStage.DemandDispatcher do
   end
 
   @doc false
-  def cancel({_, ref}, {demands, max}) do
-    {:ok, 0, {delete_demand(ref, demands), max}}
+  def cancel({_, ref}, {demands, pending, max}) do
+    {current, demands} = pop_demand(ref, demands)
+    {:ok, 0, {demands, current + pending, max}}
   end
 
   @doc false
-  def ask(counter, {pid, ref}, {demands, max}) do
+  def ask(counter, {pid, ref}, {demands, pending, max}) do
     max = max || counter
 
     if counter > max do
@@ -36,13 +37,15 @@ defmodule GenStage.DemandDispatcher do
 
     {current, demands} = pop_demand(ref, demands)
     demands = add_demand(current + counter, pid, ref, demands)
-    {:ok, counter, {demands, max}}
+
+    already_sent = min(pending, counter)
+    {:ok, counter - already_sent, {demands, pending - already_sent, max}}
   end
 
   @doc false
-  def dispatch(events, {demands, max}) do
+  def dispatch(events, {demands, pending, max}) do
     {events, demands} = dispatch_demand(events, demands)
-    {:ok, events, {demands, max}}
+    {:ok, events, {demands, pending, max}}
   end
 
   defp dispatch_demand([], demands) do
@@ -80,9 +83,5 @@ defmodule GenStage.DemandDispatcher do
       {{current, _pid, ^ref}, rest} -> {current, rest}
       nil -> {0, demands}
     end
-  end
-
-  defp delete_demand(ref, demands) do
-    List.keydelete(demands, ref, 2)
   end
 end
