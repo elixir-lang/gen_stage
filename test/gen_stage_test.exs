@@ -549,4 +549,44 @@ defmodule GenStageTest do
       end) =~ "GenStage consumer cannot dispatch events"
     end
   end
+
+  describe "$gen_producer message errors" do
+    @describetag :capture_log
+
+    test "duplicated subscriptions" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      ref = make_ref()
+      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, []}}
+      assert_receive {:"$gen_consumer", {^producer, ^ref}, {:cancel, :duplicated_subscription}}
+    end
+
+    test "unknown demand" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      ref = make_ref()
+      send producer, {:"$gen_producer", {self(), ref}, {:ask, 10}}
+      assert_receive {:"$gen_consumer", {^producer, ^ref}, {:cancel, :unknown_subscription}}
+    end
+
+    test "not a producer" do
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      send consumer, {:"$gen_producer", {self(), make_ref()}, {:subscribe, []}}
+    end
+  end
+
+  describe "$gen_consumer message errors" do
+    @describetag :capture_log
+
+    test "unknown events" do
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      ref = make_ref()
+      send consumer, {:"$gen_consumer", {self(), ref}, [1, 2, 3]}
+      assert_receive {:"$gen_producer", {^consumer, ^ref}, {:cancel, :unknown_subscription}}
+    end
+
+    test "not a consumer" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      send producer, {:"$gen_consumer", {self(), make_ref()}, {:events, []}}
+    end
+  end
 end
