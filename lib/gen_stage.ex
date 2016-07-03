@@ -366,8 +366,9 @@ defmodule GenStage do
   @doc """
   Invoked on :producer stages.
 
-  It is invoked with the demand from the dispatcher. The producer
-  must either store the demand or return the events requested.
+  Must always be explicitly implemented by `:producer` types.
+  It is invoked with the demand from consumers/dispatcher. The
+  producer must either store the demand or return the events requested.
   """
   @callback handle_demand(demand :: pos_integer, state :: term) ::
     {:noreply, [event], new_state} |
@@ -389,8 +390,11 @@ defmodule GenStage do
 
   For producers, successful subscriptions must always return
   `{:automatic, new_state}`, the `:manual` mode is not supported.
+
+  If this callback is not implemented, the default implementation by
+  `use GenStage` will return `{:automatic, state}`.
   """
-  @callback handle_subscribe(opts :: [options], GenServer.from, state :: term) ::
+  @callback handle_subscribe(opts :: [options], to_or_from :: GenServer.from, state :: term) ::
     {:automatic | :manual, new_state} |
     {:stop, reason, new_state} when new_state: term, reason: term
 
@@ -398,7 +402,12 @@ defmodule GenStage do
   Invoked when a consumer is no longer subscribed to a producer.
 
   It receives the cancellation reason, the `from` tuple and the state.
-  It has the same return values as `handle_info/3`.
+  The `cancel_reason` will be a `{:cancel, _}` tuple if the reason for
+  cancellation was a `GenStage.cancel/2` call. Any other value means
+  the cancellation reason was due to an EXIT.
+
+  If this callback is not implemented, the default implementation by
+  `use GenStage` will return `{:noreply, [], state}`.
 
   Return values are the same as `c:handle_cast/2`.
   """
@@ -410,7 +419,9 @@ defmodule GenStage do
   @doc """
   Invoked on :producer_consumer and :consumer stages to handle events.
 
-  Return values are the same as `c:handle_events/3`.
+  Must always be explicitly implemented by such types.
+
+  Return values are the same as `c:handle_cast/2`.
   """
   @callback handle_events([event], GenServer.from, state :: term) ::
     {:noreply, [event], new_state} |
@@ -487,10 +498,10 @@ defmodule GenStage do
   `msg` is the message and `state` is the current state of the `GenStage`. When
   a timeout occurs the message is `:timeout`.
 
-  Return values are the same as `c:handle_cast/2`.
-
   If this callback is not implemented, the default implementation by
-  `use GenStage` will return `{:noreply, state}`.
+  `use GenStage` will return `{:noreply, [], state}`.
+
+  Return values are the same as `c:handle_cast/2`.
   """
   @callback handle_info(msg :: term, state :: term) ::
     {:noreply, [event], new_state} |
@@ -706,10 +717,24 @@ defmodule GenStage do
   @doc """
   Asks the given demand to the producer.
 
-  Used by consumers in `:manual` demand mode.
+  This is an asynchronous request typically used
+  by consumers in `:manual` demand mode.
   """
   def ask({pid, ref}, demand) when is_integer(demand) and demand > 0 do
     send pid, {:"$gen_producer", {self(), ref}, {:ask, demand}}
+    :ok
+  end
+
+  @doc """
+  Cancels the given subscription on the producer.
+
+  Once the producer receives the request, a confirmation
+  may be forwarded to the consumer (although there is no
+  guarantee as the producer may crash for unrelated reasons
+  before). This is an asynchronous request.
+  """
+  def cancel({pid, ref}, reason) do
+    send pid, {:"$gen_producer", {self(), ref}, {:cancel, reason}}
     :ok
   end
 
@@ -779,7 +804,7 @@ defmodule GenStage do
 
       def handle_call(:reply_in_one_second, from, state) do
         Process.send_after(self(), {:reply, from}, 1_000)
-        {:noreply, state}
+        {:noreply, [], state}
       end
 
       def handle_info({:reply, from}, state) do
@@ -1263,13 +1288,15 @@ defmodule GenStage do
     case Map.pop(producers, ref) do
       {nil, _producers} ->
         {:noreply, stage}
-      {{producer_pid, :temporary, _}, producers} ->
+      {{producer_pid, mode, _}, producers} ->
         Process.demonitor(ref, [:flush])
         stage = %{stage | producers: producers}
-        noreply_callback(:handle_cancel, [reason, {producer_pid, ref}, state], stage)
-      {{_, :permanent, _}, producers} ->
-        Process.demonitor(ref, [:flush])
-        {:stop, reason, %{stage | producers: producers}}
+        case noreply_callback(:handle_cancel, [reason, {producer_pid, ref}, state], stage) do
+          {:noreply, stage} when mode == :permanent ->
+            {:stop, reason, stage}
+          other ->
+            other
+        end
     end
   end
 
