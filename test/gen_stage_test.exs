@@ -523,7 +523,7 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
       GenStage.cancel({producer, ref}, :oops)
-      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, {:cancel, :oops}}}
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, :oops}}
     end
 
     @tag :capture_log
@@ -533,8 +533,8 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :permanent)
       GenStage.cancel({producer, ref}, self())
-      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, {:cancel, pid}}} when pid == self()
-      assert_receive {:EXIT, ^consumer, {:cancel, {:cancel, pid}}} when pid == self()
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, pid}} when pid == self()
+      assert_receive {:EXIT, ^consumer, {:cancel, pid}} when pid == self()
     end
 
     test "handle_cancel/3 on producer down with temporary subscription" do

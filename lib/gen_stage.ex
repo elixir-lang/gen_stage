@@ -965,7 +965,7 @@ defmodule GenStage do
       %{} ->
         case monitors do
           %{^ref => consumer_ref} ->
-            producer_cancel(consumer_ref, reason, stage)
+            producer_cancel(consumer_ref, reason, reason, stage)
           %{} ->
             noreply_callback(:handle_info, [msg, state], stage)
         end
@@ -1006,8 +1006,8 @@ defmodule GenStage do
     end
   end
 
-  def handle_info({:"$gen_producer", {_, ref}, {:cancel, _} = reason}, stage) do
-    producer_cancel(ref, reason, stage)
+  def handle_info({:"$gen_producer", {_, ref}, {:cancel, reason} = cancel_reason}, stage) do
+    producer_cancel(ref, reason, cancel_reason, stage)
   end
 
   ## Consumer messages
@@ -1345,7 +1345,7 @@ defmodule GenStage do
     end
   end
 
-  defp producer_cancel(ref, reason, stage) do
+  defp producer_cancel(ref, reason, cancel_reason, stage) do
     %{consumers: consumers, monitors: monitors, state: state} = stage
 
     case Map.pop(consumers, ref) do
@@ -1356,7 +1356,7 @@ defmodule GenStage do
         send pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}}
         stage = %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}
 
-        case noreply_callback(:handle_cancel, [reason, {pid, ref}, state], stage) do
+        case noreply_callback(:handle_cancel, [cancel_reason, {pid, ref}, state], stage) do
           {:noreply, %{dispatcher_state: dispatcher_state} = stage} ->
             # Call the dispatcher after since it may generate demand and the
             # main module must know the consumer is no longer subscribed.
