@@ -141,9 +141,39 @@ defmodule GenStageTest do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
-      batch = Enum.to_list(0..99)
+      batch = Enum.to_list(0..49)
       assert_receive {:consumed, ^batch}
-      batch = Enum.to_list(100..199)
+      batch = Enum.to_list(50..99)
+      assert_receive {:consumed, ^batch}
+    end
+
+    test "with 80% min demand" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, _} = Forwarder.start_link({:consumer, self(),
+                                       subscribe_to: [{producer, min_demand: 80}]})
+
+      batch = Enum.to_list(0..19)
+      assert_receive {:consumed, ^batch}
+      batch = Enum.to_list(20..39)
+      assert_receive {:consumed, ^batch}
+      batch = Enum.to_list(1000..1019)
+      assert_receive {:consumed, ^batch}
+    end
+
+    test "with 20% min demand" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, _} = Forwarder.start_link({:consumer, self(),
+                                       subscribe_to: [{producer, min_demand: 20}]})
+
+      batch = Enum.to_list(0..79)
+      assert_receive {:consumed, ^batch}
+      batch = Enum.to_list(80..99)
+      assert_receive {:consumed, ^batch}
+      batch = Enum.to_list(100..179)
+      assert_receive {:consumed, ^batch}
+      batch = Enum.to_list(180..259)
+      assert_receive {:consumed, ^batch}
+      batch = Enum.to_list(260..279)
       assert_receive {:consumed, ^batch}
     end
 

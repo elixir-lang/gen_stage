@@ -7,6 +7,9 @@ defmodule GenStage do
   data, it acts as a consumer. Stages may take both producer and
   consumer roles at once.
 
+  **Note:** the `:producer_consumer` type referenced below is not
+  yet implemented.
+
   ## Stage types
 
   Besides taking both producer and consumer roles, a stage may be
@@ -1015,17 +1018,11 @@ defmodule GenStage do
   end
 
   def handle_info({:"$gen_consumer", {producer_pid, ref} = from, events},
-                  %{producers: producers, state: state} = stage) when is_list(events) do
+                  %{producers: producers, mod: mod, state: state} = stage) when is_list(events) do
     case producers do
       %{^ref => entry} ->
-        case consumer_receive(ref, entry, events, stage) do
-          {events, 0, stage} ->
-            noreply_callback(:handle_events, [events, from, state], stage)
-          {events, ask, stage} when is_integer(ask) and ask > 0 ->
-            return = noreply_callback(:handle_events, [events, from, state], stage)
-            ask(from, ask)
-            return
-        end
+        {batches, stage} = consumer_receive(from, entry, events, stage)
+        consumer_dispatch(batches, from, mod, state, stage, false)
       _ ->
         send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
@@ -1183,26 +1180,6 @@ defmodule GenStage do
   defp queue_last([event | events], queue, excess, counter, max),
     do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max)
 
-  defp consumer_receive(ref, {producer_id, cancel, {demand, min, max}}, events, stage) do
-    demand = consumer_check_excess(ref, producer_id, demand - length(events))
-    new_demand = if demand <= min, do: max, else: demand
-    stage = put_in stage.producers[ref], {producer_id, cancel, {new_demand, min, max}}
-    {events, new_demand - demand, stage}
-  end
-  defp consumer_receive(_, {_, _, :manual}, events, stage) do
-    {events, 0, stage}
-  end
-
-  defp consumer_check_excess(ref, producer_id, remaining) do
-    if remaining < 0 do
-      :error_logger.error_msg('GenStage consumer has received ~p events in excess from: ~p~n',
-                              [abs(remaining), {producer_id, ref}])
-      0
-    else
-      remaining
-    end
-  end
-
   defp consumer_init_subscribe(producers, stage) do
     Enum.reduce producers, {:ok, stage}, fn
       to, {:ok, stage} ->
@@ -1216,9 +1193,77 @@ defmodule GenStage do
     end
   end
 
+  defp consumer_receive({_, ref} = from, {producer_id, cancel, {demand, min, max}}, events, stage) do
+    {demand, batches} = split_batches(events, from, min, max, demand, demand, [])
+    stage = put_in stage.producers[ref], {producer_id, cancel, {demand, min, max}}
+    {batches, stage}
+  end
+  defp consumer_receive(_, {_, _, :manual}, events, stage) do
+    {[{events, 0}], stage}
+  end
+
+  defp split_batches([], _from, _min, _max, _old_demand, new_demand, batches) do
+    {new_demand, Enum.reverse(batches)}
+  end
+  defp split_batches(events, from, min, max, old_demand, new_demand, batches) do
+    {events, batch, batch_size} = split_events(events, max - min, 0, [])
+
+    # Adjust the batch size to whatever is left of the demand in case of excess.
+    {old_demand, batch_size} =
+      case old_demand - batch_size do
+        diff when diff < 0 ->
+          :error_logger.error_msg('GenStage consumer has received ~p events in excess from: ~p~n',
+                                  [abs(diff), from])
+          {0, old_demand}
+        diff ->
+          {diff, batch_size}
+      end
+
+    # In case we've reached min, we will ask for more events.
+    {new_demand, batch_size} =
+      case new_demand - batch_size do
+        diff when diff <= min ->
+          {max, max - diff}
+        diff ->
+          {diff, 0}
+      end
+
+    split_batches(events, from, min, max, old_demand, new_demand, [{batch, batch_size} | batches])
+  end
+
+  defp split_events(events, limit, limit, acc),
+    do: {events, Enum.reverse(acc), limit}
+  defp split_events([], _limit, counter, acc),
+    do: {[], Enum.reverse(acc), counter}
+  defp split_events([event | events], limit, counter, acc),
+    do: split_events(events, limit, counter + 1, [event | acc])
+
+  defp consumer_dispatch([{batch, ask} | batches], from, mod, state, stage, _hibernate?) do
+    case mod.handle_events(batch, from, state) do
+      {:noreply, events, state} when is_list(events) ->
+        stage = dispatch_events(events, stage)
+        ask > 0 and ask(from, ask)
+        consumer_dispatch(batches, from, mod, state, stage, false)
+      {:noreply, events, state, :hibernate} when is_list(events) ->
+        stage = dispatch_events(events, stage)
+        ask > 0 and ask(from, ask)
+        consumer_dispatch(batches, from, mod, state, stage, true)
+      {:stop, reason, state} ->
+        {:stop, reason, %{stage | state: state}}
+      other ->
+        {:stop, {:bad_return_value, other}, %{stage | state: state}}
+    end
+  end
+
+  defp consumer_dispatch([], _from, _mod, state, stage, false) do
+    {:noreply, %{stage | state: state}}
+  end
+  defp consumer_dispatch([], _from, _mod, state, stage, true) do
+    {:noreply, %{stage | state: state}, :hibernate}
+  end
+
   defp consumer_subscribe({to, opts}, stage),
     do: consumer_subscribe(to, opts, stage)
-
   defp consumer_subscribe(to, stage),
     do: consumer_subscribe(to, [], stage)
 
