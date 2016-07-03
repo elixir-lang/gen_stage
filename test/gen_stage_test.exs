@@ -56,23 +56,23 @@ defmodule GenStageTest do
       {:noreply, events, state}
     end
 
+    def handle_info(other, state) do
+      is_pid(state) && send(state, other)
+      {:noreply, [], state}
+    end
+
     def handle_subscribe(opts, from, state) do
-      is_pid(opts[:recipient]) && send(opts[:recipient], {:producer_subscribed, from})
+      is_pid(state) && send(state, {:producer_subscribed, from})
       {Keyword.get(opts, :producer_demand, :automatic), state}
     end
 
-    def handle_cancel(reason, from, recipient) do
-      case reason do
-        {:cancel, recipient} when is_pid(recipient) ->
-          send recipient, {:producer_cancelled, from, reason}
-        _ ->
-          :ok
-      end
-      {:noreply, [], recipient}
+    def handle_cancel(reason, from, state) do
+      is_pid(state) && send(state, {:producer_cancelled, from, reason})
+      {:noreply, [], state}
     end
 
-    def handle_demand(demand, -1) when demand > 0 do
-      {:noreply, [], -1}
+    def handle_demand(demand, pid) when is_pid(pid) and demand > 0 do
+      {:noreply, [], pid}
     end
 
     def handle_demand(demand, counter) when demand > 0 do
@@ -116,6 +116,11 @@ defmodule GenStageTest do
       {Keyword.get(opts, :consumer_demand, :automatic), recipient}
     end
 
+    def handle_info(other, recipient) do
+      send(recipient, other)
+      {:noreply, [], recipient}
+    end
+
     def handle_events(events, _from, recipient) do
       send recipient, {:consumed, events}
       {:noreply, [], recipient}
@@ -127,7 +132,7 @@ defmodule GenStageTest do
     end
 
     def terminate(reason, state) do
-      send state, {:consumer_terminated, reason}
+      send state, {:terminated, reason}
     end
   end
 
@@ -324,33 +329,43 @@ defmodule GenStageTest do
     end
 
     test "handle_subscribe/3" do
-      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, producer} = Counter.start_link({:producer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, recipient: self())
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:producer_subscribed, {^consumer, ^ref}}
     end
 
     @tag :capture_log
     test "handle_subscribe/3 does not accept manual demand" do
       Process.flag(:trap_exit, true)
-      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, producer} = Counter.start_link({:producer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer,
-                                           recipient: self(), producer_demand: :manual)
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, producer_demand: :manual)
       assert_receive {:producer_subscribed, {^consumer, ^ref}}
-      assert_receive {:EXIT, ^producer, {:bad_return_value, {:manual, 0}}}
+      assert_receive {:EXIT, ^producer, {:bad_return_value, {:manual, pid}}} when pid == self()
     end
 
     test "handle_cancel/3" do
-      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, producer} = Counter.start_link({:producer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
-      GenStage.cancel({producer, ref}, self())
-      assert_receive {:producer_cancelled, {^consumer, ^ref}, {:cancel, pid}} when pid == self()
+      assert_receive {:producer_subscribed, {^consumer, ^ref}}
+      GenStage.cancel({producer, ref}, :oops)
+      assert_receive {:producer_cancelled, {^consumer, ^ref}, {:cancel, :oops}}
+    end
+
+    test "handle_cancel/3 on consumer down" do
+      {:ok, producer} = Counter.start_link({:producer, self()})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
+      assert_receive {:producer_subscribed, {^consumer, ^ref}}
+      Process.unlink(consumer)
+      Process.exit(consumer, :kill)
+      assert_receive {:producer_cancelled, {^consumer, ^ref}, :killed}
     end
 
     test "handle_call/3 sends events before reply" do
-      {:ok, producer} = Counter.start_link({:producer, -1})
+      {:ok, producer} = Counter.start_link({:producer, self()})
 
       # Subscribe
       stage_ref = make_ref()
@@ -366,13 +381,14 @@ defmodule GenStageTest do
 
       {:messages, messages} = Process.info(self(), :messages)
       assert messages == [
+        {:producer_subscribed, {self(), stage_ref}},
         {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
-        {call_ref, -1},
+        {call_ref, self()},
       ]
     end
 
     test "handle_call/3 allows replies before sending events" do
-      {:ok, producer} = Counter.start_link({:producer, -1})
+      {:ok, producer} = Counter.start_link({:producer, self()})
 
       # Subscribe
       stage_ref = make_ref()
@@ -388,7 +404,8 @@ defmodule GenStageTest do
 
       {:messages, messages} = Process.info(self(), :messages)
       assert messages == [
-        {call_ref, -1},
+        {:producer_subscribed, {self(), stage_ref}},
+        {call_ref, self()},
         {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
       ]
     end
@@ -399,9 +416,20 @@ defmodule GenStageTest do
       assert Counter.stop(producer) == :ok
       assert_receive {:EXIT, ^producer, :shutdown}
     end
-  end
 
-  # TODO: Test third-party cancellation
+    test "handle_info/2 is called for unmatched down messages" do
+      {:ok, consumer} = Counter.start_link({:producer, self()})
+      ref = make_ref()
+      send consumer, {:DOWN, ref, :process, self(), :oops}
+      assert_receive {:DOWN, ^ref, :process, pid, :oops} when pid == self()
+    end
+
+    test "terminate/2" do
+      {:ok, pid} = Forwarder.start_link({:producer, self()})
+      :ok = GenStage.stop(pid)
+      assert_receive {:terminated, :normal}
+    end
+  end
 
   describe "consumer callbacks" do
     test "init/1", context do
@@ -429,14 +457,24 @@ defmodule GenStageTest do
       assert_receive {:consumer_subscribed, {^producer, ^ref}}
     end
 
+    @tag :capture_log
+    test "handle_subscribe/3 with invalid demand" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      GenStage.async_subscribe(consumer, to: producer, consumer_demand: :unknown)
+      assert_receive {:EXIT, ^consumer, {:bad_return_value, {:unknown, pid}}} when pid == self()
+    end
+
     test "handle_cancel/3 with temporary subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
-      GenStage.cancel({producer, ref}, self())
-      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, {:cancel, pid}}} when pid == self()
+      GenStage.cancel({producer, ref}, :oops)
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, {:cancel, :oops}}}
     end
 
+    @tag :capture_log
     test "handle_cancel/3 with permanent subscription" do
       Process.flag(:trap_exit, true)
       {:ok, producer} = Counter.start_link({:producer, 0})
@@ -447,10 +485,38 @@ defmodule GenStageTest do
       assert_receive {:EXIT, ^consumer, {:cancel, {:cancel, pid}}} when pid == self()
     end
 
+    test "handle_cancel/3 on producer down with temporary subscription" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
+      Process.unlink(producer)
+      Process.exit(producer, :kill)
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, :killed}
+    end
+
+    @tag :capture_log
+    test "handle_cancel/3 on producer down with permanent subscription" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :permanent)
+      Process.unlink(producer)
+      Process.exit(producer, :kill)
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, :killed}
+      assert_receive {:EXIT, ^consumer, :killed}
+    end
+
+    test "handle_info/2 is called for unmatched down messages" do
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      ref = make_ref()
+      send consumer, {:DOWN, ref, :process, self(), :oops}
+      assert_receive {:DOWN, ^ref, :process, pid, :oops} when pid == self()
+    end
+
     test "terminate/1" do
       {:ok, pid} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.stop(pid)
-      assert_receive {:consumer_terminated, :normal}
+      assert_receive {:terminated, :normal}
     end
 
     test "emit warning if trying to dispatch events from a consumer" do
