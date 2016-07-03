@@ -1,6 +1,20 @@
 # GenStage
 
-Coming soon.
+GenStage is a specification for exchanging events between producers and consumers.
+
+This project currently provides the following functionality:
+
+  * `GenStage` ([docs](https://hexdocs.pm/gen_stage/GenStage.html)) - a behaviour for implementing producer and consumer stages
+
+  * `DynamicSupervisor` ([docs](https://hexdocs.pm/gen_stage/DynamicSupervisor.html)) - a supervisor designed for starting children dynamically. Besides being a replacement for the `:simple_one_for_one` strategy in the regular `Supervisor`, a `DynamicSupervisor` can also
+  be used as a stage consumer, making it straight-forward to spawn a new process for every
+  event in a stage pipeline
+
+You can find examples on how to use the modules above in the [examples](examples) directory:
+
+  * [DymamicSupervisor consumer](examples/dynamic_supervisor_consumer.exs) - an example of how to use one or more `DynamicSupervisor` as a consumer to a producer that works as a counter
+
+  * [GenEvent](examples/gen_event.exs) - an example of how to use `GenStage` to implement a `GenEvent` replacement that leverages concurrency and provides more flexibility regarding buffer size and back-pressure
 
 ## Installation
 
@@ -9,7 +23,7 @@ GenStage requires Elixir v1.3.
   1. Add `:gen_stage` to your list of dependencies in mix.exs:
 
         def deps do
-          [{:gen_stage, "~> 0.0.1"}]
+          [{:gen_stage, "~> 0.1.0"}]
         end
 
   2. Ensure `:gen_stage` is started before your application:
@@ -18,19 +32,19 @@ GenStage requires Elixir v1.3.
           [applications: [:gen_stage]]
         end
 
-## Further topics
+## Future research
 
 Here is a list of potential topics to be explored by this project (in no particular order or guarantee):
 
   * Provide examples with delivery guarantees
 
-  * Consider integrating dynamic supervisors with task supervisors (as consumers)
+  * Consider using DynamicSupervisor to implement Task.Supervisor (as a consumer)
 
-  * TCP and UDP acceptors producers
+  * TCP and UDP acceptors as producers
 
   * Ability to attach filtering to producers - today, if we need to filter events from a producer, we need an intermediary process which incurs extra copying
 
-  * Connecting stages across nodes - because there is no guarantee messages are delivered, the demand driven approach in `GenStage` won't perform well in a distributed setup
+  * Connecting stages across nodes - because there is no guarantee demand is delivered, the demand driven approach in `GenStage` won't perform well in a distributed setup
 
   * Integration with streams - how the `GenStage` foundation integrates with Elixir streams? In particular, streams composition is still purely functional while stages introduce asynchronicity.
 

@@ -70,6 +70,7 @@ defmodule App do
 
     children = [
       worker(Counter, [0]),
+      # We can add as many dynamic supervisors as consumers as we want!
       worker(Consumer, [], id: 1)
     ]
 

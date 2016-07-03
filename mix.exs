@@ -1,33 +1,32 @@
-defmodule GenRouter.Mixfile do
+defmodule GenStage.Mixfile do
   use Mix.Project
+
+  @version "0.1.0"
 
   def project do
     [app: :gen_stage,
-     version: "0.1.0",
+     version: @version,
      elixir: "~> 1.3",
+     package: package(),
+     description: "GenStage specification for Elixir",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
-     deps: deps()]
+     deps: deps(),
+     docs: [main: "GenStage", source_ref: "v#{@version}",
+            source_url: "https://github.com/elixir-lang/gen_stage"]]
   end
 
-  # Configuration for the OTP application
-  #
-  # Type `mix help compile.app` for more information
   def application do
     [applications: [:logger]]
   end
 
-  # Dependencies can be Hex packages:
-  #
-  #   {:mydep, "~> 0.3.0"}
-  #
-  # Or git/path repositories:
-  #
-  #   {:mydep, git: "https://github.com/elixir-lang/mydep.git", tag: "0.1.0"}
-  #
-  # Type `mix help deps` for more examples and options
   defp deps do
     [{:ex_doc, "~> 0.12", only: :docs},
-     {:inch_ex, only: :docs},]
+     {:inch_ex, only: :docs}]
+  end
+
+  defp package do
+    %{licenses: ["Apache 2"],
+      links: %{"GitHub" => "https://github.com/elixir-lang/gen_stage"}}
   end
 end
