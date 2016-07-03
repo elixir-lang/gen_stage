@@ -170,6 +170,28 @@ defmodule GenStageTest do
       assert_receive {:consumed, [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]}
       assert_receive {:consumed, [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]}
     end
+
+    test "with shared (broadcast) demand and synchronizer subscriber" do
+      {:ok, producer} = Counter.start_link({:producer, 0, dispatcher: GenStage.BroadcastDispatcher})
+      {:ok, consumer1} = Forwarder.start_link({:consumer, self()})
+      {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
+
+      # Subscribe but not demand
+      send producer, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, []}}
+
+      # Further subscriptions will block
+      GenStage.sync_subscribe(consumer1, to: producer, max_demand: 10, min_demand: 0)
+      GenStage.sync_subscribe(consumer2, to: producer, max_demand: 20, min_demand: 0)
+      refute_received {:consumed, _}
+
+      # Cancel the stale one
+      send producer, {:"$gen_producer", {self(), stage_ref}, {:cancel, :killed}}
+
+      # Because there is a race condition between subscriptions
+      # we will assert for events just later on.
+      assert_receive {:consumed, [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]}
+      assert_receive {:consumed, [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]}
+    end
   end
 
   describe "buffer" do
