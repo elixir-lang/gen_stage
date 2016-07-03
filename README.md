@@ -23,7 +23,7 @@ GenStage requires Elixir v1.3.
   1. Add `:gen_stage` to your list of dependencies in mix.exs:
 
         def deps do
-          [{:gen_stage, "~> 0.1.0"}]
+          [{:gen_stage, "~> 0.1"}]
         end
 
   2. Ensure `:gen_stage` is started before your application:
