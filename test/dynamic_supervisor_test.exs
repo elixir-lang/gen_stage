@@ -1,3 +1,5 @@
+alias Experimental.{DynamicSupervisor, GenStage}
+
 defmodule DynamicSupervisorTest do
   use ExUnit.Case, async: true
 

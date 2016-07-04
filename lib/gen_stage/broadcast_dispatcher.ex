@@ -1,3 +1,5 @@
+alias Experimental.GenStage
+
 defmodule GenStage.BroadcastDispatcher do
   @moduledoc """
   A dispatcher that accumulates demand from all consumer

@@ -1,3 +1,5 @@
+alias Experimental.GenStage
+
 defmodule GenStage do
   @moduledoc """
   Stages are computation steps that send and/or receive data
@@ -9,6 +11,10 @@ defmodule GenStage do
 
   **Note:** the `:producer_consumer` type referenced below is not
   yet implemented.
+
+  **Note:** this module is currently namespaced under
+  `Experimental.GenStage`. You will need to `alias Experimental.GenStage`
+  before writing the examples below.
 
   ## Stage types
 

@@ -1,3 +1,5 @@
+alias Experimental.GenStage
+
 defmodule GenStage.DemandDispatcher do
   @moduledoc """
   A dispatcher that sends batches to the highest demand.

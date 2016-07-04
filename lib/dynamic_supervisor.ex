@@ -1,3 +1,5 @@
+alias Experimental.{DynamicSupervisor, GenStage}
+
 defmodule DynamicSupervisor do
   @moduledoc ~S"""
   A supervisor that dynamically supervises and manages children.
@@ -7,12 +9,13 @@ defmodule DynamicSupervisor do
   `DynamicSupervisor` was designed to start, manage and supervise
   these children dynamically.
 
-  **Note**: due to a limitation in Erlang OTP, `DynamicSupervisor`
-  currently cannot be used as the root supervisor in your supervision
-  tree if you are planning to perform hot-code upgrades. We hope this
-  issue is addressed in upcoming OTP releases. For now, it is
-  recommended to define the dynamic supervisor as a child of a regular
-  supervisor.
+  **Note**: if you want to perform hot code upgrades, the
+  `DynamicSupervisor` can only be used as the root supervisor in
+  your supervision tree from Erlang 19 onwards.
+
+  **Note:** this module is currently namespaced under
+  `Experimental.DynamicSupervisor`. You will need to
+  `alias Experimental.DynamicSupervisor` before writing the examples below.
 
   ## Example
 

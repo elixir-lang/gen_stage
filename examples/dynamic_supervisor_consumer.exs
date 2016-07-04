@@ -1,5 +1,6 @@
 # Usage: mix run examples/dynamic_supervisor_consumer.exs
 # Hit Ctrl+C twice to stop it.
+alias Experimental.{DynamicSupervisor, GenStage}
 
 defmodule Counter do
   @moduledoc """

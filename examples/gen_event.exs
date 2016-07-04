@@ -1,4 +1,5 @@
 # Usage: mix run examples/gen_event.exs
+alias Experimental.{GenStage}
 
 defmodule Broadcaster do
   @moduledoc """
