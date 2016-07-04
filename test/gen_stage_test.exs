@@ -63,7 +63,7 @@ defmodule GenStageTest do
       {:noreply, [], state}
     end
 
-    def handle_subscribe(opts, from, state) do
+    def handle_subscribe(:consumer, opts, from, state) do
       is_pid(state) && send(state, {:producer_subscribed, from})
       {Keyword.get(opts, :producer_demand, :automatic), state}
     end
@@ -113,7 +113,7 @@ defmodule GenStageTest do
       {:reply, :ok, [], state}
     end
 
-    def handle_subscribe(opts, from, recipient) do
+    def handle_subscribe(:producer, opts, from, recipient) do
       send recipient, {:consumer_subscribed, from}
       {Keyword.get(opts, :consumer_demand, :automatic), recipient}
     end
@@ -267,6 +267,17 @@ defmodule GenStageTest do
       :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
       assert_receive {:consumed, [:d, :e, :f, :g]}
       assert_receive {:consumed, [:h]}
+    end
+
+    test "may have limit set to infinity" do
+      {:ok, producer} = Counter.start_link({:producer, 0, buffer_size: :infinity})
+      0 = Counter.sync_queue(producer, [:a, :b, :c, :d, :e])
+      0 = Counter.sync_queue(producer, [:f, :g, :h])
+
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
+      assert_receive {:consumed, [:a, :b, :c, :d]}
+      assert_receive {:consumed, [:e, :f, :g, :h]}
     end
   end
 

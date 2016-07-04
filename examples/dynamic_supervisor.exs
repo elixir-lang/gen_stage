@@ -1,4 +1,4 @@
-# Usage: mix run examples/dynamic_supervisor_consumer.exs
+# Usage: mix run examples/dynamic_supervisor.exs
 # Hit Ctrl+C twice to stop it.
 alias Experimental.{DynamicSupervisor, GenStage}
 

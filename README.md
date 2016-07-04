@@ -14,7 +14,9 @@ The module names are marked as `Experimental` to avoid conflicts as they are mea
 
 You can find examples on how to use the modules above in the [examples](examples) directory:
 
-  * [DymamicSupervisor consumer](examples/dynamic_supervisor_consumer.exs) - an example of how to use one or more `DynamicSupervisor` as a consumer to a producer that works as a counter
+  * [ProducerConsumer](examples/producer_consumer.exs) - a simple example of setting up a pipeline of `A -> B -> C` stages and having events flowing through
+
+  * [DymamicSupervisor](examples/dynamic_supervisor_consumer.exs) - an example of how to use one or more `DynamicSupervisor` as a consumer to a producer that works as a counter
 
   * [GenEvent](examples/gen_event.exs) - an example of how to use `GenStage` to implement a `GenEvent` replacement that leverages concurrency and provides more flexibility regarding buffer size and back-pressure
 

@@ -9,9 +9,6 @@ defmodule GenStage do
   data, it acts as a consumer. Stages may take both producer and
   consumer roles at once.
 
-  **Note:** the `:producer_consumer` type referenced below is not
-  yet implemented.
-
   **Note:** this module is currently namespaced under
   `Experimental.GenStage`. You will need to `alias Experimental.GenStage`
   before writing the examples below.
@@ -132,8 +129,8 @@ defmodule GenStage do
       {:ok, b} = GenStage.start_link(B, 2)   # multiply by 2
       {:ok, c} = GenStage.start_link(C, :ok) # state does not matter
 
-      GenStage.sync_subscribe(c, to: b)
       GenStage.sync_subscribe(b, to: a)
+      GenStage.sync_subscribe(c, to: b)
 
   After you subscribe all of them, demand will start flowing
   upstream and events downstream. Because C blocks for one
@@ -304,10 +301,8 @@ defmodule GenStage do
 
   """
 
-  defstruct [:mod, :state, :type, :dispatcher_mod, :dispatcher_state,
-             :buffer, :buffer_config, monitors: %{}, producers: %{}, consumers: %{}]
-
-  # TODO: Explore termination
+  defstruct [:mod, :state, :type, :dispatcher_mod, :dispatcher_state, :buffer,
+             :buffer_config, demand: 0, monitors: %{}, producers: %{}, consumers: %{}]
 
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer
@@ -356,7 +351,8 @@ defmodule GenStage do
 
     * `:buffer_size` - the size of the buffer to store events
       without demand. Check the "Buffer events" section on the
-      module documentation (defaults to 1000)
+      module documentation (defaults to 1000 for `:producer`,
+      `:infinity` for `:producer_consumer`)
     * `:buffer_keep` - returns if the `:first` or `:last` (default) entries
       should be kept on the buffer in case we exceed the buffer size
     * `:dispatcher` - the dispatcher responsible for handling demands.
@@ -406,8 +402,8 @@ defmodule GenStage do
   If this callback is not implemented, the default implementation by
   `use GenStage` will return `{:automatic, state}`.
   """
-  # TODO: Add kind parameter
-  @callback handle_subscribe(opts :: [options], to_or_from :: GenServer.from, state :: term) ::
+  @callback handle_subscribe(:producer | :consumer, opts :: [options],
+                             to_or_from :: GenServer.from, state :: term) ::
     {:automatic | :manual, new_state} |
     {:stop, reason, new_state} when new_state: term, reason: term
 
@@ -573,7 +569,7 @@ defmodule GenStage do
       end
 
       @doc false
-      def handle_subscribe(_opts, _from, state) do
+      def handle_subscribe(_kind, _opts, _from, state) do
         {:automatic, state}
       end
 
@@ -592,7 +588,7 @@ defmodule GenStage do
         {:ok, state}
       end
 
-      defoverridable [handle_call: 3, handle_info: 2, handle_subscribe: 3,
+      defoverridable [handle_call: 3, handle_info: 2, handle_subscribe: 4,
                       handle_cancel: 3, handle_cast: 2, terminate: 2, code_change: 3]
     end
   end
@@ -861,6 +857,10 @@ defmodule GenStage do
         init_producer(mod, [], state)
       {:producer, state, opts} when is_list(opts) ->
         init_producer(mod, opts, state)
+      {:producer_consumer, state} ->
+        init_producer_consumer(mod, [], state)
+      {:producer_consumer, state, opts} when is_list(opts) ->
+        init_producer_consumer(mod, opts, state)
       {:consumer, state} ->
         init_consumer(mod, [], state)
       {:consumer, state, opts} when is_list(opts) ->
@@ -876,13 +876,30 @@ defmodule GenStage do
 
   defp init_producer(mod, opts, state) do
     with {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher),
-         {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity),
+         {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity, true),
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
          :ok <- validate_no_opts(opts) do
       {:ok, dispatcher_state} = dispatcher_mod.init(opts)
-      {:ok, %GenStage{mod: mod, state: state, type: :producer, buffer: {:queue.new, 0},
-                      buffer_config: {buffer_size, buffer_keep},
+      {:ok, %GenStage{mod: mod, state: state, type: :producer,
+                      buffer: {:queue.new, 0}, buffer_config: {buffer_size, buffer_keep},
                       dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
+    else
+      {:error, message} -> {:stop, {:bad_opts, message}}
+    end
+  end
+
+  defp init_producer_consumer(mod, opts, state) do
+    {producers, opts} = Keyword.pop(opts, :subscribe_to, [])
+
+    with {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher),
+         {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, :infinity, 0, :infinity, true),
+         {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
+         :ok <- validate_no_opts(opts) do
+      {:ok, dispatcher_state} = dispatcher_mod.init(opts)
+      stage = %GenStage{mod: mod, state: state, type: :producer_consumer,
+                        buffer: {:queue.new, 0}, buffer_config: {buffer_size, buffer_keep},
+                        dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}
+      consumer_init_subscribe(producers, stage)
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
@@ -909,10 +926,12 @@ defmodule GenStage do
     end
   end
 
-  defp validate_integer(opts, key, default, min, max) do
+  defp validate_integer(opts, key, default, min, max, infinity?) do
     {value, opts} = Keyword.pop(opts, key, default)
 
     cond do
+      value == :infinity and infinity? ->
+        {:ok, value, opts}
       not is_integer(value) ->
         {:error, "expected #{inspect key} to be an integer, got: #{inspect value}"}
       value < min ->
@@ -1041,17 +1060,24 @@ defmodule GenStage do
   end
 
   def handle_info({:"$gen_consumer", {producer_pid, ref}, :ack},
-                  %{monitors: monitors, mod: mod, state: state} = stage) do
+                  %{monitors: monitors, mod: mod, state: state, type: type} = stage) do
     case Map.pop(monitors, ref) do
       {{producer_pid, cancel, min, max, opts}, monitors} ->
         to = {producer_pid, ref}
         stage = %{stage | monitors: monitors}
 
-        case apply(mod, :handle_subscribe, [opts, to, state]) do
-          {:automatic, state} ->
+        case apply(mod, :handle_subscribe, [:producer, opts, to, state]) do
+          {:automatic, state} when type == :consumer ->
             ask(to, max)
             stage = put_in stage.producers[ref], {producer_pid, cancel, {max, min, max}}
             {:noreply, %{stage | state: state}}
+          {:automatic, state} when type == :producer_consumer ->
+            case stage do
+              %{demand: 0} -> :ok
+              %{demand: n} -> ask(to, n)
+            end
+            stage = put_in stage.producers[ref], {producer_pid, cancel, :producer_consumer}
+            {:noreply, %{stage | state: state, demand: 0}}
           {:manual, state} ->
             stage = put_in stage.producers[ref], {producer_pid, cancel, :manual}
             {:noreply, %{stage | state: state}}
@@ -1127,10 +1153,26 @@ defmodule GenStage do
     case buffer_demand(counter, stage) do
       {:ok, 0, stage} ->
         {:noreply, stage}
-      {:ok, counter, %{state: state} = stage} when is_integer(counter) and counter > 0 ->
-        # TODO: support producer_consumer
-        noreply_callback(:handle_demand, [counter, state], stage)
+      {:ok, counter, stage} when is_integer(counter) and counter > 0 ->
+        case stage do
+          %{type: :producer_consumer} ->
+            handle_demand(counter, stage)
+          %{state: state} ->
+            noreply_callback(:handle_demand, [counter, state], stage)
+        end
     end
+  end
+
+  defp handle_demand(counter, %{producers: producers, demand: demand} = stage)
+       when map_size(producers) == 0 do
+    {:noreply, %{stage | demand: demand + counter}}
+  end
+
+  defp handle_demand(counter, %{producers: producers} = stage) do
+    for {ref, {producer_pid, _, :producer_consumer}} <- producers do
+      send(producer_pid, {:"$gen_producer", {self(), ref}, {:ask, counter}})
+    end
+    {:noreply, stage}
   end
 
   defp noreply_callback(callback, args, %{mod: mod} = stage) do
@@ -1173,7 +1215,6 @@ defmodule GenStage do
       0 ->
         {:ok, counter, stage}
       allowed ->
-        %{buffer_config: {max, _keep}} = stage
         {events, queue} = take_from_queue(allowed, [], queue)
         stage = dispatch_events(events, stage)
         {:ok, counter - allowed, %{stage | buffer: {queue, buffer - allowed}}}
@@ -1204,10 +1245,17 @@ defmodule GenStage do
     %{stage | buffer: {queue, counter}}
   end
 
+  defp queue_events(events, queue, counter, counter, :infinity),
+    do: queue_infinity(events, queue, counter)
   defp queue_events(:first, events, queue, counter, max),
     do: queue_first(events, queue, counter, max)
   defp queue_events(:last, events, queue, counter, max),
     do: queue_last(events, queue, 0, counter, max)
+
+  defp queue_infinity([], queue, counter),
+    do: {0, queue, counter}
+  defp queue_infinity([event | events], queue, counter),
+    do: queue_infinity(events, :queue.in(event, queue), counter + 1)
 
   defp queue_first([], queue, counter, _max),
     do: {0, queue, counter}
@@ -1239,6 +1287,9 @@ defmodule GenStage do
     {demand, batches} = split_batches(events, from, min, max, demand, demand, [])
     stage = put_in stage.producers[ref], {producer_id, cancel, {demand, min, max}}
     {batches, stage}
+  end
+  defp consumer_receive(_, {_, _, :producer_consumer}, events, stage) do
+    {[{events, 0}], stage}
   end
   defp consumer_receive(_, {_, _, :manual}, events, stage) do
     {[{events, 0}], stage}
@@ -1316,8 +1367,8 @@ defmodule GenStage do
 
   defp consumer_subscribe(to, full_opts, stage) do
     with {:ok, cancel, opts} <- validate_in(full_opts, :cancel, :permanent, [:temporary, :permanent]),
-         {:ok, max, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity),
-         {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1) do
+         {:ok, max, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity, false),
+         {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
       producer_pid = GenServer.whereis(to)
       cond do
         producer_pid != nil ->
@@ -1340,7 +1391,7 @@ defmodule GenStage do
   defp producer_subscribe(opts, from, stage) do
     %{mod: mod, state: state, dispatcher_state: dispatcher_state} = stage
 
-    case apply(mod, :handle_subscribe, [opts, from, state]) do
+    case apply(mod, :handle_subscribe, [:consumer, opts, from, state]) do
       {:automatic, state} ->
         # Call the dispatcher after since it may generate demand and the
         # main module must know the consumer is subscribed.

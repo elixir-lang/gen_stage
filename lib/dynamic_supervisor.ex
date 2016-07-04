@@ -452,7 +452,7 @@ defmodule DynamicSupervisor do
   defp validate_dynamic(_), do: {:error, "max_dynamic must be an integer or :infinity"}
 
   @doc false
-  def handle_subscribe(opts, {_, ref} = from, state) do
+  def handle_subscribe(:producer, opts, {_, ref} = from, state) do
     ## GenStage checks these options before allowing susbcription
     max = Keyword.get(opts, :max_demand, 100)
     min = Keyword.get(opts, :min_demand, div(max, 2))
