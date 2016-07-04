@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0-dev
+## v0.2.0 (2016-07-05)
 
 ### Enhancements
 
