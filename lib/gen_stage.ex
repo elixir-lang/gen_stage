@@ -259,38 +259,41 @@ defmodule GenStage do
       purposes in case of crashes. The `subscription_ref` is unique to
       identify the subscription (and may be the monitoring reference).
 
-      Once sent, the consumer MAY immediately send demand to the producer.
-      The `subscription_ref` is unique to identify the subscription.
-
-      Once received, the producer MUST monitor the consumer and call
-      call `dispatcher.subscribe(from, state)`. However, if the subscription
-      reference is known, it must send a `:cancel` message to the consumer.
+      Once received, the producer MUST monitor the consumer and properly
+      acknoledge or cancel the subscription. The consumer MUST wait until
+      the ack message is received before sending demand. However, if the
+      subscription reference is known, it must send a `:cancel` message
+      to the consumer.
 
     * `{:"$gen_producer", from :: {pid, subscription_ref}, {:cancel, reason}}` -
       sent by the consumer to cancel a given subscription.
 
-      Once received, the producer MUST call `dispatcher.cancel(from, state)`
-      upon receival and discard the subscription. A cancel reply must be sent
-      from the producer to the registered consumer (although there is no
-      guarantee such message can be delivered).
+      Once received, the producer MUST send a `:cancel` reply to the
+      registered consumer (which may not necessarily be the one received
+      in the tuple above). Keep in mind, however, there is no guarantee
+      such messages can be delivered in case the producer crashes before.
+      If the pair is unknown, the producer MUST send an appropriate cancel
+      reply.
 
     * `{:"$gen_producer", from :: {pid, subscription_ref}, {:ask, count}}` -
       sent by consumers to ask data in a given subscription.
 
-      Once received, the producer MUST call `dispatcher.ask(count, from, state)`
-      if one is available. The producer MUST send data up to the demand. If the
-      pair is unknown, the producer MUST send an appropriate disconnect reply.
+      Once received, the producer MUST send data up to the demand. If the
+      pair is unknown, the producer MUST send an appropriate cancel reply.
 
   ### Consumer messages
 
   The consumer is responsible for starting the subscription
   and sending demand to producers.
 
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, :ack}` -
+      sent by producers to acknowledge a subscription.
+
     * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, {:cancel, reason}}` -
       sent by producers to cancel a given subscription.
 
-      It is used as a confirmation for client disconnects OR whenever
-      the producer wants to cancel some upstream demand.
+      It is used as a confirmation for client cancellations OR
+      whenever the producer wants to cancel some upstream demand.
 
     * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, [event]}` -
       events sent by producers to consumers.
