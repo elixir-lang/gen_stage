@@ -316,15 +316,38 @@ defmodule GenStageTest do
     end
 
     @tag :capture_log
+    test "consumer exits when producer does not ack and subscription is permanent" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Task.start_link(fn ->
+        receive do
+          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+        end
+      end)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer)
+      assert_receive {:EXIT, ^consumer, {:cancel, :no_thanks}}
+    end
+
     test "consumer does not exit when there is no named producer and subscription is temporary" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown, cancel: :temporary)
     end
 
-    @tag :capture_log
     test "consumer does not exit when producer is dead and subscription is temporary" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
+    end
+
+    test "consumer exits when producer does not ack and subscription is temporary" do
+      {:ok, producer} = Task.start_link(fn ->
+        receive do
+          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+        end
+      end)
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
     end
@@ -435,6 +458,7 @@ defmodule GenStageTest do
 
       {:messages, messages} = Process.info(self(), :messages)
       assert messages == [
+        {:"$gen_consumer", {producer, stage_ref}, :ack},
         {:producer_subscribed, {self(), stage_ref}},
         {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
         {call_ref, self()},
@@ -458,6 +482,7 @@ defmodule GenStageTest do
 
       {:messages, messages} = Process.info(self(), :messages)
       assert messages == [
+        {:"$gen_consumer", {producer, stage_ref}, :ack},
         {:producer_subscribed, {self(), stage_ref}},
         {call_ref, self()},
         {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
@@ -613,6 +638,13 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       ref = make_ref()
       send consumer, {:"$gen_consumer", {self(), ref}, [1, 2, 3]}
+      assert_receive {:"$gen_producer", {^consumer, ^ref}, {:cancel, :unknown_subscription}}
+    end
+
+    test "unknown ack" do
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      ref = make_ref()
+      send consumer, {:"$gen_consumer", {self(), ref}, :ack}
       assert_receive {:"$gen_producer", {^consumer, ^ref}, {:cancel, :unknown_subscription}}
     end
 

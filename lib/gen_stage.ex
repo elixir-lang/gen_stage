@@ -656,9 +656,8 @@ defmodule GenStage do
 
   This call is synchronous and will return after the called stage
   sends the subscribe message to the producer. It does not, however,
-  guarantee a subscription: for example, the producer stage may
-  refuse the subscription or exit before or after receiving the
-  message.
+  wait for the subscription confirmation. Therefore this function
+  will return before `handle_subscribe` is called in the consumer.
 
   This function will return `{:ok, ref}` as long as the subscription
   message is sent. It may return `{:error, :not_a_consumer}` in case
@@ -998,6 +997,7 @@ defmodule GenStage do
         mon_ref = Process.monitor(consumer_pid)
         stage = put_in stage.monitors[mon_ref], ref
         stage = put_in stage.consumers[ref], {consumer_pid, mon_ref}
+        send(consumer_pid, {:"$gen_consumer", {self(), ref}, :ack})
         producer_subscribe(opts, from, stage)
     end
   end
@@ -1321,7 +1321,6 @@ defmodule GenStage do
           ref = Process.monitor(producer_pid)
           send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
           stage = put_in stage.monitors[ref], {producer_pid, cancel, min, max, full_opts}
-          send(self(), {:"$gen_consumer", {producer_pid, ref}, :ack})
           {:reply, {:ok, ref}, stage}
         cancel == :temporary ->
           {:reply, {:ok, make_ref()}, stage}

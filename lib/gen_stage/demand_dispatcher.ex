@@ -17,8 +17,8 @@ defmodule GenStage.DemandDispatcher do
   end
 
   @doc false
-  def subscribe(_opts, {_, _ref}, state) do
-    {:ok, 0, state}
+  def subscribe(_opts, {pid, ref}, {demands, pending, max}) do
+    {:ok, 0, {demands ++ [{0, pid, ref}], pending, max}}
   end
 
   @doc false
@@ -81,9 +81,7 @@ defmodule GenStage.DemandDispatcher do
     do: [{counter, pid, ref}]
 
   defp pop_demand(ref, demands) do
-    case List.keytake(demands, ref, 2) do
-      {{current, _pid, ^ref}, rest} -> {current, rest}
-      nil -> {0, demands}
-    end
+    {{current, _pid, ^ref}, rest} = List.keytake(demands, ref, 2)
+    {current, rest}
   end
 end

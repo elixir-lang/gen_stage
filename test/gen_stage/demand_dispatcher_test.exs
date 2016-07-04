@@ -17,7 +17,7 @@ defmodule GenStage.DemandDispatcherTest do
     disp = dispatcher([])
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
-    assert disp == {[], 0, nil}
+    assert disp == {[{0, pid, ref}], 0, nil}
 
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
     assert disp == {[], 0, nil}
@@ -30,7 +30,7 @@ defmodule GenStage.DemandDispatcherTest do
 
     # Subscribe, ask and cancel and leave some demand
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
-    assert disp == {[], 0, nil}
+    assert disp == {[{0, pid, ref}], 0, nil}
 
     {:ok, 10, disp} = D.ask(10, {pid, ref}, disp)
     assert disp == {[{10, pid, ref}], 0, 10}
@@ -40,7 +40,7 @@ defmodule GenStage.DemandDispatcherTest do
 
     # Subscribe, ask and cancel and leave the same demand
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
-    assert disp == {[], 10, 10}
+    assert disp == {[{0, pid, ref}], 10, 10}
 
     {:ok, 0, disp} = D.ask(5, {pid, ref}, disp)
     assert disp == {[{5, pid, ref}], 5, 10}
