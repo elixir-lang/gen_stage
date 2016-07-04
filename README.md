@@ -38,7 +38,7 @@ GenStage requires Elixir v1.3.
 
 Here is a list of potential topics to be explored by this project (in no particular order or guarantee):
 
-  * Provide examples with delivery guarantees
+  * Provide examples with delivery guarantees and/or checkpoints
 
   * Consider using DynamicSupervisor to implement Task.Supervisor (as a consumer)
 
