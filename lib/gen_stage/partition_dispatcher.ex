@@ -55,10 +55,10 @@ defmodule GenStage.PartitionDispatcher do
     partition = Map.fetch!(references, ref)
     {pid, ref, demand_or_queue} = Map.fetch!(partitions, partition)
 
-    {events, demand_or_queue, counter} =
+    {events, demand_or_queue} =
       case demand_or_queue do
         demand when is_integer(demand) ->
-          {[], demand + counter, counter}
+          {[], demand + counter}
         queue ->
           take_from_queue([], queue, counter)
       end
@@ -71,14 +71,14 @@ defmodule GenStage.PartitionDispatcher do
   end
 
   defp take_from_queue(acc, queue, 0) do
-    {Enum.reverse(acc), queue, 0}
+    {Enum.reverse(acc), queue}
   end
   defp take_from_queue(acc, queue, counter) do
     case :queue.out(queue) do
       {{:value, event}, queue} ->
         take_from_queue([event | acc], queue, counter - 1)
       {:empty, _queue} ->
-        {Enum.reverse(acc), counter, counter}
+        {Enum.reverse(acc), counter}
     end
   end
 
