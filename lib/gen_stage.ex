@@ -875,11 +875,10 @@ defmodule GenStage do
   end
 
   defp init_producer(mod, opts, state) do
-    with {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher),
+    with {:ok, dispatcher_mod, dispatcher_state, opts} <- validate_dispatcher(opts),
          {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity, true),
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
          :ok <- validate_no_opts(opts) do
-      {:ok, dispatcher_state} = dispatcher_mod.init(opts)
       {:ok, %GenStage{mod: mod, state: state, type: :producer,
                       buffer: {:queue.new, 0}, buffer_config: {buffer_size, buffer_keep},
                       dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
@@ -888,14 +887,26 @@ defmodule GenStage do
     end
   end
 
+  defp validate_dispatcher(opts) do
+    case Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher) do
+      {dispatcher, opts} when is_atom(dispatcher) ->
+        {:ok, dispatcher_state} = dispatcher.init([])
+        {:ok, dispatcher, dispatcher_state, opts}
+      {{dispatcher, dispatcher_opts}, opts} when is_atom(dispatcher) and is_list(dispatcher_opts) ->
+        {:ok, dispatcher_state} = dispatcher.init(dispatcher_opts)
+        {:ok, dispatcher, dispatcher_state, opts}
+      {other, _opts} ->
+        {:error, "expected :dispatcher to be an atom or a {atom, list}, got: #{inspect other}"}
+    end
+  end
+
   defp init_producer_consumer(mod, opts, state) do
     {producers, opts} = Keyword.pop(opts, :subscribe_to, [])
 
-    with {dispatcher_mod, opts} = Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher),
+    with {:ok, dispatcher_mod, dispatcher_state, opts} <- validate_dispatcher(opts),
          {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, :infinity, 0, :infinity, true),
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
          :ok <- validate_no_opts(opts) do
-      {:ok, dispatcher_state} = dispatcher_mod.init(opts)
       stage = %GenStage{mod: mod, state: state, type: :producer_consumer,
                         buffer: {:queue.new, 0}, buffer_config: {buffer_size, buffer_keep},
                         dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}

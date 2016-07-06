@@ -567,6 +567,9 @@ defmodule GenStageTest do
       assert Counter.start_link({:producer, 0, buffer_size: -1}) ==
              {:error, {:bad_opts, "expected :buffer_size to be equal to or greater than 0, got: -1"}}
 
+      assert Counter.start_link({:producer, 0, dispatcher: 0}) ==
+             {:error, {:bad_opts, "expected :dispatcher to be an atom or a {atom, list}, got: 0"}}
+
       assert Counter.start_link({:producer, 0, unknown: :value}) ==
              {:error, {:bad_opts, "unknown options [unknown: :value]"}}
 
@@ -788,13 +791,16 @@ defmodule GenStageTest do
       assert Doubler.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
       assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
 
-      assert Doubler.start_link({:consumer, self(), unknown: :value}) ==
+      assert Doubler.start_link({:producer_consumer, self(), unknown: :value}) ==
              {:error, {:bad_opts, "unknown options [unknown: :value]"}}
 
+      assert Doubler.start_link({:producer_consumer, 0, dispatcher: 0}) ==
+             {:error, {:bad_opts, "expected :dispatcher to be an atom or a {atom, list}, got: 0"}}
+
       assert {:ok, pid} =
-             Doubler.start_link({:consumer, self()}, name: context.test)
+             Doubler.start_link({:producer_consumer, self()}, name: context.test)
       assert {:error, {:already_started, ^pid}} =
-             Doubler.start_link({:consumer, self()}, name: context.test)
+             Doubler.start_link({:producer_consumer, self()}, name: context.test)
     end
 
     test "producer handle_subscribe/4" do
