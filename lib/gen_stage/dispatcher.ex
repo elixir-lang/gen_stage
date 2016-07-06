@@ -52,10 +52,11 @@ defmodule GenStage.Dispatcher do
   @doc """
   Called every time a producer wants to dispatch an event.
 
-  The events will always be a non empty list. This callback must
-  return events it could not effectively deliver as part of its
+  The events will always be a non empty list. This callback may
+  receive more events than previously asked and therefore must
+  return events it cannot not effectively deliver as part of its
   return tuple. Any `leftover_events` will be stored by producers
-  in their overflown buffer.
+  in their buffer.
 
   It is important to emphasize that `leftover_events` can happen
   in any dispatcher implementation. After all, a consumer can
