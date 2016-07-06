@@ -129,12 +129,15 @@ defmodule GenStage do
       {:ok, b} = GenStage.start_link(B, 2)   # multiply by 2
       {:ok, c} = GenStage.start_link(C, :ok) # state does not matter
 
-      GenStage.sync_subscribe(b, to: a)
       GenStage.sync_subscribe(c, to: b)
+      GenStage.sync_subscribe(b, to: a)
 
-  After you subscribe all of them, demand will start flowing
-  upstream and events downstream. Because C blocks for one
-  second, the demand will eventually be adjusted to C needs.
+  Notice we typically subscribe from bottom to top. Since A will
+  start producing items only when B connects to it, we want this
+  subscription to happen when the whole pipeline is ready. After
+  you subscribe all of them, demand will start flowing upstream and
+  events downstream.
+
   When implementing consumers, we often set the `:max_demand` and
   `:min_demand` on subscription. The `:max_demand` specifies the
   maximum amount of events that must be in flow while the `:min_demand`
@@ -142,6 +145,12 @@ defmodule GenStage do
   example, if `:max_demand` is 100 and `:min_demand` is 50
   (the default values), the consumer will ask for 100 events initially
   and ask for more only after it receives at least 50.
+
+  In the example above, B is a `:producer_consumer` and therefore
+  acts as a buffer. Getting the proper demand values in B is
+  important: making the buffer to small may make the whole pipeline
+  slower, making the buffer too big may unecessarily consume
+  memory.
 
   When such values are applied to the stages above, it is easy
   to see the producer works in batches. The producer A ends-up
@@ -302,7 +311,7 @@ defmodule GenStage do
   """
 
   defstruct [:mod, :state, :type, :dispatcher_mod, :dispatcher_state, :buffer,
-             :buffer_config, demand: 0, monitors: %{}, producers: %{}, consumers: %{}]
+             :buffer_config, events: 0, monitors: %{}, producers: %{}, consumers: %{}]
 
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer
@@ -668,10 +677,8 @@ defmodule GenStage do
       the consumer exits when the producer cancels or exits. In case
       of exits, the same reason is used to exit the consumer. In case of
       cancellations, the reason is wrapped in a `:cancel` tuple.
-    * `:min_demand` - the minimum demand for this subscription. It overrides
-      the value configured in the consumer initializer
-    * `:max_demand` - the maximum demand for this subscription. It overrides
-      the value configured in the consumer initializer
+    * `:min_demand` - the minimum demand for this subscription
+    * `:max_demand` - the maximum demand for this subscription
 
   All other options are sent as is to the producer stage.
   """
@@ -698,10 +705,8 @@ defmodule GenStage do
       the consumer exits when the producer cancels or exits. In case
       of exits, the same reason is used to exit the consumer. In case of
       cancellations, the reason is wrapped in a `:cancel` tuple.
-    * `:min_demand` - the minimum demand for this subscription. It overrides
-      the value configured in the consumer initializer
-    * `:max_demand` - the maximum demand for this subscription. It overrides
-      the value configured in the consumer initializer
+    * `:min_demand` - the minimum demand for this subscription
+    * `:max_demand` - the maximum demand for this subscription
 
   All other options are sent as is to the producer stage.
 
@@ -1058,10 +1063,29 @@ defmodule GenStage do
     {:noreply, stage}
   end
 
+  def handle_info({:"$gen_consumer", {producer_pid, ref}, events},
+                  %{type: :producer_consumer, events: demand_or_queue, producers: producers} = stage) when is_list(events) do
+    case producers do
+      %{^ref => _entry} ->
+        {events, demand_or_queue} =
+          case demand_or_queue do
+            demand when is_integer(demand) ->
+              split_pc_events(events, ref, demand, [])
+            queue ->
+              {[], put_pc_events(events, ref, queue)}
+          end
+        send_pc_events(events, ref, %{stage | events: demand_or_queue})
+      _ ->
+        send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
+        {:noreply, stage}
+    end
+  end
+
   def handle_info({:"$gen_consumer", {producer_pid, ref} = from, events},
-                  %{producers: producers, mod: mod, state: state} = stage) when is_list(events) do
+                  %{type: :consumer, producers: producers, mod: mod, state: state} = stage) when is_list(events) do
     case producers do
       %{^ref => entry} ->
+        {producer_pid, _, _} = entry
         {batches, stage} = consumer_receive(from, entry, events, stage)
         consumer_dispatch(batches, from, mod, state, stage, false)
       _ ->
@@ -1071,24 +1095,17 @@ defmodule GenStage do
   end
 
   def handle_info({:"$gen_consumer", {producer_pid, ref}, :ack},
-                  %{monitors: monitors, mod: mod, state: state, type: type} = stage) do
+                  %{monitors: monitors, mod: mod, state: state} = stage) do
     case Map.pop(monitors, ref) do
       {{producer_pid, cancel, min, max, opts}, monitors} ->
         to = {producer_pid, ref}
         stage = %{stage | monitors: monitors}
 
         case apply(mod, :handle_subscribe, [:producer, opts, to, state]) do
-          {:automatic, state} when type == :consumer ->
+          {:automatic, state} ->
             ask(to, max)
             stage = put_in stage.producers[ref], {producer_pid, cancel, {max, min, max}}
             {:noreply, %{stage | state: state}}
-          {:automatic, state} when type == :producer_consumer ->
-            case stage do
-              %{demand: 0} -> :ok
-              %{demand: n} -> ask(to, n)
-            end
-            stage = put_in stage.producers[ref], {producer_pid, cancel, :producer_consumer}
-            {:noreply, %{stage | state: state, demand: 0}}
           {:manual, state} ->
             stage = put_in stage.producers[ref], {producer_pid, cancel, :manual}
             {:noreply, %{stage | state: state}}
@@ -1161,7 +1178,7 @@ defmodule GenStage do
     {:ok, counter, dispatcher_state} = apply(dispatcher_mod, callback, args)
     stage = %{stage | dispatcher_state: dispatcher_state}
 
-    case buffer_demand(counter, stage) do
+    case take_from_buffer(counter, stage) do
       {:ok, 0, stage} ->
         {:noreply, stage}
       {:ok, counter, stage} when is_integer(counter) and counter > 0 ->
@@ -1174,16 +1191,12 @@ defmodule GenStage do
     end
   end
 
-  defp handle_demand(counter, %{producers: producers, demand: demand} = stage)
-       when map_size(producers) == 0 do
-    {:noreply, %{stage | demand: demand + counter}}
+  defp handle_demand(counter, %{events: events} = stage) when is_integer(events) do
+    {:noreply, %{stage | events: events + counter}}
   end
 
-  defp handle_demand(counter, %{producers: producers} = stage) do
-    for {ref, {producer_pid, _, :producer_consumer}} <- producers do
-      send(producer_pid, {:"$gen_producer", {self(), ref}, {:ask, counter}})
-    end
-    {:noreply, stage}
+  defp handle_demand(counter, %{events: events} = stage) do
+    take_pc_events(events, counter, stage)
   end
 
   defp noreply_callback(callback, args, %{mod: mod} = stage) do
@@ -1221,23 +1234,23 @@ defmodule GenStage do
     buffer_events(events, %{stage | dispatcher_state: dispatcher_state})
   end
 
-  defp buffer_demand(counter, %{buffer: {queue, buffer}} = stage) do
+  defp take_from_buffer(counter, %{buffer: {queue, buffer}} = stage) do
     case min(counter, buffer) do
       0 ->
         {:ok, counter, stage}
       allowed ->
-        {events, queue} = take_from_queue(allowed, [], queue)
+        {events, queue} = take_from_buffer(allowed, [], queue)
         stage = dispatch_events(events, stage)
         {:ok, counter - allowed, %{stage | buffer: {queue, buffer - allowed}}}
     end
   end
 
-  defp take_from_queue(0, events, queue) do
+  defp take_from_buffer(0, events, queue) do
     {Enum.reverse(events), queue}
   end
-  defp take_from_queue(counter, events, queue) do
+  defp take_from_buffer(counter, events, queue) do
     {{:value, val}, queue} = :queue.out(queue)
-    take_from_queue(counter - 1, [val | events], queue)
+    take_from_buffer(counter - 1, [val | events], queue)
   end
 
   defp buffer_events([], stage) do
@@ -1456,6 +1469,54 @@ defmodule GenStage do
           {:stop, _, _} = stop ->
             stop
         end
+    end
+  end
+
+  ## producer_consumer
+
+  defp split_pc_events(events, ref, 0, acc),
+    do: {Enum.reverse(acc), put_pc_events(events, ref, :queue.new)}
+  defp split_pc_events([], _from, counter, acc),
+    do: {Enum.reverse(acc), counter}
+  defp split_pc_events([event | events], ref, counter, acc),
+    do: split_pc_events(events, ref, counter - 1, [event | acc])
+
+  defp put_pc_events(events, ref, queue) do
+    :queue.in({events, length(events), ref}, queue)
+  end
+
+  defp send_pc_events(events, ref,
+                      %{mod: mod, state: state, producers: producers} = stage) do
+    case producers do
+      %{^ref => entry} ->
+        {producer_id, _, _} = entry
+        from = {producer_id, ref}
+        {batches, stage} = consumer_receive(from, entry, events, stage)
+        consumer_dispatch(batches, from, mod, state, stage, false)
+      %{} ->
+        # We queued but producer was removed
+        # TODO: Test me
+        consumer_dispatch([{events, 0}], :unused, mod, state, stage, false)
+    end
+  end
+
+  defp take_pc_events(queue, counter, stage) do
+    case :queue.out(queue) do
+      {{:value, {events, length, ref}}, queue} when length < counter ->
+        case send_pc_events(events, ref, stage) do
+          {:noreply, stage} ->
+            take_pc_events(queue, counter - length, stage)
+          {:noreply, stage, :hibernate} ->
+            take_pc_events(queue, counter - length, stage)
+          {:stop, _, _} = stop ->
+            stop
+        end
+      {{:value, {events, _length, ref}}, queue} ->
+        {now, later} = Enum.split(events, counter)
+        events = put_pc_events(later, ref, queue)
+        send_pc_events(now, ref, %{stage | events: events})
+      {:empty, _queue} ->
+        {:noreply, %{stage | events: 0}}
     end
   end
 end
