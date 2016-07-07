@@ -433,7 +433,7 @@ defmodule GenStageTest do
 
       assert capture_log(fn ->
         0 = Counter.sync_queue(producer, [:f, :g, :h])
-      end) =~ "GenStage producer has discarded 3 events from buffer"
+      end) =~ "GenStage producer #{inspect producer} has discarded 3 events from buffer"
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
@@ -447,7 +447,7 @@ defmodule GenStageTest do
 
       assert capture_log(fn ->
         0 = Counter.sync_queue(producer, [:f, :g, :h])
-      end) =~ "GenStage producer has discarded 3 events from buffer"
+      end) =~ "GenStage producer #{inspect producer} has discarded 3 events from buffer"
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
@@ -799,11 +799,11 @@ defmodule GenStageTest do
     end
 
     test "emit warning if trying to dispatch events from a consumer" do
-      {:ok, consumer} = Counter.start_link({:consumer, 0})
+      {:ok, consumer} = Counter.start_link({:consumer, 0}, name: :gen_stage_error)
 
       assert capture_log(fn ->
         0 = Counter.sync_queue(consumer, [:f, :g, :h])
-      end) =~ "GenStage consumer cannot dispatch events"
+      end) =~ "GenStage consumer :gen_stage_error cannot dispatch events"
     end
   end
 

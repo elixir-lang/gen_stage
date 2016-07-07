@@ -1020,7 +1020,7 @@ defmodule GenStage do
   ## Producer messages
 
   def handle_info({:"$gen_producer", _, _} = msg, %{type: :consumer} = stage) do
-    :error_logger.error_msg('GenStage consumer received $gen_producer message: ~p~n', [msg])
+    :error_logger.error_msg('GenStage consumer ~p received $gen_producer message: ~p~n', [name(), msg])
     {:noreply, stage}
   end
 
@@ -1028,7 +1028,7 @@ defmodule GenStage do
                   %{consumers: consumers} = stage) do
     case consumers do
       %{^ref => _} ->
-        :error_logger.error_msg('GenStage producer received duplicated subscription from: ~p~n', [from])
+        :error_logger.error_msg('GenStage producer ~p received duplicated subscription from: ~p~n', [name(), from])
         send(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}})
         {:noreply, stage}
       %{} ->
@@ -1059,7 +1059,7 @@ defmodule GenStage do
   ## Consumer messages
 
   def handle_info({:"$gen_consumer", _, _} = msg, %{type: :producer} = stage) do
-    :error_logger.error_msg('GenStage producer received $gen_consumer message: ~p~n', [msg])
+    :error_logger.error_msg('GenStage producer ~p received $gen_consumer message: ~p~n', [name(), msg])
     {:noreply, stage}
   end
 
@@ -1222,7 +1222,7 @@ defmodule GenStage do
     stage
   end
   defp dispatch_events(events, %{type: :consumer} = stage) do
-    :error_logger.error_msg('GenStage consumer cannot dispatch events (an empty list must be returned): ~p~n', [events])
+    :error_logger.error_msg('GenStage consumer ~p cannot dispatch events (an empty list must be returned): ~p~n', [name(), events])
     stage
   end
   defp dispatch_events(events, %{consumers: consumers} = stage) when map_size(consumers) == 0 do
@@ -1263,7 +1263,7 @@ defmodule GenStage do
       0 ->
         :ok
       excess ->
-        :error_logger.warning_msg('GenStage producer has discarded ~p events from buffer', [excess])
+        :error_logger.warning_msg('GenStage producer ~p has discarded ~p events from buffer', [name(), excess])
     end
 
     %{stage | buffer: {queue, counter}}
@@ -1329,8 +1329,8 @@ defmodule GenStage do
     {old_demand, batch_size} =
       case old_demand - batch_size do
         diff when diff < 0 ->
-          :error_logger.error_msg('GenStage consumer has received ~p events in excess from: ~p~n',
-                                  [abs(diff), from])
+          :error_logger.error_msg('GenStage consumer ~p has received ~p events in excess from: ~p~n',
+                                  [name(), abs(diff), from])
           {0, old_demand}
         diff ->
           {diff, batch_size}
@@ -1385,7 +1385,7 @@ defmodule GenStage do
     do: consumer_subscribe(to, [], stage)
 
   defp consumer_subscribe(to, _opts, %{type: :producer} = stage) do
-    :error_logger.error_msg('GenStage producer cannot be subscribed to another stage: ~p~n', [to])
+    :error_logger.error_msg('GenStage producer ~p cannot be subscribed to another stage: ~p~n', [name(), to])
     {:reply, {:error, :not_a_consumer}, stage}
   end
 
@@ -1407,7 +1407,7 @@ defmodule GenStage do
        end
     else
       {:error, message} ->
-        :error_logger.error_msg('GenStage subscribe received invalid option: ~ts~n', [message])
+        :error_logger.error_msg('GenStage consumer ~p subscribe received invalid option: ~ts~n', [name(), message])
         {:reply, {:error, {:bad_opts, message}}, stage}
     end
   end
@@ -1469,6 +1469,13 @@ defmodule GenStage do
           {:stop, _, _} = stop ->
             stop
         end
+    end
+  end
+
+  defp name() do
+    case :erlang.process_info(self(), :registered_name) do
+      {:registered_name, name} when is_atom(name) -> name
+      _ -> self()
     end
   end
 
