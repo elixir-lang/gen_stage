@@ -453,8 +453,8 @@ defmodule DynamicSupervisor do
 
   @doc false
   def handle_subscribe(:producer, opts, {_, ref} = from, state) do
-    ## GenStage checks these options before allowing susbcription
-    max = Keyword.get(opts, :max_demand, 100)
+    # GenStage checks these options before allowing susbcription
+    max = Keyword.get(opts, :max_demand, 1000)
     min = Keyword.get(opts, :min_demand, div(max, 2))
     GenStage.ask(from, max)
     {:manual, put_in(state.producers[ref], {from, 0, max, min, max})}

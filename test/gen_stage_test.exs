@@ -174,16 +174,16 @@ defmodule GenStageTest do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
-      batch = Enum.to_list(0..49)
+      batch = Enum.to_list(0..499)
       assert_receive {:consumed, ^batch}
-      batch = Enum.to_list(50..99)
+      batch = Enum.to_list(500..999)
       assert_receive {:consumed, ^batch}
     end
 
     test "with 80% min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{producer, min_demand: 80}]})
+                                       subscribe_to: [{producer, min_demand: 80, max_demand: 100}]})
 
       batch = Enum.to_list(0..19)
       assert_receive {:consumed, ^batch}
@@ -196,7 +196,7 @@ defmodule GenStageTest do
     test "with 20% min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{producer, min_demand: 20}]})
+                                       subscribe_to: [{producer, min_demand: 20, max_demand: 100}]})
 
       batch = Enum.to_list(0..79)
       assert_receive {:consumed, ^batch}
@@ -490,8 +490,8 @@ defmodule GenStageTest do
       assert message == "expected :max_demand to be equal to or greater than 1, got: 0"
 
       assert {:error, {:bad_opts, message}} =
-             GenStage.sync_subscribe(consumer, to: :whatever, min_demand: 200)
-      assert message == "expected :min_demand to be equal to or less than 99, got: 200"
+             GenStage.sync_subscribe(consumer, to: :whatever, min_demand: 2000)
+      assert message == "expected :min_demand to be equal to or less than 999, got: 2000"
     end
 
     @tag :capture_log

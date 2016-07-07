@@ -142,9 +142,9 @@ defmodule GenStage do
   `:min_demand` on subscription. The `:max_demand` specifies the
   maximum amount of events that must be in flow while the `:min_demand`
   specifies the minimum threshold to trigger for more demand. For
-  example, if `:max_demand` is 100 and `:min_demand` is 50
-  (the default values), the consumer will ask for 100 events initially
-  and ask for more only after it receives at least 50.
+  example, if `:max_demand` is 1000 and `:min_demand` is 500
+  (the default values), the consumer will ask for 1000 events initially
+  and ask for more only after it receives at least 500.
 
   In the example above, B is a `:producer_consumer` and therefore
   acts as a buffer. Getting the proper demand values in B is
@@ -172,13 +172,13 @@ defmodule GenStage do
   The buffer can also be used in cases external sources only send
   events in batches larger than asked for. For example, if you are
   receiving events from an external source that only sends events
-  in batches of 100 in 100 and the internal demand is smaller than
+  in batches of 1000 in 1000 and the internal demand is smaller than
   that.
 
   In all of those cases, if the message cannot be sent immediately,
   it is stored and sent whenever there is an opportunity to. The
   size of the buffer is configured via the `:buffer_size` option
-  returned by `init/1`. The default value is 1000.
+  returned by `init/1`. The default value is 10000.
 
   ## Streams
 
@@ -360,7 +360,7 @@ defmodule GenStage do
 
     * `:buffer_size` - the size of the buffer to store events
       without demand. Check the "Buffer events" section on the
-      module documentation (defaults to 1000 for `:producer`,
+      module documentation (defaults to 10000 for `:producer`,
       `:infinity` for `:producer_consumer`)
     * `:buffer_keep` - returns if the `:first` or `:last` (default) entries
       should be kept on the buffer in case we exceed the buffer size
@@ -713,7 +713,7 @@ defmodule GenStage do
   ## Examples
 
       def init(producer) do
-        GenStage.async_subscribe(self(), to: producer, min_demand: 10, max_demand: 100)
+        GenStage.async_subscribe(self(), to: producer, min_demand: 800, max_demand: 1000)
         {:consumer, []}
       end
 
@@ -881,7 +881,7 @@ defmodule GenStage do
 
   defp init_producer(mod, opts, state) do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- validate_dispatcher(opts),
-         {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 1000, 0, :infinity, true),
+         {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 10000, 0, :infinity, true),
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
          :ok <- validate_no_opts(opts) do
       {:ok, %GenStage{mod: mod, state: state, type: :producer,
@@ -1391,7 +1391,7 @@ defmodule GenStage do
 
   defp consumer_subscribe(to, full_opts, stage) do
     with {:ok, cancel, opts} <- validate_in(full_opts, :cancel, :permanent, [:temporary, :permanent]),
-         {:ok, max, opts} <- validate_integer(opts, :max_demand, 100, 1, :infinity, false),
+         {:ok, max, opts} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
          {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
       producer_pid = GenServer.whereis(to)
       cond do

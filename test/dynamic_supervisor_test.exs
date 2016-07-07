@@ -588,8 +588,8 @@ defmodule DynamicSupervisorTest do
       assert message == "expected :max_demand to be equal to or greater than 1, got: 0"
 
       assert {:error, {:bad_opts, message}} =
-             GenStage.sync_subscribe(sup, to: :whatever, min_demand: 200)
-      assert message == "expected :min_demand to be equal to or less than 99, got: 200"
+             GenStage.sync_subscribe(sup, to: :whatever, min_demand: 2000)
+      assert message == "expected :min_demand to be equal to or less than 999, got: 2000"
     end
 
     @tag :capture_log
