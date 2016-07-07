@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.1 (2016-07-08)
+
+### Enhancements
+
+  * Add `GenStage.PartitionDispatcher`
+  * Set default `:max_demand` to 1000
+  * Use buffer based `:producer_consumer` to avoid escalating demand
+
 ## v0.2.0 (2016-07-05)
 
 ### Enhancements
