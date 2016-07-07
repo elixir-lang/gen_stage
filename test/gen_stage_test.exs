@@ -261,41 +261,41 @@ defmodule GenStageTest do
     test "with 80% min demand with init subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, doubler} = Doubler.start_link({:producer_consumer, self(),
-                                           subscribe_to: [producer]})
+                                           subscribe_to: [{producer, max_demand: 100, min_demand: 80}]})
       {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{doubler, min_demand: 80}]})
+                                       subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]})
 
-      batch = Enum.to_list(0..99)
+      batch = Enum.to_list(0..19)
       assert_receive {:producer_consumed, ^batch}
-      batch = Enum.flat_map(0..9, &[&1, &1])
+      batch = Enum.flat_map(0..19, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(10..19, &[&1, &1])
+      batch = Enum.flat_map(20..39, &[&1, &1])
       assert_receive {:consumed, ^batch}
 
       batch = Enum.to_list(100..119)
       assert_receive {:producer_consumed, ^batch}
-      batch = Enum.flat_map(20..29, &[&1, &1])
+      batch = Enum.flat_map(120..124, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(30..39, &[&1, &1])
+      batch = Enum.flat_map(125..149, &[&1, &1])
       assert_receive {:consumed, ^batch}
     end
 
     test "with 20% min demand with init subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, doubler} = Doubler.start_link({:producer_consumer, self(),
-                                           subscribe_to: [producer]})
+                                           subscribe_to: [{producer, max_demand: 100, min_demand: 20}]})
       {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{doubler, min_demand: 20}]})
+                                       subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]})
 
-      batch = Enum.to_list(0..99)
+      batch = Enum.to_list(0..79)
       assert_receive {:producer_consumed, ^batch}
-      batch = Enum.flat_map(0..39, &[&1, &1])
+      batch = Enum.flat_map(0..24, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(40..49, &[&1, &1])
+      batch = Enum.flat_map(25..49, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(50..89, &[&1, &1])
+      batch = Enum.flat_map(50..74, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.to_list(100..179)
+      batch = Enum.to_list(100..149)
       assert_receive {:producer_consumed, ^batch}
     end
 
@@ -304,21 +304,22 @@ defmodule GenStageTest do
       {:ok, doubler}  = Doubler.start_link({:producer_consumer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
 
-      GenStage.sync_subscribe(consumer, to: doubler, min_demand: 80)
-      GenStage.sync_subscribe(doubler, to: producer)
+      # Now let's try consumer first
+      GenStage.sync_subscribe(consumer, to: doubler, min_demand: 50, max_demand: 100)
+      GenStage.sync_subscribe(doubler, to: producer, min_demand: 80, max_demand: 100)
 
-      batch = Enum.to_list(0..99)
+      batch = Enum.to_list(0..19)
       assert_receive {:producer_consumed, ^batch}
-      batch = Enum.flat_map(0..9, &[&1, &1])
+      batch = Enum.flat_map(0..19, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(10..19, &[&1, &1])
+      batch = Enum.flat_map(20..39, &[&1, &1])
       assert_receive {:consumed, ^batch}
 
       batch = Enum.to_list(100..119)
       assert_receive {:producer_consumed, ^batch}
-      batch = Enum.flat_map(20..29, &[&1, &1])
+      batch = Enum.flat_map(120..124, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(30..39, &[&1, &1])
+      batch = Enum.flat_map(125..149, &[&1, &1])
       assert_receive {:consumed, ^batch}
     end
 
@@ -327,18 +328,19 @@ defmodule GenStageTest do
       {:ok, doubler}  = Doubler.start_link({:producer_consumer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
 
-      GenStage.sync_subscribe(consumer, to: doubler, min_demand: 20)
-      GenStage.sync_subscribe(doubler, to: producer)
+      # Now let's try consumer first
+      GenStage.sync_subscribe(consumer, to: doubler, min_demand: 50, max_demand: 100)
+      GenStage.sync_subscribe(doubler, to: producer, min_demand: 20, max_demand: 100)
 
-      batch = Enum.to_list(0..99)
+      batch = Enum.to_list(0..79)
       assert_receive {:producer_consumed, ^batch}
-      batch = Enum.flat_map(0..39, &[&1, &1])
+      batch = Enum.flat_map(0..24, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(40..49, &[&1, &1])
+      batch = Enum.flat_map(25..49, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(50..89, &[&1, &1])
+      batch = Enum.flat_map(50..74, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.to_list(100..179)
+      batch = Enum.to_list(100..149)
       assert_receive {:producer_consumed, ^batch}
     end
 
@@ -355,8 +357,8 @@ defmodule GenStageTest do
 
       # Because there is a race condition between subscriptions
       # we will assert for events just later on.
-      assert_receive {:consumed, [1000, 1000, 1001, 1001, 1002, 1002, 1003, 1003, 1004, 1004]}
-      assert_receive {:consumed, [1000, 1000, 1001, 1001, 1002, 1002, 1003, 1003, 1004, 1004]}
+      assert_receive {:consumed, [200, 200, 201, 201, 202, 202, 203, 203, 204, 204]}
+      assert_receive {:consumed, [200, 200, 201, 201, 202, 202, 203, 203, 204, 204]}
     end
 
     test "with shared (broadcast) demand and synchronizer subscriber" do
@@ -381,8 +383,32 @@ defmodule GenStageTest do
 
       # Because there is a race condition between subscriptions
       # we will assert for events just later on.
-      assert_receive {:consumed, [1000, 1000, 1001, 1001, 1002, 1002, 1003, 1003, 1004, 1004]}
-      assert_receive {:consumed, [1000, 1000, 1001, 1001, 1002, 1002, 1003, 1003, 1004, 1004]}
+      assert_receive {:consumed, [200, 200, 201, 201, 202, 202, 203, 203, 204, 204]}
+      assert_receive {:consumed, [200, 200, 201, 201, 202, 202, 203, 203, 204, 204]}
+    end
+
+    test "queued events with lost producer" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, doubler}  = Doubler.start_link({:producer_consumer, self()})
+
+      {:ok, ref} = GenStage.sync_subscribe(doubler, to: producer, cancel: :temporary,
+                                           min_demand: 50, max_demand: 100)
+      assert_receive {:producer_consumer_subscribed, :producer, {^producer, ^ref}}
+
+      GenStage.cancel({producer, ref}, :done)
+      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, :done}}
+      refute_received {:producer_consumed, _}
+
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      GenStage.sync_subscribe(consumer, to: doubler, min_demand: 50, max_demand: 100)
+
+      batch = Enum.to_list(0..99)
+      assert_receive {:producer_consumed, ^batch}
+      batch = Enum.flat_map(0..24, &[&1, &1])
+      assert_receive {:consumed, ^batch}
+      batch = Enum.flat_map(25..49, &[&1, &1])
+      assert_receive {:consumed, ^batch}
+      refute_received {:producer_consumed, _}
     end
   end
 

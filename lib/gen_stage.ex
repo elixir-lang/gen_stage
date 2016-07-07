@@ -1495,7 +1495,6 @@ defmodule GenStage do
         consumer_dispatch(batches, from, mod, state, stage, false)
       %{} ->
         # We queued but producer was removed
-        # TODO: Test me
         consumer_dispatch([{events, 0}], :unused, mod, state, stage, false)
     end
   end
