@@ -25,14 +25,14 @@ defmodule GenStage.PartitionDispatcher do
   def subscribe(opts, {pid, ref}, {hash, waiting, pending, partitions, references}) do
     partition = Keyword.get(opts, :partition)
     case partitions do
-      %{^partition => @init} ->
-        partitions = Map.put(partitions, partition, {pid, ref, 0})
+      %{^partition => {nil, nil, demand_or_queue}} ->
+        partitions = Map.put(partitions, partition, {pid, ref, demand_or_queue})
         references = Map.put(references, ref, partition)
         {:ok, 0, {hash, waiting, pending, partitions, references}}
-      %{^partition => {pid, _demand_or_queue}} ->
-        raise ArgumentError, "the partition #{partition} is already taken by #{pid}"
+      %{^partition => {pid, _, _}} ->
+        raise ArgumentError, "the partition #{partition} is already taken by #{inspect pid}"
       _ when is_nil(partition) ->
-        raise ArgumentError, "a :partition is required when subscribing to a producer with partition dispatcher"
+        raise ArgumentError, "the :partition option is required when subscribing to a producer with partition dispatcher"
       _ ->
         raise ArgumentError, ":partition must be an integer between 0..#{map_size(partitions)-1}, got: #{partition}"
     end
@@ -43,12 +43,14 @@ defmodule GenStage.PartitionDispatcher do
     {partition, references} = Map.pop(references, ref)
     {_pid, _ref, demand_or_queue} = Map.get(partitions, partition)
     partitions = Map.put(partitions, partition, @init)
-    pending = pending + to_demand(demand_or_queue)
-    {:ok, 0, {hash, waiting, pending, partitions, references}}
+    case demand_or_queue do
+      demand when is_integer(demand) ->
+        {:ok, 0, {hash, waiting, pending + demand, partitions, references}}
+      queue ->
+        length = :queue.len(queue)
+        {:ok, length, {hash, waiting + length, pending, partitions, references}}
+    end
   end
-
-  defp to_demand(demand) when is_integer(demand), do: demand
-  defp to_demand(_), do: 0
 
   @doc false
   def ask(counter, {_, ref}, {hash, waiting, pending, partitions, references}) do
