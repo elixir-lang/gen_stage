@@ -14,6 +14,14 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   @doc false
+  def notify(msg, {demands, _} = state) do
+    Enum.each(demands, fn {_, pid, ref} ->
+      send(pid, {ref, msg})
+    end)
+    {:ok, state}
+  end
+
+  @doc false
   def subscribe(_opts, {pid, ref}, {demands, waiting}) do
     {:ok, 0, {add_demand(-waiting, pid, ref, demands), waiting}}
   end

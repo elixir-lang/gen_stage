@@ -972,8 +972,8 @@ defmodule GenStage do
   end
 
   @doc false
-  def handle_call({:"$notify", to, msg}, _from, stage) do
-    producer_notify(to, msg, stage)
+  def handle_call({:"$notify", msg}, _from, stage) do
+    producer_notify(msg, stage)
   end
 
   def handle_call({:"$subscribe", to, opts}, _from, stage) do
@@ -996,8 +996,8 @@ defmodule GenStage do
   end
 
   @doc false
-  def handle_cast({:"$notify", to, msg}, stage) do
-    {:reply, _, stage} = producer_notify(to, msg, stage)
+  def handle_cast({:"$notify", msg}, stage) do
+    {:reply, _, stage} = producer_notify(msg, stage)
     {:noreply, stage}
   end
 
@@ -1305,23 +1305,27 @@ defmodule GenStage do
     # trigger more events to be buffered.
     stage = %{stage | buffer: {queue, buffer, notifications}}
     stage = dispatch_events(events, stage)
-    stage = dispatch_notification(notification, stage)
-    take_from_buffer(counter, stage)
+    case notification do
+      {:ok, msg} ->
+        take_from_buffer(counter, dispatch_notification(msg, stage))
+      :error ->
+        take_from_buffer(counter, stage)
+    end
   end
 
   defp take_from_buffer(queue, events, 0, buffer, notifications) do
-    {queue, Enum.reverse(events), 0, buffer, nil, notifications}
+    {queue, Enum.reverse(events), 0, buffer, :error, notifications}
   end
 
   defp take_from_buffer(queue, events, counter, 0, notifications) do
-    {queue, Enum.reverse(events), counter, 0, nil, notifications}
+    {queue, Enum.reverse(events), counter, 0, :error, notifications}
   end
 
   defp take_from_buffer(queue, events, counter, buffer, notifications) when is_reference(notifications) do
     {{:value, value}, queue} = :queue.out(queue)
     case value do
-      {^notifications, to, msg} ->
-        {queue, Enum.reverse(events), counter, buffer - 1, {to, msg}, notifications}
+      {^notifications, msg} ->
+        {queue, Enum.reverse(events), counter, buffer - 1, msg, notifications}
       val ->
         take_from_buffer(queue, [val | events], counter - 1, buffer - 1, notifications)
     end
@@ -1331,10 +1335,10 @@ defmodule GenStage do
     {{:value, value}, queue} = :queue.out(queue)
 
     case pop_and_increment_wheel(wheel) do
-      {nil, wheel} ->
+      {:ok, notification, wheel} ->
+        {queue, Enum.reverse([value | events]), counter - 1, buffer - 1, {:ok, notification}, wheel}
+      {:error, wheel} ->
         take_from_buffer(queue, [value | events], counter - 1, buffer - 1, wheel)
-      {notification, wheel} ->
-        {queue, Enum.reverse([value | events]), counter - 1, buffer - 1, notification, wheel}
     end
   end
 
@@ -1381,10 +1385,10 @@ defmodule GenStage do
   defp queue_last([event | events], queue, excess, max, max, pending, wheel) do
     queue = :queue.in(event, :queue.drop(queue))
     case pop_and_increment_wheel(wheel) do
-      {nil, wheel} ->
-        queue_last(events, queue, excess + 1, max, max, pending, wheel)
-      {notification, wheel} ->
+      {:ok, notification, wheel} ->
         queue_last(events, queue, excess + 1, max, max, [notification | pending], wheel)
+      {:error, wheel} ->
+        queue_last(events, queue, excess + 1, max, max, pending, wheel)
     end
   end
   defp queue_last([event | events], queue, excess, counter, max, pending, wheel),
@@ -1396,23 +1400,23 @@ defmodule GenStage do
   defp init_wheel(:infinity), do: make_ref()
   defp init_wheel(_), do: nil
 
-  defp producer_notify(_to, _msg, %{type: :consumer} = stage) do
+  defp producer_notify(_msg, %{type: :consumer} = stage) do
     :error_logger.error_msg('GenStage consumer ~p cannot send notifications', [name()])
     {:reply, {:error, :not_a_producer}, stage}
   end
 
-  defp producer_notify(to, msg, stage) do
+  defp producer_notify(msg, stage) do
     %{buffer: {queue, count, notifications},
       buffer_config: {max, _keep}} = stage
 
     case count do
       0 ->
-        {:reply, :ok, dispatch_notification({to, msg}, stage)}
+        {:reply, :ok, dispatch_notification(msg, stage)}
       _ when is_reference(notifications) ->
-        queue = :queue.in({notifications, to, msg}, queue)
+        queue = :queue.in({notifications, msg}, queue)
         {:reply, :ok, %{stage | buffer: {queue, count + 1, notifications}}}
       true ->
-        wheel = put_wheel(notifications, count, max, {to, msg})
+        wheel = put_wheel(notifications, count, max, msg)
         {:reply, :ok, %{stage | buffer: {queue, count, wheel}}}
     end
   end
@@ -1422,22 +1426,24 @@ defmodule GenStage do
   defp put_wheel({pos, _, wheel}, count, max, contents),
     do: {pos, max, Map.put(wheel, rem(pos + count - 1, max), contents)}
 
-  defp pop_and_increment_wheel(nil), do: {nil, nil}
+  defp pop_and_increment_wheel(nil), do: {:error, nil}
   defp pop_and_increment_wheel({pos, limit, wheel}) do
-    case Map.pop(wheel, pos) do
-      {notification, wheel} when wheel == %{} ->
-        {notification, nil}
-      {notification, wheel} ->
-        {notification, {rem(pos + 1, limit), limit, wheel}}
+    new_pos = rem(pos + 1, limit)
+
+    # TODO: Use :maps.take/2
+    case wheel do
+      %{^pos => notification} when map_size(wheel) == 1 ->
+        {:ok, notification, nil}
+      %{^pos => notification} ->
+        {:ok, notification, {new_pos, limit, Map.delete(wheel, pos)}}
+      %{} ->
+        {:error, {new_pos, limit, wheel}}
     end
   end
 
-  defp dispatch_notification(nil, stage) do
-    stage
-  end
-  defp dispatch_notification({to, msg}, stage) do
+  defp dispatch_notification(msg, stage) do
     %{dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} = stage
-    {:ok, dispatcher_state} = dispatcher_mod.notify(to, msg, dispatcher_state)
+    {:ok, dispatcher_state} = dispatcher_mod.notify(msg, dispatcher_state)
     %{stage | dispatcher_state: dispatcher_state}
   end
 

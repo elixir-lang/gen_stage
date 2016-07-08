@@ -18,17 +18,31 @@ defmodule GenStage.PartitionDispatcher do
              raise ArgumentError, "the number of :partitions is required when using the partition dispatcher"
 
     partitions = for i <- 0..max-1, do: {i, @init}, into: %{}
-    {:ok, {hash, 0, 0, partitions, %{}}}
+    {:ok, {make_ref(), hash, 0, 0, partitions, %{}}}
   end
 
   @doc false
-  def subscribe(opts, {pid, ref}, {hash, waiting, pending, partitions, references}) do
+  def notify(msg, {tag, hash, waiting, pending, partitions, references}) do
+    partitions =
+      Enum.reduce(partitions, partitions, fn
+        {_, {pid, ref, demand}}, acc when is_integer(demand) ->
+          send(pid, {ref, msg})
+          acc
+        {partition, {pid, ref, queue}}, acc ->
+          Map.put(acc, partition, {pid, ref, :queue.in({tag, msg}, queue)})
+      end)
+
+    {:ok, {tag, hash, waiting, pending, partitions, references}}
+  end
+
+  @doc false
+  def subscribe(opts, {pid, ref}, {tag, hash, waiting, pending, partitions, references}) do
     partition = Keyword.get(opts, :partition)
     case partitions do
       %{^partition => {nil, nil, demand_or_queue}} ->
         partitions = Map.put(partitions, partition, {pid, ref, demand_or_queue})
         references = Map.put(references, ref, partition)
-        {:ok, 0, {hash, waiting, pending, partitions, references}}
+        {:ok, 0, {tag, hash, waiting, pending, partitions, references}}
       %{^partition => {pid, _, _}} ->
         raise ArgumentError, "the partition #{partition} is already taken by #{inspect pid}"
       _ when is_nil(partition) ->
@@ -39,69 +53,75 @@ defmodule GenStage.PartitionDispatcher do
   end
 
   @doc false
-  def cancel({_, ref}, {hash, waiting, pending, partitions, references}) do
+  def cancel({_, ref}, {tag, hash, waiting, pending, partitions, references}) do
     {partition, references} = Map.pop(references, ref)
     {_pid, _ref, demand_or_queue} = Map.get(partitions, partition)
     partitions = Map.put(partitions, partition, @init)
     case demand_or_queue do
       demand when is_integer(demand) ->
-        {:ok, 0, {hash, waiting, pending + demand, partitions, references}}
+        {:ok, 0, {tag, hash, waiting, pending + demand, partitions, references}}
       queue ->
         length = :queue.len(queue)
-        {:ok, length, {hash, waiting + length, pending, partitions, references}}
+        {:ok, length, {tag, hash, waiting + length, pending, partitions, references}}
     end
   end
 
   @doc false
-  def ask(counter, {_, ref}, {hash, waiting, pending, partitions, references}) do
+  def ask(counter, {_, ref}, {tag, hash, waiting, pending, partitions, references}) do
     partition = Map.fetch!(references, ref)
     {pid, ref, demand_or_queue} = Map.fetch!(partitions, partition)
 
-    {events, demand_or_queue} =
+    demand_or_queue =
       case demand_or_queue do
         demand when is_integer(demand) ->
-          {[], demand + counter}
+          demand + counter
         queue ->
-          take_from_queue([], queue, counter)
+          send_from_queue(queue, tag, pid, ref, counter, [])
       end
 
-    maybe_send(events, pid, ref)
     partitions = Map.put(partitions, partition, {pid, ref, demand_or_queue})
-
     already_sent = min(pending, counter)
     demand = counter - already_sent
-    {:ok, demand, {hash, waiting + demand, pending - already_sent, partitions, references}}
+    {:ok, demand, {tag, hash, waiting + demand, pending - already_sent, partitions, references}}
   end
 
-  defp take_from_queue(acc, queue, 0) do
-    {Enum.reverse(acc), queue}
+  defp send_from_queue(queue, _tag, pid, ref, 0, acc) do
+    maybe_send(acc, pid, ref)
+    queue
   end
-  defp take_from_queue(acc, queue, counter) do
+  defp send_from_queue(queue, tag, pid, ref, counter, acc) do
     case :queue.out(queue) do
+      {{:value, {^tag, msg}}, queue} ->
+        maybe_send(acc, pid, ref)
+        send(pid, {ref, msg})
+        send_from_queue(queue, tag, pid, ref, counter, [])
       {{:value, event}, queue} ->
-        take_from_queue([event | acc], queue, counter - 1)
+        send_from_queue(queue, tag, pid, ref, counter - 1, [event | acc])
       {:empty, _queue} ->
-        {Enum.reverse(acc), counter}
+        maybe_send(acc, pid, ref)
+        counter
     end
   end
 
+  # Important: events must be in reverse order
   defp maybe_send([], _pid, _ref),
     do: :ok
   defp maybe_send(events, pid, ref),
-    do: send(pid, {:"$gen_consumer", {self(), ref}, events})
+    do: send(pid, {:"$gen_consumer", {self(), ref}, Enum.reverse(events)})
 
   @doc false
-  def dispatch(events, {hash, waiting, pending, partitions, references}) do
+  def dispatch(events, {tag, hash, waiting, pending, partitions, references}) do
     {deliver_now, deliver_later, waiting} =
       split_events(events, waiting, [])
 
-    partitioned = Enum.reduce(deliver_now, %{}, fn event, acc ->
-      partition = rem(hash.(event), map_size(partitions))
-      Map.update(acc, partition, [event], &[event | &1])
-    end)
+    partitioned =
+      Enum.reduce(deliver_now, %{}, fn event, acc ->
+        partition = rem(hash.(event), map_size(partitions))
+        Map.update(acc, partition, [event], &[event | &1])
+      end)
 
     partitions = Enum.reduce partitioned, partitions, &dispatch_per_partition/2
-    {:ok, deliver_later, {hash, waiting, pending, partitions, references}}
+    {:ok, deliver_later, {tag, hash, waiting, pending, partitions, references}}
   end
 
   defp split_events(events, 0, acc),
@@ -128,9 +148,9 @@ defmodule GenStage.PartitionDispatcher do
   end
 
   defp split_into_queue(events, 0, acc),
-    do: {Enum.reverse(acc), put_into_queue(events, :queue.new)}
+    do: {acc, put_into_queue(events, :queue.new)}
   defp split_into_queue([], counter, acc),
-    do: {Enum.reverse(acc), counter}
+    do: {acc, counter}
   defp split_into_queue([event | events], counter, acc),
     do: split_into_queue(events, counter - 1, [event | acc])
 

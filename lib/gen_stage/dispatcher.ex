@@ -70,4 +70,13 @@ defmodule GenStage.Dispatcher do
   """
   @callback dispatch(events :: nonempty_list(term), state :: term) ::
     {:ok, leftover_events :: [term], new_state} when new_state: term
+
+  @doc """
+  Used to send a notification to all consumers.
+
+  In case the dispatcher is doing buffering, notify must keep
+  the ordering guarantees.
+  """
+  @callback notify(msg :: term, state :: term) ::
+    {:ok, new_state} when new_state: term
 end
