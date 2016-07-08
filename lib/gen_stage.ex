@@ -660,7 +660,39 @@ defmodule GenStage do
   end
 
   @doc """
-  Asks the stage to subscribe to the given producer stage synchronously.
+  Asks the producer to send a notification to all consumers synchronously.
+
+  This call is synchronous and will return after the producer has either
+  sent the notification to all consumers or placed it in a buffer. In
+  other words, it guarantees the producer has handled the message but not
+  that the consumers have received it.
+
+  The given message will be delivered in the format `{ref, msg}`, where
+  `ref` is the subscription reference and `msg` is the message given below.
+
+  This function will return `:ok` as long as the notification request is
+  sent. It may return `{:error, :not_a_producer}` in case the stage is not
+  a producer.
+  """
+  @spec sync_notify(stage, msg :: term(), timeout) :: :ok | {:error, :not_a_producer}
+  def sync_notify(stage, msg, timeout \\ 5_000) do
+    call(stage, {:"$notify", msg}, timeout)
+  end
+
+  @doc """
+  Asks the consumer to subscribe to the given producer asynchronously.
+
+  This call returns `:ok` regardless if the notification has been
+  received by the producer or sent. It is typically called from
+  the producer stage itself.
+  """
+  @spec async_notify(stage, msg :: term()) :: :ok
+  def async_notify(stage, msg) do
+    cast(stage, {:"$notify", msg})
+  end
+
+  @doc """
+  Asks the consumer to subscribe to the given producer synchronously.
 
   This call is synchronous and will return after the called consumer
   sends the subscribe message to the producer. It does not, however,
@@ -695,7 +727,7 @@ defmodule GenStage do
   end
 
   @doc """
-  Asks the stage to subscribe to the given producer stage asynchronously.
+  Asks the consumer to subscribe to the given producer asynchronously.
 
   This call returns `:ok` regardless if the subscription
   effectively happened or not. It is typically called from
