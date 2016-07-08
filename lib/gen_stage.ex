@@ -180,29 +180,19 @@ defmodule GenStage do
   size of the buffer is configured via the `:buffer_size` option
   returned by `init/1`. The default value is 10000.
 
-  ## Streams
+  ## Notifications
 
-  After exploring the example above, you may be thinking it is
-  a lot of code for something that could be expressed with streams.
-  For example:
+  `GenStage` also supports the ability to send notifications to all
+  consumers. Those notifications are sent as regular messages outside
+  of the demand-driven protocol but respecting the event ordering.
+  See `sync_notify/3` and `async_notify/2`.
 
-      Stream.iterate(0, fn i -> i + 1 end)
-      |> Stream.map(fn i -> i * 2 end)
-      |> Stream.each(&IO.inspect/1)
-      |> Stream.run()
+  Notifications are useful for out-of-band information, for example,
+  to notify consumers the producer has sent all events it had to
+  process or that a new batch/window of events is starting.
 
-  The example above would print the same values as our stages with
-  the difference the stream above is not leveraging concurrency.
-  One of the goals of this project is exactly how to explore the
-  interfaces between streams and stages. Meanwhile, it is worth
-  reiterating the advantage of using stages:
-
-    * Stages provide a more structured approach by breaking each
-      stage into a separate module
-    * Stages provide all callbacks necessary for process management
-      (init, terminate, etc)
-    * Stages can be hot-code upgraded
-    * Stages can be supervised individually
+  Note the notification system should not be used for broadcasting
+  events, for such, consider using `GenStage.BroadcastDispatcher`.
 
   ## Callbacks
 
