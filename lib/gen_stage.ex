@@ -662,10 +662,12 @@ defmodule GenStage do
   @doc """
   Asks the stage to subscribe to the given producer stage synchronously.
 
-  This call is synchronous and will return after the called stage
+  This call is synchronous and will return after the called consumer
   sends the subscribe message to the producer. It does not, however,
   wait for the subscription confirmation. Therefore this function
   will return before `handle_subscribe` is called in the consumer.
+  In other words, it guarantees the message was sent, but it does not
+  guarantee a subscription has effectively been established.
 
   This function will return `{:ok, ref}` as long as the subscription
   message is sent. It may return `{:error, :not_a_consumer}` in case
@@ -885,7 +887,8 @@ defmodule GenStage do
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
          :ok <- validate_no_opts(opts) do
       {:ok, %GenStage{mod: mod, state: state, type: :producer,
-                      buffer: {:queue.new, 0}, buffer_config: {buffer_size, buffer_keep},
+                      buffer: {:queue.new, 0, init_wheel(buffer_size)},
+                      buffer_config: {buffer_size, buffer_keep},
                       dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
@@ -913,7 +916,8 @@ defmodule GenStage do
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
          :ok <- validate_no_opts(opts) do
       stage = %GenStage{mod: mod, state: state, type: :producer_consumer,
-                        buffer: {:queue.new, 0}, buffer_config: {buffer_size, buffer_keep},
+                        buffer: {:queue.new, 0, init_wheel(buffer_size)},
+                        buffer_config: {buffer_size, buffer_keep},
                         dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}
       consumer_init_subscribe(producers, stage)
     else
@@ -968,6 +972,10 @@ defmodule GenStage do
   end
 
   @doc false
+  def handle_call({:"$notify", to, msg}, _from, stage) do
+    producer_notify(to, msg, stage)
+  end
+
   def handle_call({:"$subscribe", to, opts}, _from, stage) do
     consumer_subscribe(to, opts, stage)
   end
@@ -988,6 +996,11 @@ defmodule GenStage do
   end
 
   @doc false
+  def handle_cast({:"$notify", to, msg}, stage) do
+    {:reply, _, stage} = producer_notify(to, msg, stage)
+    {:noreply, stage}
+  end
+
   def handle_cast({:"$subscribe", to, opts}, stage) do
     case consumer_subscribe(to, opts, stage) do
       {:reply, _, stage}        -> {:noreply, stage}
@@ -1172,7 +1185,72 @@ defmodule GenStage do
     end
   end
 
-  ## Helpers
+  ## Shared helpers
+
+  defp noreply_callback(callback, args, %{mod: mod} = stage) do
+    handle_noreply_callback apply(mod, callback, args), stage
+  end
+
+  defp handle_noreply_callback(return, stage) do
+    case return do
+      {:noreply, events, state} when is_list(events) ->
+        stage = dispatch_events(events, stage)
+        {:noreply, %{stage | state: state}}
+      {:noreply, events, state, :hibernate} when is_list(events) ->
+        stage = dispatch_events(events, stage)
+        {:noreply, %{stage | state: state}, :hibernate}
+      {:stop, reason, state} ->
+        {:stop, reason, %{stage | state: state}}
+      other ->
+        {:stop, {:bad_return_value, other}, stage}
+    end
+  end
+
+  defp name() do
+    case :erlang.process_info(self(), :registered_name) do
+      {:registered_name, name} when is_atom(name) -> name
+      _ -> self()
+    end
+  end
+
+  ## Producer helpers
+
+  defp producer_subscribe(opts, from, stage) do
+    %{mod: mod, state: state, dispatcher_state: dispatcher_state} = stage
+
+    case apply(mod, :handle_subscribe, [:consumer, opts, from, state]) do
+      {:automatic, state} ->
+        # Call the dispatcher after since it may generate demand and the
+        # main module must know the consumer is subscribed.
+        dispatcher_callback(:subscribe, [opts, from, dispatcher_state], %{stage | state: state})
+      {:stop, reason, state} ->
+        {:stop, reason, %{stage | state: state}}
+      other ->
+        {:stop, {:bad_return_value, other}, stage}
+    end
+  end
+
+  defp producer_cancel(ref, reason, cancel_reason, stage) do
+    %{consumers: consumers, monitors: monitors, state: state} = stage
+
+    case Map.pop(consumers, ref) do
+      {nil, _consumers} ->
+        {:noreply, stage}
+      {{pid, mon_ref}, consumers} ->
+        Process.demonitor(mon_ref, [:flush])
+        send pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}}
+        stage = %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}
+
+        case noreply_callback(:handle_cancel, [cancel_reason, {pid, ref}, state], stage) do
+          {:noreply, %{dispatcher_state: dispatcher_state} = stage} ->
+            # Call the dispatcher after since it may generate demand and the
+            # main module must know the consumer is no longer subscribed.
+            dispatcher_callback(:cancel, [{pid, ref}, dispatcher_state], stage)
+          {:stop, _, _} = stop ->
+            stop
+        end
+    end
+  end
 
   defp dispatcher_callback(callback, args, %{dispatcher_mod: dispatcher_mod} = stage) do
     {:ok, counter, dispatcher_state} = apply(dispatcher_mod, callback, args)
@@ -1199,25 +1277,6 @@ defmodule GenStage do
     take_pc_events(events, counter, stage)
   end
 
-  defp noreply_callback(callback, args, %{mod: mod} = stage) do
-    handle_noreply_callback apply(mod, callback, args), stage
-  end
-
-  defp handle_noreply_callback(return, stage) do
-    case return do
-      {:noreply, events, state} when is_list(events) ->
-        stage = dispatch_events(events, stage)
-        {:noreply, %{stage | state: state}}
-      {:noreply, events, state, :hibernate} when is_list(events) ->
-        stage = dispatch_events(events, stage)
-        {:noreply, %{stage | state: state}, :hibernate}
-      {:stop, reason, state} ->
-        {:stop, reason, %{stage | state: state}}
-      other ->
-        {:stop, {:bad_return_value, other}, stage}
-    end
-  end
-
   defp dispatch_events([], stage) do
     stage
   end
@@ -1234,30 +1293,58 @@ defmodule GenStage do
     buffer_events(events, %{stage | dispatcher_state: dispatcher_state})
   end
 
-  defp take_from_buffer(counter, %{buffer: {queue, buffer}} = stage) do
-    case min(counter, buffer) do
-      0 ->
-        {:ok, counter, stage}
-      allowed ->
-        {events, queue} = take_from_buffer(allowed, [], queue)
-        stage = dispatch_events(events, stage)
-        {:ok, counter - allowed, %{stage | buffer: {queue, buffer - allowed}}}
+  defp take_from_buffer(counter, %{buffer: {_, buffer, _}} = stage)
+       when counter == 0 when buffer == 0 do
+    {:ok, counter, stage}
+  end
+
+  defp take_from_buffer(counter, %{buffer: {queue, buffer, notifications}} = stage) do
+    {queue, events, counter, buffer, notification, notifications} =
+      take_from_buffer(queue, [], counter, buffer, notifications)
+    # Update the buffer because dispatch events may
+    # trigger more events to be buffered.
+    stage = %{stage | buffer: {queue, buffer, notifications}}
+    stage = dispatch_events(events, stage)
+    stage = dispatch_notification(notification, stage)
+    take_from_buffer(counter, stage)
+  end
+
+  defp take_from_buffer(queue, events, 0, buffer, notifications) do
+    {queue, Enum.reverse(events), 0, buffer, nil, notifications}
+  end
+
+  defp take_from_buffer(queue, events, counter, 0, notifications) do
+    {queue, Enum.reverse(events), counter, 0, nil, notifications}
+  end
+
+  defp take_from_buffer(queue, events, counter, buffer, notifications) when is_reference(notifications) do
+    {{:value, value}, queue} = :queue.out(queue)
+    case value do
+      {^notifications, to, msg} ->
+        {queue, Enum.reverse(events), counter, buffer - 1, {to, msg}, notifications}
+      val ->
+        take_from_buffer(queue, [val | events], counter - 1, buffer - 1, notifications)
     end
   end
 
-  defp take_from_buffer(0, events, queue) do
-    {Enum.reverse(events), queue}
-  end
-  defp take_from_buffer(counter, events, queue) do
-    {{:value, val}, queue} = :queue.out(queue)
-    take_from_buffer(counter - 1, [val | events], queue)
+  defp take_from_buffer(queue, events, counter, buffer, wheel) do
+    {{:value, value}, queue} = :queue.out(queue)
+
+    case pop_and_increment_wheel(wheel) do
+      {nil, wheel} ->
+        take_from_buffer(queue, [value | events], counter - 1, buffer - 1, wheel)
+      {notification, wheel} ->
+        {queue, Enum.reverse([value | events]), counter - 1, buffer - 1, notification, wheel}
+    end
   end
 
   defp buffer_events([], stage) do
     stage
   end
-  defp buffer_events(events, %{buffer: {queue, counter}, buffer_config: {max, keep}} = stage) do
-    {excess, queue, counter} = queue_events(keep, events, queue, counter, max)
+  defp buffer_events(events, %{buffer: {queue, counter, notifications},
+                               buffer_config: {max, keep}} = stage) do
+    {{excess, queue, counter}, pending, notifications} =
+      queue_events(keep, events, queue, counter, max, notifications)
 
     case excess do
       0 ->
@@ -1266,15 +1353,16 @@ defmodule GenStage do
         :error_logger.warning_msg('GenStage producer ~p has discarded ~p events from buffer', [name(), excess])
     end
 
-    %{stage | buffer: {queue, counter}}
+    stage = %{stage | buffer: {queue, counter, notifications}}
+    Enum.reduce(pending, stage, &dispatch_notification/2)
   end
 
-  defp queue_events(events, queue, counter, counter, :infinity),
-    do: queue_infinity(events, queue, counter)
-  defp queue_events(:first, events, queue, counter, max),
-    do: queue_first(events, queue, counter, max)
-  defp queue_events(:last, events, queue, counter, max),
-    do: queue_last(events, queue, 0, counter, max)
+  defp queue_events(events, queue, counter, counter, :infinity, notifications),
+    do: {queue_infinity(events, queue, counter), [], notifications}
+  defp queue_events(:first, events, queue, counter, max, notifications),
+    do: {queue_first(events, queue, counter, max), [], notifications}
+  defp queue_events(:last, events, queue, counter, max, notifications),
+    do: queue_last(events, queue, 0, counter, max, [], notifications)
 
   defp queue_infinity([], queue, counter),
     do: {0, queue, counter}
@@ -1288,12 +1376,72 @@ defmodule GenStage do
   defp queue_first([event | events], queue, counter, max),
     do: queue_first(events, :queue.in(event, queue), counter + 1, max)
 
-  defp queue_last([], queue, excess, counter, _max),
-    do: {excess, queue, counter}
-  defp queue_last([event | events], queue, excess, max, max),
-    do: queue_last(events, :queue.in(event, :queue.drop(queue)), excess + 1, max, max)
-  defp queue_last([event | events], queue, excess, counter, max),
-    do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max)
+  defp queue_last([], queue, excess, counter, _max, pending, wheel),
+    do: {{excess, queue, counter}, Enum.reverse(pending), wheel}
+  defp queue_last([event | events], queue, excess, max, max, pending, wheel) do
+    queue = :queue.in(event, :queue.drop(queue))
+    case pop_and_increment_wheel(wheel) do
+      {nil, wheel} ->
+        queue_last(events, queue, excess + 1, max, max, pending, wheel)
+      {notification, wheel} ->
+        queue_last(events, queue, excess + 1, max, max, [notification | pending], wheel)
+    end
+  end
+  defp queue_last([event | events], queue, excess, counter, max, pending, wheel),
+    do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max, pending, wheel)
+
+  ## Notifications helpers
+
+  # We use a wheel unless the queue is infinity.
+  defp init_wheel(:infinity), do: make_ref()
+  defp init_wheel(_), do: nil
+
+  defp producer_notify(_to, _msg, %{type: :consumer} = stage) do
+    :error_logger.error_msg('GenStage consumer ~p cannot send notifications', [name()])
+    {:reply, {:error, :not_a_producer}, stage}
+  end
+
+  defp producer_notify(to, msg, stage) do
+    %{buffer: {queue, count, notifications},
+      buffer_config: {max, _keep}} = stage
+
+    case count do
+      0 ->
+        {:reply, :ok, dispatch_notification({to, msg}, stage)}
+      _ when is_reference(notifications) ->
+        queue = :queue.in({notifications, to, msg}, queue)
+        {:reply, :ok, %{stage | buffer: {queue, count + 1, notifications}}}
+      true ->
+        wheel = put_wheel(notifications, count, max, {to, msg})
+        {:reply, :ok, %{stage | buffer: {queue, count, wheel}}}
+    end
+  end
+
+  defp put_wheel(nil, count, max, contents),
+    do: {0, max, %{count - 1 => contents}}
+  defp put_wheel({pos, _, wheel}, count, max, contents),
+    do: {pos, max, Map.put(wheel, rem(pos + count - 1, max), contents)}
+
+  defp pop_and_increment_wheel(nil), do: {nil, nil}
+  defp pop_and_increment_wheel({pos, limit, wheel}) do
+    case Map.pop(wheel, pos) do
+      {notification, wheel} when wheel == %{} ->
+        {notification, nil}
+      {notification, wheel} ->
+        {notification, {rem(pos + 1, limit), limit, wheel}}
+    end
+  end
+
+  defp dispatch_notification(nil, stage) do
+    stage
+  end
+  defp dispatch_notification({to, msg}, stage) do
+    %{dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} = stage
+    {:ok, dispatcher_state} = dispatcher_mod.notify(to, msg, dispatcher_state)
+    %{stage | dispatcher_state: dispatcher_state}
+  end
+
+  ## Consumer helpers
 
   defp consumer_init_subscribe(producers, stage) do
     Enum.reduce producers, {:ok, stage}, fn
@@ -1412,21 +1560,6 @@ defmodule GenStage do
     end
   end
 
-  defp producer_subscribe(opts, from, stage) do
-    %{mod: mod, state: state, dispatcher_state: dispatcher_state} = stage
-
-    case apply(mod, :handle_subscribe, [:consumer, opts, from, state]) do
-      {:automatic, state} ->
-        # Call the dispatcher after since it may generate demand and the
-        # main module must know the consumer is subscribed.
-        dispatcher_callback(:subscribe, [opts, from, dispatcher_state], %{stage | state: state})
-      {:stop, reason, state} ->
-        {:stop, reason, %{stage | state: state}}
-      other ->
-        {:stop, {:bad_return_value, other}, stage}
-    end
-  end
-
   defp consumer_no_ack(cancel, reason, stage) do
     case cancel do
       :temporary -> {:noreply, stage}
@@ -1450,36 +1583,7 @@ defmodule GenStage do
     end
   end
 
-  defp producer_cancel(ref, reason, cancel_reason, stage) do
-    %{consumers: consumers, monitors: monitors, state: state} = stage
-
-    case Map.pop(consumers, ref) do
-      {nil, _consumers} ->
-        {:noreply, stage}
-      {{pid, mon_ref}, consumers} ->
-        Process.demonitor(mon_ref, [:flush])
-        send pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}}
-        stage = %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}
-
-        case noreply_callback(:handle_cancel, [cancel_reason, {pid, ref}, state], stage) do
-          {:noreply, %{dispatcher_state: dispatcher_state} = stage} ->
-            # Call the dispatcher after since it may generate demand and the
-            # main module must know the consumer is no longer subscribed.
-            dispatcher_callback(:cancel, [{pid, ref}, dispatcher_state], stage)
-          {:stop, _, _} = stop ->
-            stop
-        end
-    end
-  end
-
-  defp name() do
-    case :erlang.process_info(self(), :registered_name) do
-      {:registered_name, name} when is_atom(name) -> name
-      _ -> self()
-    end
-  end
-
-  ## producer_consumer
+  ## Producer consumer helpers
 
   defp split_pc_events(events, ref, 0, acc),
     do: {Enum.reverse(acc), put_pc_events(events, ref, :queue.new)}
