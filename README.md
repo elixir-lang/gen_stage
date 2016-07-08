@@ -52,27 +52,23 @@ Here is a list of potential topics to be explored by this project (in no particu
 
   * Integration with streams - how the `GenStage` foundation integrates with Elixir streams? In particular, streams composition is still purely functional while stages introduce asynchronicity.
 
-  * Exploit parallelism - how the GenStage foundation can help us implement conveniences like pmap, chunked map, farming and so on. See Patterns for Parallel Programming (1), the Eden project (2) and the skel project (3, 4, 5)
+  * Exploit parallelism - how the GenStage foundation can help us implement conveniences like pmap, chunked map, farming and so on
 
-  * Explore different windowing strategies - the ideas behind the Apache Beam project are interesting, specially the mechanism that divides operations between what/where/when/how (6, 7) as well as windowing from the perspective of aggregation (8)
+  * Explore different windowing strategies - the ideas behind the Apache Beam project are interesting, specially the mechanism that divides operations between what/where/when/how (1, 2) as well as windowing from the perspective of aggregation (3)
 
-  * Introduce key-based functions - after a `group_by` is performed, there are many operations that can be inlined like `map_by_key`, `reduce_by_key` and so on. The Spark project, for example, provides many functions for key-based functionality (9)
+  * Introduce key-based functions - after a `group_by` is performed, there are many operations that can be inlined like `map_by_key`, `reduce_by_key` and so on. The Spark project, for example, provides many functions for key-based functionality (4)
 
-Other research topics include the Naiad's Differential Dataflow engine (10) and Lasp (11).
+Other research topics include the Titan (5), Naiad's Differential Dataflow engine (6) and Lasp (7).
 
 ### Links
 
-  1.  https://www.amazon.com/Patterns-Parallel-Programming-paperback-Paperback/dp/0321940784
-  2.  http://www.mathematik.uni-marburg.de/~eden/
-  3.  https://github.com/ParaPhrase/skel
-  4.  http://paraphrase-ict.eu/Deliverables/d2.5/at_download/file
-  5.  http://paraphrase-ict.eu/Deliverables/d2-10-pattern-amenability/at_download/file
-  6.  https://cloud.google.com/blog/big-data/2016/05/why-apache-beam-a-google-perspective
-  7.  http://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf
-  8.  http://www.vldb.org/pvldb/vol8/p702-tangwongsan.pdf
-  9.  http://spark.apache.org/docs/latest/programming-guide.html#working-with-key-value-pairs
-  10. http://research-srv.microsoft.com/pubs/176693/differentialdataflow.pdf
-  11. https://lasp-lang.org/
+  1. https://cloud.google.com/blog/big-data/2016/05/why-apache-beam-a-google-perspective
+  2. http://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf
+  3. http://www.vldb.org/pvldb/vol8/p702-tangwongsan.pdf
+  4. http://spark.apache.org/docs/latest/programming-guide.html#working-with-key-value-pairs
+  5. http://asc.di.fct.unl.pt/~nmp/pubs/clouddp-2013.pdf
+  6. http://research-srv.microsoft.com/pubs/176693/differentialdataflow.pdf
+  7. https://lasp-lang.org/
 
 ## License
 
