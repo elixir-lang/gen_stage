@@ -1,4 +1,5 @@
 # Usage: mix run examples/producer_consumer.exs
+#
 # Hit Ctrl+C twice to stop it.
 #
 # This is a very straight-forward example where

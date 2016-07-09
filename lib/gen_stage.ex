@@ -356,13 +356,14 @@ defmodule GenStage do
     * `:buffer_keep` - returns if the `:first` or `:last` (default) entries
       should be kept on the buffer in case we exceed the buffer size
     * `:dispatcher` - the dispatcher responsible for handling demands.
-      Defaults to `GenStage.DemandDispatch`
+      Defaults to `GenStage.DemandDispatch`. May be either an atom or
+      a tuple with the dispatcher and the dispatcher options
 
   ### :consumer and :producer_consumer options
 
     * `:subscribe_to` - a list of producers to subscribe to. Each element
-      represents the producer or a tuple with the producer and the subscription
-      options
+      represents the producer or a tuple with the producer and the
+      subscription options
 
   """
   @callback init(args :: term) ::
@@ -889,12 +890,36 @@ defmodule GenStage do
   end
 
   @doc """
+  Starts a stage from an enumerable.
+
+  ## Options
+
+    * `:consumers` - when `:permanent`, the stage exits when a
+      consumer exits. Defaults to `:temporary`
+
+    * `:dispatcher` - the dispatcher responsible for handling demands.
+      Defaults to `GenStage.DemandDispatch`. May be either an atom or
+      a tuple with the dispatcher and the dispatcher options
+
+  All other options that would be given for `start_link/3` are
+  also accepted.
+  """
+  # TODO: Add @spec
+  # TODO: is the :consumers option OK?
+  # TODO: is it the best name for this function?
+  # TODO: Implement proper termination
+  # TODO: Test this functionality
+  def from_enumerable(stream, opts) do
+    start_link(GenStage.Streamer, {stream, opts}, opts)
+  end
+
+  @doc """
   Creates a stream that subscribes to the given producers
   and emits the appropriate messages.
 
-  It expects a list of producer stages either as producer
-  names or `{producer, options}` tuples, similar to the
-  `:subscribe_to` option returned on `c:init/1` for consumers.
+  It expects a list of producers to subscribe to. Each element
+  represents the producer or a tuple with the producer and the
+  subscription options as defined in `async_subscribe/2`.
 
   Although `GenStage.stream/1` uses the process inbox to
   receive messages from producers, it guarantees it won't
