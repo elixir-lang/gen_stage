@@ -117,4 +117,21 @@ defmodule GenStage.BroadcastDispatcherTest do
     assert_received {:"$gen_consumer", {_, ^ref2}, [:e, :f]}
     assert_received {:"$gen_consumer", {_, ^ref3}, [:e, :f]}
   end
+
+  test "delivers notifications to all consumers" do
+    pid  = self()
+    ref1 = make_ref()
+    ref2 = make_ref()
+    disp = dispatcher([])
+
+    {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
+    {:ok, 0, disp} = D.ask(3, {pid, ref1}, disp)
+
+    {:ok, notify_disp} = D.notify(:hello, disp)
+    assert disp == notify_disp
+
+    assert_received {^ref1, :hello}
+    assert_received {^ref2, :hello}
+  end
 end

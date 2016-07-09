@@ -124,6 +124,48 @@ defmodule GenStage.PartitionDispatcherTest do
     assert {_, _, 5, 0, _, _} = disp
   end
 
+  test "delivers notifications to all consumers" do
+    pid0  = self()
+    ref0 = make_ref()
+    pid1  = self()
+    ref1 = make_ref()
+    disp = dispatcher(partitions: 2)
+
+    {:ok, 0, disp} = D.subscribe([partition: 0], {pid0, ref0}, disp)
+    {:ok, 0, disp} = D.subscribe([partition: 1], {pid1, ref1}, disp)
+    {:ok, 3, disp} = D.ask(3, {pid1, ref1}, disp)
+
+    {:ok, notify_disp} = D.notify(:hello, disp)
+    assert disp == notify_disp
+
+    assert_received {^ref0, :hello}
+    assert_received {^ref1, :hello}
+  end
+
+  test "queues notifications to backed up consumers" do
+    pid0 = self()
+    ref0 = make_ref()
+    pid1 = self()
+    ref1 = make_ref()
+    disp = dispatcher(partitions: 2)
+
+    {:ok, 0, disp}  = D.subscribe([partition: 0], {pid0, ref0}, disp)
+    {:ok, 0, disp}  = D.subscribe([partition: 1], {pid0, ref1}, disp)
+    {:ok, 3, disp}  = D.ask(3, {pid1, ref1}, disp)
+    {:ok, [], disp} = D.dispatch([1, 2, 5], disp)
+
+    {:ok, disp} = D.notify(:hello, disp)
+    refute_received {^ref0, :hello}
+    assert_received {^ref1, :hello}
+
+    {:ok, 5, _}  = D.ask(5, {pid0, ref0}, disp)
+
+    assert Process.info(self(), :messages) == {:messages, [
+      {:"$gen_consumer", {self(), ref0}, [1, 2, 5]},
+      {ref0, :hello}
+    ]}
+  end
+
   test "errors on init" do
     assert_raise ArgumentError, ~r/the number of :partitions is required/, fn ->
       dispatcher([])

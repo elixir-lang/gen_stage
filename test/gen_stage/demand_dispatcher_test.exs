@@ -140,6 +140,23 @@ defmodule GenStage.DemandDispatcherTest do
     assert_received {:"$gen_consumer", {_, ^ref2}, [:f]}
   end
 
+  test "delivers notifications to all consumers" do
+    pid  = self()
+    ref1 = make_ref()
+    ref2 = make_ref()
+    disp = dispatcher([])
+
+    {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
+    {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
+
+    {:ok, notify_disp} = D.notify(:hello, disp)
+    assert disp == notify_disp
+
+    assert_received {^ref1, :hello}
+    assert_received {^ref2, :hello}
+  end
+
   test "warns on demand mismatch" do
     pid  = self()
     ref1 = make_ref()
