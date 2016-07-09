@@ -1067,4 +1067,104 @@ defmodule GenStageTest do
       send producer, {:"$gen_consumer", {self(), make_ref()}, {:events, []}}
     end
   end
+
+  describe "stream" do
+    test "may consume 10 events out of demand of 1000" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      stream = GenStage.stream([producer])
+      assert Enum.take(stream, 10) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      refute_received {:"$gen_consumer", _, _}
+    end
+
+    test "may consume 300 events out of demand of 100" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      stream = GenStage.stream([{producer, max_demand: 100}])
+      assert length(Enum.take(stream, 300)) == 300
+      refute_received {:"$gen_consumer", _, _}
+    end
+
+    test "stream exits when there is no named producer and subscription is permanent" do
+      assert catch_exit(GenStage.stream([:unknown]) |> Enum.take(10)) == :noproc
+    end
+
+    test "stream exits when producer is dead and subscription is permanent" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      GenStage.stop(producer)
+      assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) == :noproc
+    end
+
+    test "stream exits when producer does not ack and subscription is permanent" do
+      {:ok, producer} = Task.start_link(fn ->
+        receive do
+          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+        end
+      end)
+      assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) == {:cancel, :no_thanks}
+    end
+
+    test "stream exits when producer does not ack and lives and subscription is permanent" do
+      {:ok, producer} = Task.start_link(fn ->
+        receive do
+          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+            Process.sleep(:infinity)
+        end
+      end)
+      assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) == {:cancel, :no_thanks}
+    end
+
+    test "stream exits when there is no named producer and subscription is temporary" do
+      assert GenStage.stream([{:unknown, cancel: :temporary}]) |> Enum.take(10) == []
+    end
+
+    test "stream exits when producer is dead and subscription is temporary" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      GenStage.stop(producer)
+      assert GenStage.stream([{producer,cancel: :temporary}]) |> Enum.take(10) == []
+    end
+
+    test "stream exits when producer does not ack and subscription is temporary" do
+      {:ok, producer} = Task.start_link(fn ->
+        receive do
+          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+        end
+      end)
+      assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
+    end
+
+    test "stream exits when producer does not ack and lives and subscription is temporary" do
+      {:ok, producer} = Task.start_link(fn ->
+        receive do
+          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+            Process.sleep(:infinity)
+        end
+      end)
+      assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
+    end
+
+    test "raises on bad options" do
+      msg = "invalid options for :unknown producer " <>
+            "(expected :max_demand to be equal to or greater than 1, got: 0)"
+
+      assert_raise ArgumentError, msg, fn ->
+        GenStage.stream([{:unknown, max_demand: 0}])
+      end
+    end
+
+    test "returns cancel on unknown subscription" do
+      {:ok, producer} = Counter.start_link({:producer, self()})
+      {:ok, consumer} = Task.start_link fn -> GenStage.stream([producer]) |> Enum.to_list() end
+
+      ref = make_ref()
+      send consumer, {:"$gen_consumer", {self(), ref}, :ack}
+      assert_receive {:"$gen_producer", {^consumer, ^ref}, {:cancel, :unknown_subscription}}
+
+      ref = make_ref()
+      send consumer, {:"$gen_consumer", {self(), ref}, [1, 2, 3]}
+      assert_receive {:"$gen_producer", {^consumer, ^ref}, {:cancel, :unknown_subscription}}
+    end
+  end
 end
