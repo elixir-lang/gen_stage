@@ -886,10 +886,10 @@ defmodule GenStage do
   """
   @spec stream([stage | {stage, Keyword.t}]) :: Enumerable.t
   def stream(subscriptions) when is_list(subscriptions) do
-    subscriptions = Enum.map(subscriptions, &stream_validate_opts/1)
-    Stream.resource(fn -> init_stream(subscriptions) end,
+    parsed_subscriptions = Enum.map(subscriptions, &stream_validate_opts/1)
+    Stream.resource(fn -> init_stream(parsed_subscriptions, subscriptions) end,
                     &consume_stream/1,
-                    &close_stream/1)
+                    fn stream -> close_stream(stream, subscriptions) end)
   end
 
   def stream(subscriptions) do
@@ -911,134 +911,138 @@ defmodule GenStage do
     stream_validate_opts({to, []})
   end
 
-  defp init_stream(subscriptions) do
+  defp init_stream(subscriptions, original) do
+    monitor_ref = make_ref()
+
     subscriptions =
       Enum.reduce(subscriptions, %{}, fn {to, cancel, min, max, opts, full_opts}, acc ->
         producer_pid = GenServer.whereis(to)
 
         cond do
           producer_pid != nil ->
-            ref = Process.monitor(producer_pid)
-            send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
-            Map.put(acc, ref, {:ack, producer_pid, cancel, min, max, full_opts})
+            inner_ref = Process.monitor(producer_pid)
+            send producer_pid, {:"$gen_producer", {self(), {monitor_ref, inner_ref}}, {:subscribe, opts}}
+            Map.put(acc, inner_ref, {:ack, producer_pid, cancel, min, max, full_opts})
           cancel == :temporary ->
             acc
           cancel == :permanent ->
-            exit(:noproc)
+            exit({:noproc, {GenStage, :stream, [original]}})
         end
       end)
 
-    {:receive, subscriptions}
+    {:receive, monitor_ref, subscriptions}
   end
 
-  defp consume_stream({:receive, subscriptions}) do
-    receive_stream(subscriptions)
+  defp consume_stream({:receive, monitor_ref, subscriptions}) do
+    receive_stream(monitor_ref, subscriptions)
   end
-  defp consume_stream({:ask, from, ask, batches, subscriptions}) do
+  defp consume_stream({:ask, from, ask, batches, monitor_ref, subscriptions}) do
     ask > 0 and ask(from, ask)
-    deliver_stream(batches, from, subscriptions)
+    deliver_stream(batches, from, monitor_ref, subscriptions)
   end
 
-  defp close_stream({:receive, subscriptions}) do
-    request_to_cancel_stream(subscriptions)
+  defp close_stream({:receive, monitor_ref, subscriptions}, _) do
+    request_to_cancel_stream(monitor_ref, subscriptions)
   end
-  defp close_stream({:ask, _, _, _, subscriptions}) do
-    request_to_cancel_stream(subscriptions)
+  defp close_stream({:ask, _, _, _, monitor_ref, subscriptions}, _) do
+    request_to_cancel_stream(monitor_ref, subscriptions)
   end
-  defp close_stream({:exit, reason, subscriptions}) do
-    request_to_cancel_stream(subscriptions)
-    exit(reason)
+  defp close_stream({:exit, reason, monitor_ref, subscriptions}, original) do
+    request_to_cancel_stream(monitor_ref, subscriptions)
+    exit({reason, {GenStage, :stream, [original]}})
   end
 
-  defp receive_stream(subscriptions) when map_size(subscriptions) == 0 do
-    {:halt, {:receive, subscriptions}}
+  defp receive_stream(monitor_ref, subscriptions) when map_size(subscriptions) == 0 do
+    {:halt, {:receive, monitor_ref, subscriptions}}
   end
-  defp receive_stream(subscriptions) do
+  defp receive_stream(monitor_ref, subscriptions) do
     receive do
       # TODO: Support redirects
-      {:"$gen_consumer", {producer_pid, ref}, :ack} ->
+      {:"$gen_consumer", {producer_pid, {^monitor_ref, inner_ref} = ref}, :ack} ->
         case subscriptions do
-          %{^ref => {:ack, producer_pid, cancel, min, max, _opts}} ->
+          %{^inner_ref => {:ack, producer_pid, cancel, min, max, _opts}} ->
             ask({producer_pid, ref}, max)
             subscribed = {:subscribed, producer_pid, cancel, min, max, max}
-            receive_stream(Map.put(subscriptions, ref, subscribed))
-          %{^ref => {:cancel, _}} ->
+            receive_stream(monitor_ref, Map.put(subscriptions, inner_ref, subscribed))
+          %{^inner_ref => {:cancel, _}} ->
             # We received this message before the cancellation was processed
-            receive_stream(subscriptions)
+            receive_stream(monitor_ref, subscriptions)
           _ ->
             # Cancel if messages are out of order or unknown
             send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
-            receive_stream(Map.delete(subscriptions, ref))
+            receive_stream(monitor_ref, Map.delete(subscriptions, inner_ref))
         end
 
-      {:"$gen_consumer", {producer_pid, ref}, events} when is_list(events) ->
+      {:"$gen_consumer", {producer_pid, {^monitor_ref, inner_ref} = ref}, events} when is_list(events) ->
         case subscriptions do
-          %{^ref => {:subscribed, producer_pid, cancel, min, max, demand}} ->
+          %{^inner_ref => {:subscribed, producer_pid, cancel, min, max, demand}} ->
             from = {producer_pid, ref}
             {demand, batches} = split_batches(events, from, min, max, demand, demand, [])
             subscribed = {:subscribed, producer_pid, cancel, min, max, demand}
-            deliver_stream(batches, from, Map.put(subscriptions, ref, subscribed))
-          %{^ref => {:cancel, _}} ->
+            deliver_stream(batches, from, monitor_ref, Map.put(subscriptions, inner_ref, subscribed))
+          %{^inner_ref => {:cancel, _}} ->
             # We received this message before the cancellation was processed
-            receive_stream(subscriptions)
+            receive_stream(monitor_ref, subscriptions)
           _ ->
             # Cancel if messages are out of order or unknown
             send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
-            receive_stream(Map.delete(subscriptions, ref))
+            receive_stream(monitor_ref, Map.delete(subscriptions, inner_ref))
         end
 
-      {:"$gen_consumer", {_, ref}, {:cancel, _} = reason} ->
-        cancel_stream(ref, reason, subscriptions)
+      {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, _} = reason} ->
+        cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
 
+      # TODO: Use a separate monitor process
       {:DOWN, ref, :process, _, reason} ->
-        cancel_stream(ref, reason, subscriptions)
+        cancel_stream(ref, reason, monitor_ref, subscriptions)
 
       # TODO: Test me when connecting stream stage with a stream consumer
-      {ref, {:producer, status}} when is_reference(ref) and status in [:halt, :done] ->
+      {{^monitor_ref, inner_ref}, {:producer, status}}
+          when is_reference(inner_ref) and status in [:halt, :done] ->
         case subscriptions do
-          %{^ref => tuple} ->
-            subscriptions = request_to_cancel_stream(ref, tuple, subscriptions)
-            receive_stream(subscriptions)
+          %{^inner_ref => tuple} ->
+            subscriptions = request_to_cancel_stream(inner_ref, tuple, monitor_ref, subscriptions)
+            receive_stream(monitor_ref, subscriptions)
           %{} ->
-            receive_stream(subscriptions)
+            receive_stream(monitor_ref, subscriptions)
         end
     end
   end
 
-  defp deliver_stream([], _from, subscriptions) do
-    receive_stream(subscriptions)
+  defp deliver_stream([], _from, monitor_ref, subscriptions) do
+    receive_stream(monitor_ref, subscriptions)
   end
-  defp deliver_stream([{events, ask} | batches], from, subscriptions) do
-    {events, {:ask, from, ask, batches, subscriptions}}
-  end
-
-  defp request_to_cancel_stream(subscriptions) do
-    subscriptions
-    |> Enum.reduce(subscriptions, fn {ref, tuple}, acc ->
-      request_to_cancel_stream(ref, tuple, acc)
-    end)
-    |> receive_stream()
+  defp deliver_stream([{events, ask} | batches], from, monitor_ref, subscriptions) do
+    {events, {:ask, from, ask, batches, monitor_ref, subscriptions}}
   end
 
-  defp request_to_cancel_stream(_ref, {:cancel, _}, subscriptions) do
+  defp request_to_cancel_stream(monitor_ref, subscriptions) do
+    subscriptions =
+      Enum.reduce(subscriptions, subscriptions, fn {inner_ref, tuple}, acc ->
+        request_to_cancel_stream(inner_ref, tuple, monitor_ref, acc)
+      end)
+    receive_stream(monitor_ref, subscriptions)
+  end
+
+  defp request_to_cancel_stream(_ref, {:cancel, _}, _monitor_ref, subscriptions) do
     subscriptions
   end
-  defp request_to_cancel_stream(ref, tuple, subscriptions) do
+  defp request_to_cancel_stream(inner_ref, tuple, monitor_ref, subscriptions) do
     process_pid = elem(tuple, 1)
-    GenStage.cancel({process_pid, ref}, :done)
-    Map.put(subscriptions, ref, {:cancel, process_pid})
+    GenStage.cancel({process_pid, {monitor_ref, inner_ref}}, :done)
+    Map.put(subscriptions, inner_ref, {:cancel, process_pid})
   end
 
-  defp cancel_stream(ref, reason, subscriptions) do
+  defp cancel_stream(inner_ref, reason, monitor_ref, subscriptions) do
     case subscriptions do
-      %{^ref => {_, _, :permanent, _, _, _}} ->
-        Process.demonitor(ref, [:flush])
-        {:halt, {:exit, reason, Map.delete(subscriptions, ref)}}
-      %{^ref => _} ->
-        Process.demonitor(ref, [:flush])
-        receive_stream(Map.delete(subscriptions, ref))
+      %{^inner_ref => {_, _, :permanent, _, _, _}} ->
+        Process.demonitor(inner_ref, [:flush])
+        {:halt, {:exit, reason, monitor_ref, Map.delete(subscriptions, inner_ref)}}
+      %{^inner_ref => _} ->
+        Process.demonitor(inner_ref, [:flush])
+        receive_stream(monitor_ref, Map.delete(subscriptions, inner_ref))
       %{} ->
-        receive_stream(subscriptions)
+        receive_stream(monitor_ref, subscriptions)
     end
   end
 
