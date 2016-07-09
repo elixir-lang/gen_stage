@@ -1347,7 +1347,7 @@ defmodule GenStage do
     {{:value, value}, queue} = :queue.out(queue)
     case value do
       {^notifications, msg} ->
-        {queue, Enum.reverse(events), counter, buffer - 1, msg, notifications}
+        {queue, Enum.reverse(events), counter, buffer - 1, {:ok, msg}, notifications}
       val ->
         take_from_buffer(queue, [val | events], counter - 1, buffer - 1, notifications)
     end
@@ -1357,8 +1357,8 @@ defmodule GenStage do
     {{:value, value}, queue} = :queue.out(queue)
 
     case pop_and_increment_wheel(wheel) do
-      {:ok, notification, wheel} ->
-        {queue, Enum.reverse([value | events]), counter - 1, buffer - 1, {:ok, notification}, wheel}
+      {:ok, msg, wheel} ->
+        {queue, Enum.reverse([value | events]), counter - 1, buffer - 1, {:ok, msg}, wheel}
       {:error, wheel} ->
         take_from_buffer(queue, [value | events], counter - 1, buffer - 1, wheel)
     end
@@ -1437,7 +1437,7 @@ defmodule GenStage do
       _ when is_reference(notifications) ->
         queue = :queue.in({notifications, msg}, queue)
         {:reply, :ok, %{stage | buffer: {queue, count + 1, notifications}}}
-      true ->
+      _ ->
         wheel = put_wheel(notifications, count, max, msg)
         {:reply, :ok, %{stage | buffer: {queue, count, wheel}}}
     end
