@@ -912,26 +912,61 @@ defmodule GenStage do
     stream_validate_opts({to, []})
   end
 
-  defp init_stream(subscriptions) do
-    monitor_ref = make_ref()
+  defp init_monitor(parent, subscriptions) do
+    parent_ref = Process.monitor(parent)
 
-    subscriptions =
-      Enum.reduce(subscriptions, %{}, fn {to, cancel, min, max, opts, full_opts}, acc ->
-        producer_pid = GenServer.whereis(to)
+    receive do
+      {:DOWN, ^parent_ref, _, _, reason} ->
+        exit(reason)
+      {^parent, monitor_ref} ->
+        subscriptions = subscriptions_monitor(parent, monitor_ref, subscriptions)
+        send(parent, {monitor_ref, {:subscriptions, subscriptions}})
+        loop_monitor(parent, parent_ref, monitor_ref, Map.keys(subscriptions))
+    end
+  end
 
-        cond do
-          producer_pid != nil ->
-            inner_ref = Process.monitor(producer_pid)
-            send producer_pid, {:"$gen_producer", {self(), {monitor_ref, inner_ref}}, {:subscribe, opts}}
-            Map.put(acc, inner_ref, {:ack, producer_pid, cancel, min, max, full_opts})
-          cancel == :temporary ->
-            acc
-          cancel == :permanent ->
-            exit({:noproc, {GenStage, :init_stream, [subscriptions]}})
+  defp subscriptions_monitor(parent, monitor_ref, subscriptions) do
+    Enum.reduce(subscriptions, %{}, fn {to, cancel, min, max, opts, full_opts}, acc ->
+      producer_pid = GenServer.whereis(to)
+
+      cond do
+        producer_pid != nil ->
+          inner_ref = Process.monitor(producer_pid)
+          send producer_pid, {:"$gen_producer", {parent, {monitor_ref, inner_ref}}, {:subscribe, opts}}
+          Map.put(acc, inner_ref, {:ack, producer_pid, cancel, min, max, full_opts})
+        cancel == :temporary ->
+          acc
+        cancel == :permanent ->
+          exit({:noproc, {GenStage, :init_stream, [subscriptions]}})
+      end
+    end)
+  end
+
+  defp loop_monitor(parent, parent_ref, monitor_ref, keys) do
+    receive do
+      {:DOWN, ^parent_ref, _, _, reason} ->
+        exit(reason)
+      {:DOWN, ref, _, _, reason} ->
+        if ref in keys do
+          send(parent, {{monitor_ref, ref}, {:down, reason}})
         end
-      end)
+        loop_monitor(parent, parent_ref, monitor_ref, keys -- [ref])
+    end
+  end
 
-    {:receive, monitor_ref, subscriptions}
+  defp init_stream(subscriptions) do
+    parent = self()
+
+    {monitor_pid, monitor_ref} =
+      spawn_monitor(fn -> init_monitor(parent, subscriptions) end)
+    send(monitor_pid, {parent, monitor_ref})
+
+    receive do
+      {:DOWN, ^monitor_ref, _, _, reason} ->
+        exit(reason)
+      {^monitor_ref, {:subscriptions, subscriptions}} ->
+        {:receive, monitor_ref, subscriptions}
+    end
   end
 
   defp consume_stream({:receive, monitor_ref, subscriptions}) do
@@ -993,9 +1028,8 @@ defmodule GenStage do
       {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, _} = reason} ->
         cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
 
-      # TODO: Use a separate monitor process
-      {:DOWN, ref, :process, _, reason} ->
-        cancel_stream(ref, reason, monitor_ref, subscriptions)
+      {{^monitor_ref, inner_ref}, {:down, reason}} ->
+        cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
 
       # TODO: Test me when connecting stream stage with a stream consumer
       {{^monitor_ref, inner_ref}, {:producer, status}}

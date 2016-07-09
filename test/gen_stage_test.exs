@@ -1083,6 +1083,22 @@ defmodule GenStageTest do
       refute_received {:"$gen_consumer", _, _}
     end
 
+    test "does not remove unknown $gen_consumer and DOWN messages" do
+      pid = self()
+      ref = make_ref()
+      send self(), {:"$gen_consumer", {pid, ref}, :ack}
+      send self(), {:DOWN, ref, :process, pid, :oops}
+
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      stream = GenStage.stream([producer])
+      assert Enum.take(stream, 10) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+      assert_received {:"$gen_consumer", {^pid, ^ref}, :ack}
+      assert_received {:DOWN, ^ref, :process, ^pid, :oops}
+      refute_received {:"$gen_consumer", _, _}
+      refute_received {:DOWN, _, _, _, _}
+    end
+
     test "stream exits when there is no named producer and subscription is permanent" do
       assert {:noproc, {GenStage, :init_stream, [_]}} =
              catch_exit(GenStage.stream([:unknown]) |> Enum.take(10))
