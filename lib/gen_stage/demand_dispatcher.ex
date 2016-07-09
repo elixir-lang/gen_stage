@@ -19,7 +19,7 @@ defmodule GenStage.DemandDispatcher do
   @doc false
   def notify(msg, {demands, _, _} = state) do
     Enum.each(demands, fn {_, pid, ref} ->
-      send(pid, {ref, msg})
+      Process.send(pid, {ref, msg}, [:noconnect])
     end)
     {:ok, state}
   end
@@ -69,7 +69,7 @@ defmodule GenStage.DemandDispatcher do
   defp dispatch_demand(events, [{counter, pid, ref} | demands]) do
     {deliver_now, deliver_later, counter} =
       split_events(events, counter, [])
-    send(pid, {:"$gen_consumer", {self(), ref}, deliver_now})
+    Process.send(pid, {:"$gen_consumer", {self(), ref}, deliver_now}, [:noconnect])
     demands = add_demand(counter, pid, ref, demands)
     dispatch_demand(deliver_later, demands)
   end

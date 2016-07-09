@@ -26,7 +26,7 @@ defmodule GenStage.PartitionDispatcher do
     partitions =
       Enum.reduce(partitions, partitions, fn
         {_, {pid, ref, demand}}, acc when is_integer(demand) ->
-          send(pid, {ref, msg})
+          Process.send(pid, {ref, msg}, [:noconnect])
           acc
         {partition, {pid, ref, queue}}, acc ->
           Map.put(acc, partition, {pid, ref, :queue.in({tag, msg}, queue)})
@@ -93,7 +93,7 @@ defmodule GenStage.PartitionDispatcher do
     case :queue.out(queue) do
       {{:value, {^tag, msg}}, queue} ->
         maybe_send(acc, pid, ref)
-        send(pid, {ref, msg})
+        Process.send(pid, {ref, msg}, [:noconnect])
         send_from_queue(queue, tag, pid, ref, counter, [])
       {{:value, event}, queue} ->
         send_from_queue(queue, tag, pid, ref, counter - 1, [event | acc])
@@ -107,7 +107,7 @@ defmodule GenStage.PartitionDispatcher do
   defp maybe_send([], _pid, _ref),
     do: :ok
   defp maybe_send(events, pid, ref),
-    do: send(pid, {:"$gen_consumer", {self(), ref}, Enum.reverse(events)})
+    do: Process.send(pid, {:"$gen_consumer", {self(), ref}, Enum.reverse(events)}, [:noconnect])
 
   @doc false
   def dispatch(events, {tag, hash, waiting, pending, partitions, references}) do

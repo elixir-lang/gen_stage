@@ -66,7 +66,13 @@ defmodule GenStage.Dispatcher do
   another consumer subscribes.
 
   It is guaranteed the reference given in `from` points to a
-  reference previously given in subscribe.
+  reference previously given in subscribe. It is also recommended
+  for events to be sent with `Process.send/3` and the `[:noconnect]`
+  option as the consumers are all monitored by the producer. For
+  example:
+
+      Process.send(consumer, {:"$gen_consumer, {self(), consumer_ref}, events}, [:noconnect])
+
   """
   @callback dispatch(events :: nonempty_list(term), state :: term) ::
     {:ok, leftover_events :: [term], new_state} when new_state: term
@@ -75,7 +81,11 @@ defmodule GenStage.Dispatcher do
   Used to send a notification to all consumers.
 
   In case the dispatcher is doing buffering, notify must keep
-  the ordering guarantees.
+  the ordering guarantees. It is recommended for the notification
+  to be sent with `Process.send/3` and the `[:noconnect]` option
+  as the consumers are all monitored by the producer. For example:
+
+      Process.send(consumer, {consumer_ref, msg}, [:noconnect])
   """
   @callback notify(msg :: term, state :: term) ::
     {:ok, new_state} when new_state: term

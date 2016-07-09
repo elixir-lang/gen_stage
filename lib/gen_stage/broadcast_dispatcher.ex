@@ -16,7 +16,7 @@ defmodule GenStage.BroadcastDispatcher do
   @doc false
   def notify(msg, {demands, _} = state) do
     Enum.each(demands, fn {_, pid, ref} ->
-      send(pid, {ref, msg})
+      Process.send(pid, {ref, msg}, [:noconnect])
     end)
     {:ok, state}
   end
@@ -55,7 +55,7 @@ defmodule GenStage.BroadcastDispatcher do
       split_events(events, waiting, [])
 
     Enum.each(demands, fn {_, pid, ref} ->
-      send(pid, {:"$gen_consumer", {self(), ref}, deliver_now})
+      Process.send(pid, {:"$gen_consumer", {self(), ref}, deliver_now}, [:noconnect])
     end)
 
     {:ok, deliver_later, {demands, waiting}}

@@ -757,9 +757,11 @@ defmodule GenStage do
 
   This is an asynchronous request typically used
   by consumers in `:manual` demand mode.
+
+  It accepts the same options as `Process.send/3`.
   """
-  def ask({pid, ref}, demand) when is_integer(demand) and demand > 0 do
-    send pid, {:"$gen_producer", {self(), ref}, {:ask, demand}}
+  def ask({pid, ref}, demand, opts \\ []) when is_integer(demand) and demand > 0 do
+    Process.send(pid, {:"$gen_producer", {self(), ref}, {:ask, demand}}, opts)
     :ok
   end
 
@@ -770,10 +772,18 @@ defmodule GenStage do
   may be forwarded to the consumer (although there is no
   guarantee as the producer may crash for unrelated reasons
   before). This is an asynchronous request.
+
+  It accepts the same options as `Process.send/3`.
   """
-  def cancel({pid, ref}, reason) do
-    send pid, {:"$gen_producer", {self(), ref}, {:cancel, reason}}
+  def cancel({pid, ref}, reason, opts \\ []) do
+    Process.send(pid, {:"$gen_producer", {self(), ref}, {:cancel, reason}}, opts)
     :ok
+  end
+
+  @compile {:inline, send_noconnect: 2, ask: 3, cancel: 3}
+
+  defp send_noconnect(pid, msg) do
+    Process.send(pid, msg, [:noconnect])
   end
 
   @doc """
@@ -932,7 +942,7 @@ defmodule GenStage do
       cond do
         producer_pid != nil ->
           inner_ref = Process.monitor(producer_pid)
-          send producer_pid, {:"$gen_producer", {parent, {monitor_ref, inner_ref}}, {:subscribe, opts}}
+          send_noconnect(producer_pid, {:"$gen_producer", {parent, {monitor_ref, inner_ref}}, {:subscribe, opts}})
           Map.put(acc, inner_ref, {:ack, producer_pid, cancel, min, max, full_opts})
         cancel == :temporary ->
           acc
@@ -973,7 +983,7 @@ defmodule GenStage do
     receive_stream(monitor_ref, subscriptions)
   end
   defp consume_stream({:ask, from, ask, batches, monitor_ref, subscriptions}) do
-    ask > 0 and ask(from, ask)
+    ask > 0 and ask(from, ask, [:noconnect])
     deliver_stream(batches, from, monitor_ref, subscriptions)
   end
 
@@ -997,7 +1007,7 @@ defmodule GenStage do
       {:"$gen_consumer", {producer_pid, {^monitor_ref, inner_ref} = ref}, :ack} ->
         case subscriptions do
           %{^inner_ref => {:ack, producer_pid, cancel, min, max, _opts}} ->
-            ask({producer_pid, ref}, max)
+            ask({producer_pid, ref}, max, [:noconnect])
             subscribed = {:subscribed, producer_pid, cancel, min, max, max}
             receive_stream(monitor_ref, Map.put(subscriptions, inner_ref, subscribed))
           %{^inner_ref => {:cancel, _}} ->
@@ -1005,7 +1015,7 @@ defmodule GenStage do
             receive_stream(monitor_ref, subscriptions)
           _ ->
             # Cancel if messages are out of order or unknown
-            send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
+            send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
             receive_stream(monitor_ref, Map.delete(subscriptions, inner_ref))
         end
 
@@ -1021,7 +1031,7 @@ defmodule GenStage do
             receive_stream(monitor_ref, subscriptions)
           _ ->
             # Cancel if messages are out of order or unknown
-            send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
+            send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
             receive_stream(monitor_ref, Map.delete(subscriptions, inner_ref))
         end
 
@@ -1064,7 +1074,7 @@ defmodule GenStage do
   end
   defp request_to_cancel_stream(inner_ref, tuple, monitor_ref, subscriptions) do
     process_pid = elem(tuple, 1)
-    GenStage.cancel({process_pid, {monitor_ref, inner_ref}}, :done)
+    cancel({process_pid, {monitor_ref, inner_ref}}, :done, [:noconnect])
     Map.put(subscriptions, inner_ref, {:cancel, process_pid})
   end
 
@@ -1268,13 +1278,13 @@ defmodule GenStage do
     case consumers do
       %{^ref => _} ->
         :error_logger.error_msg('GenStage producer ~p received duplicated subscription from: ~p~n', [name(), from])
-        send(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}})
+        send_noconnect(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}})
         {:noreply, stage}
       %{} ->
         mon_ref = Process.monitor(consumer_pid)
         stage = put_in stage.monitors[mon_ref], ref
         stage = put_in stage.consumers[ref], {consumer_pid, mon_ref}
-        send(consumer_pid, {:"$gen_consumer", {self(), ref}, :ack})
+        send_noconnect(consumer_pid, {:"$gen_consumer", {self(), ref}, :ack})
         producer_subscribe(opts, from, stage)
     end
   end
@@ -1286,7 +1296,7 @@ defmodule GenStage do
         %{dispatcher_state: dispatcher_state} = stage
         dispatcher_callback(:ask, [counter, from, dispatcher_state], stage)
       %{} ->
-        send(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :unknown_subscription}})
+        send_noconnect(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
     end
   end
@@ -1315,7 +1325,7 @@ defmodule GenStage do
           end
         send_pc_events(events, ref, %{stage | events: demand_or_queue})
       _ ->
-        send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
+        send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
     end
   end
@@ -1328,7 +1338,7 @@ defmodule GenStage do
         {batches, stage} = consumer_receive(from, entry, events, stage)
         consumer_dispatch(batches, from, mod, state, stage, false)
       _ ->
-        send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
+        send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
     end
   end
@@ -1343,7 +1353,7 @@ defmodule GenStage do
 
         case apply(mod, :handle_subscribe, [:producer, opts, to, state]) do
           {:automatic, state} ->
-            ask(to, max)
+            ask(to, max, [:noconnect])
             stage = put_in stage.producers[ref], {producer_pid, cancel, {max, min, max}}
             {:noreply, %{stage | state: state}}
           {:manual, state} ->
@@ -1355,7 +1365,7 @@ defmodule GenStage do
             {:stop, {:bad_return_value, other}, stage}
         end
       {nil, _monitors} ->
-        send(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
+        send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
     end
   end
@@ -1465,7 +1475,7 @@ defmodule GenStage do
         {:noreply, stage}
       {{pid, mon_ref}, consumers} ->
         Process.demonitor(mon_ref, [:flush])
-        send pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}}
+        send_noconnect(pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}})
         stage = %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}
 
         case noreply_callback(:handle_cancel, [cancel_reason, {pid, ref}, state], stage) do
@@ -1740,11 +1750,11 @@ defmodule GenStage do
     case mod.handle_events(batch, from, state) do
       {:noreply, events, state} when is_list(events) ->
         stage = dispatch_events(events, stage)
-        ask > 0 and ask(from, ask)
+        ask > 0 and ask(from, ask, [:noconnect])
         consumer_dispatch(batches, from, mod, state, stage, false)
       {:noreply, events, state, :hibernate} when is_list(events) ->
         stage = dispatch_events(events, stage)
-        ask > 0 and ask(from, ask)
+        ask > 0 and ask(from, ask, [:noconnect])
         consumer_dispatch(batches, from, mod, state, stage, true)
       {:stop, reason, state} ->
         {:stop, reason, %{stage | state: state}}
@@ -1778,7 +1788,7 @@ defmodule GenStage do
       cond do
         producer_pid != nil ->
           ref = Process.monitor(producer_pid)
-          send producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}}
+          send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}})
           stage = put_in stage.monitors[ref], {producer_pid, cancel, min, max, full_opts}
           {:reply, {:ok, ref}, stage}
         cancel == :temporary ->
