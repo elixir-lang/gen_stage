@@ -889,11 +889,30 @@ defmodule GenStage do
   end
 
   @doc """
-  Creates a stream that subscribes to the given producers.
+  Creates a stream that subscribes to the given producers
+  and emits the appropriate messages.
 
   It expects a list of producer stages either as producer
   names or `{producer, options}` tuples, similar to the
   `:subscribe_to` option returned on `c:init/1` for consumers.
+
+  Although `GenStage.stream/1` uses the process inbox to
+  receive messages from producers, it guarantees it won't
+  remove or leave unwanted messages in the mailbox after
+  enumeration is done except if one of the producers come
+  from a remote node. For such cases, read more below.
+
+  ## Remote nodes
+
+  While it is possible to stream messages from remote nodes
+  such should be done with care. In particular, in case of
+  disconnections, there is a chance the producer will send
+  messages after the consumer receives its DOWN messages and
+  those will be remain in the process inbox, violating the
+  common scenario where `GenStage.stream/1` does not pollute
+  the caller inbox. In such cases, it is recommended to
+  consume such streams from a separate process which will be
+  discarded after the stream is consumed.
   """
   @spec stream([stage | {stage, Keyword.t}]) :: Enumerable.t
   def stream(subscriptions) when is_list(subscriptions) do
