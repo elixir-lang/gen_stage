@@ -248,12 +248,13 @@ defmodule GenStage do
   The producer is responsible for sending events to consumers
   based on demand.
 
-    * `{:"$gen_producer", from :: {consumer_pid, subscription_ref}, {:subscribe, options}}` -
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_tag}, {:subscribe, options}}` -
       sent by the consumer to the producer to start a new subscription.
 
       Before sending, the consumer MUST monitor the producer for clean-up
-      purposes in case of crashes. The `subscription_ref` is unique to
-      identify the subscription (and may be the monitoring reference).
+      purposes in case of crashes. The `subscription_tag` is unique to
+      identify the subscription. It is typically the subscriber monitoring
+      reference although it may be any term.
 
       Once received, the producer MUST monitor the consumer and properly
       acknoledge or cancel the subscription. The consumer MUST wait until
@@ -261,7 +262,7 @@ defmodule GenStage do
       subscription reference is known, it must send a `:cancel` message
       to the consumer.
 
-    * `{:"$gen_producer", from :: {pid, subscription_ref}, {:cancel, reason}}` -
+    * `{:"$gen_producer", from :: {pid, subscription_tag}, {:cancel, reason}}` -
       sent by the consumer to cancel a given subscription.
 
       Once received, the producer MUST send a `:cancel` reply to the
@@ -271,7 +272,7 @@ defmodule GenStage do
       If the pair is unknown, the producer MUST send an appropriate cancel
       reply.
 
-    * `{:"$gen_producer", from :: {pid, subscription_ref}, {:ask, count}}` -
+    * `{:"$gen_producer", from :: {pid, subscription_tag}, {:ask, count}}` -
       sent by consumers to ask data in a given subscription.
 
       Once received, the producer MUST send data up to the demand. If the
@@ -282,19 +283,19 @@ defmodule GenStage do
   The consumer is responsible for starting the subscription
   and sending demand to producers.
 
-    * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, :ack}` -
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, :ack}` -
       sent by producers to acknowledge a subscription.
 
-    * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, {:cancel, reason}}` -
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, {:cancel, reason}}` -
       sent by producers to cancel a given subscription.
 
       It is used as a confirmation for client cancellations OR
       whenever the producer wants to cancel some upstream demand.
 
-    * `{:"$gen_consumer", from :: {producer_pid, subscription_ref}, [event]}` -
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, [event]}` -
       events sent by producers to consumers.
 
-      `subscription_ref` identifies the subscription. The third argument
+      `subscription_tag` identifies the subscription. The third argument
       is a non-empty list of events. If the subscription is unknown, the
       events must be ignored and a cancel message sent to the producer.
 
@@ -886,10 +887,10 @@ defmodule GenStage do
   """
   @spec stream([stage | {stage, Keyword.t}]) :: Enumerable.t
   def stream(subscriptions) when is_list(subscriptions) do
-    parsed_subscriptions = Enum.map(subscriptions, &stream_validate_opts/1)
-    Stream.resource(fn -> init_stream(parsed_subscriptions, subscriptions) end,
+    subscriptions = Enum.map(subscriptions, &stream_validate_opts/1)
+    Stream.resource(fn -> init_stream(subscriptions) end,
                     &consume_stream/1,
-                    fn stream -> close_stream(stream, subscriptions) end)
+                    &close_stream/1)
   end
 
   def stream(subscriptions) do
@@ -911,7 +912,7 @@ defmodule GenStage do
     stream_validate_opts({to, []})
   end
 
-  defp init_stream(subscriptions, original) do
+  defp init_stream(subscriptions) do
     monitor_ref = make_ref()
 
     subscriptions =
@@ -926,7 +927,7 @@ defmodule GenStage do
           cancel == :temporary ->
             acc
           cancel == :permanent ->
-            exit({:noproc, {GenStage, :stream, [original]}})
+            exit({:noproc, {GenStage, :init_stream, [subscriptions]}})
         end
       end)
 
@@ -941,15 +942,15 @@ defmodule GenStage do
     deliver_stream(batches, from, monitor_ref, subscriptions)
   end
 
-  defp close_stream({:receive, monitor_ref, subscriptions}, _) do
+  defp close_stream({:receive, monitor_ref, subscriptions}) do
     request_to_cancel_stream(monitor_ref, subscriptions)
   end
-  defp close_stream({:ask, _, _, _, monitor_ref, subscriptions}, _) do
+  defp close_stream({:ask, _, _, _, monitor_ref, subscriptions}) do
     request_to_cancel_stream(monitor_ref, subscriptions)
   end
-  defp close_stream({:exit, reason, monitor_ref, subscriptions}, original) do
+  defp close_stream({:exit, reason, monitor_ref, subscriptions}) do
     request_to_cancel_stream(monitor_ref, subscriptions)
-    exit({reason, {GenStage, :stream, [original]}})
+    exit({reason, {GenStage, :close_stream, [subscriptions]}})
   end
 
   defp receive_stream(monitor_ref, subscriptions) when map_size(subscriptions) == 0 do

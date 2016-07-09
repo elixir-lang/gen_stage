@@ -1084,15 +1084,15 @@ defmodule GenStageTest do
     end
 
     test "stream exits when there is no named producer and subscription is permanent" do
-      assert catch_exit(GenStage.stream([:unknown]) |> Enum.take(10)) ==
-             {:noproc, {GenStage, :stream, [[:unknown]]}}
+      assert {:noproc, {GenStage, :init_stream, [_]}} =
+             catch_exit(GenStage.stream([:unknown]) |> Enum.take(10))
     end
 
     test "stream exits when producer is dead and subscription is permanent" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
-      assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) ==
-             {:noproc, {GenStage, :stream, [[producer]]}}
+      assert {:noproc, {GenStage, :close_stream, [_]}} =
+             catch_exit(GenStage.stream([producer]) |> Enum.take(10))
     end
 
     test "stream exits when producer does not ack and subscription is permanent" do
@@ -1103,7 +1103,7 @@ defmodule GenStageTest do
         end
       end)
       assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) ==
-             {{:cancel, :no_thanks}, {GenStage, :stream, [[producer]]}}
+             {{:cancel, :no_thanks}, {GenStage, :close_stream, [%{}]}}
     end
 
     test "stream exits when producer does not ack and lives and subscription is permanent" do
@@ -1115,7 +1115,7 @@ defmodule GenStageTest do
         end
       end)
       assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) ==
-             {{:cancel, :no_thanks}, {GenStage, :stream, [[producer]]}}
+             {{:cancel, :no_thanks}, {GenStage, :close_stream, [%{}]}}
     end
 
     test "stream exits when there is no named producer and subscription is temporary" do
