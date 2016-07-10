@@ -622,7 +622,7 @@ defmodule GenStageTest do
       end)
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer)
-      assert_receive {:EXIT, ^consumer, {:cancel, :no_thanks}}
+      assert_receive {:EXIT, ^consumer, :no_thanks}
     end
 
     test "consumer does not exit when there is no named producer and subscription is temporary" do
@@ -737,7 +737,7 @@ defmodule GenStageTest do
       assert_receive {:producer_subscribed, {^consumer, ^ref}}
       Process.unlink(consumer)
       Process.exit(consumer, :kill)
-      assert_receive {:producer_cancelled, {^consumer, ^ref}, :killed}
+      assert_receive {:producer_cancelled, {^consumer, ^ref}, {:down, :killed}}
     end
 
     test "handle_call/3 sends events before reply" do
@@ -860,7 +860,7 @@ defmodule GenStageTest do
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :permanent)
       GenStage.cancel({producer, ref}, self())
       assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, pid}} when pid == self()
-      assert_receive {:EXIT, ^consumer, {:cancel, pid}} when pid == self()
+      assert_receive {:EXIT, ^consumer, pid} when pid == self()
     end
 
     test "handle_cancel/3 on producer down with temporary subscription" do
@@ -869,7 +869,7 @@ defmodule GenStageTest do
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
       Process.unlink(producer)
       Process.exit(producer, :kill)
-      assert_receive {:consumer_cancelled, {^producer, ^ref}, :killed}
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
     end
 
     @tag :capture_log
@@ -880,7 +880,7 @@ defmodule GenStageTest do
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :permanent)
       Process.unlink(producer)
       Process.exit(producer, :kill)
-      assert_receive {:consumer_cancelled, {^producer, ^ref}, :killed}
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
       assert_receive {:EXIT, ^consumer, :killed}
     end
 
@@ -961,7 +961,7 @@ defmodule GenStageTest do
       assert_receive {:producer_consumer_subscribed, :consumer, {^consumer, ^ref}}
       Process.unlink(consumer)
       Process.exit(consumer, :kill)
-      assert_receive {:producer_consumer_cancelled, {^consumer, ^ref}, :killed}
+      assert_receive {:producer_consumer_cancelled, {^consumer, ^ref}, {:down, :killed}}
     end
 
     test "consumer handle_subscribe/4" do
@@ -996,7 +996,7 @@ defmodule GenStageTest do
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :permanent)
       GenStage.cancel({producer, ref}, self())
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, pid}} when pid == self()
-      assert_receive {:EXIT, ^consumer, {:cancel, pid}} when pid == self()
+      assert_receive {:EXIT, ^consumer, pid} when pid == self()
     end
 
     test "consumer handle_cancel/3 on producer down with temporary subscription" do
@@ -1005,7 +1005,7 @@ defmodule GenStageTest do
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
       Process.unlink(producer)
       Process.exit(producer, :kill)
-      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, :killed}
+      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
     end
 
     @tag :capture_log
@@ -1016,7 +1016,7 @@ defmodule GenStageTest do
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :permanent)
       Process.unlink(producer)
       Process.exit(producer, :kill)
-      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, :killed}
+      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
       assert_receive {:EXIT, ^consumer, :killed}
     end
   end

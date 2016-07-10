@@ -421,7 +421,7 @@ defmodule GenStage do
 
   Return values are the same as `c:handle_cast/2`.
   """
-  @callback handle_cancel(cancel_reason :: term, GenServer.from, state :: term) ::
+  @callback handle_cancel({:cancel | :down, reason :: term}, GenServer.from, state :: term) ::
     {:noreply, [event], new_state} |
     {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, new_state} when event: term, new_state: term, reason: term
@@ -890,9 +890,22 @@ defmodule GenStage do
   end
 
   @doc """
-  Starts a stage from an enumerable.
+  Starts a stage from an enumerable (or stream).
+
+  This function will started a stage linked to the current process
+  that will remove items from the enumerable when there is demand.
+  Since streams are enumerables, we can also pass streams as
+  arguments (in fact, streams are the most common argument to a stage).
+
+  Keep in mind, however, that streams that require the use of the
+  process inbox to work most likely won't behave as expected with
+  this function since the mailbox is controlled by the stage process
+  itself.
 
   ## Options
+
+    * `:link` - when false, does not link the stage to the current
+      process. Defaults to `true`
 
     * `:consumers` - when `:permanent`, the stage exits when a
       consumer exits. Defaults to `:temporary`
@@ -904,13 +917,13 @@ defmodule GenStage do
   All other options that would be given for `start_link/3` are
   also accepted.
   """
-  # TODO: Add @spec
-  # TODO: is the :consumers option OK?
-  # TODO: is it the best name for this function?
-  # TODO: Implement proper termination
   # TODO: Test this functionality
+  @spec from_enumerable(Enumerable.t, Keyword.t) :: GenServer.on_start
   def from_enumerable(stream, opts) do
-    start_link(GenStage.Streamer, {stream, opts}, opts)
+    case Keyword.pop(opts, :link, true) do
+      {true, opts} -> start_link(GenStage.Streamer, {stream, opts}, opts)
+      {false, opts} -> start(GenStage.Streamer, {stream, opts}, opts)
+    end
   end
 
   @doc """
@@ -921,19 +934,34 @@ defmodule GenStage do
   represents the producer or a tuple with the producer and the
   subscription options as defined in `async_subscribe/2`.
 
-  Although `GenStage.stream/1` uses the process inbox to
-  receive messages from producers, it guarantees it won't
-  remove or leave unwanted messages in the mailbox after
-  enumeration is done except if one of the producers come
-  from a remote node. For such cases, read more below.
+  `GenStage.stream/1` will "hijack" the inbox of the process
+  enumerating the stream to subscribe and receive messages
+  from producers. However it guarantees it won't remove or
+  leave unwanted messages in the mailbox after enumeration
+  except if one of the producers come from a remote node.
+  For more information, read the "Known limitations" section
+  below.
 
-  ## Remote nodes
+  ## Known limitations
+
+  ### from_enumerable
+
+  This module also provides a function called `from_enumerable/2`
+  which receives a stream and creates a stage that emits data
+  from the enumerable.
+
+  Given both `GenStage.from_enumerable/2` and `GenStage.stream/1`
+  require the process inbox to send and receive messages, it is
+  impossible to run a `stream/1` inside a `from_enumerable/2` as
+  the `stream/1` will never receive the messages it expects.
+
+  ### Remote nodes
 
   While it is possible to stream messages from remote nodes
   such should be done with care. In particular, in case of
   disconnections, there is a chance the producer will send
   messages after the consumer receives its DOWN messages and
-  those will be remain in the process inbox, violating the
+  those will remain in the process inbox, violating the
   common scenario where `GenStage.stream/1` does not pollute
   the caller inbox. In such cases, it is recommended to
   consume such streams from a separate process which will be
@@ -1118,7 +1146,7 @@ defmodule GenStage do
   end
   defp request_to_cancel_stream(inner_ref, tuple, monitor_ref, subscriptions) do
     process_pid = elem(tuple, 1)
-    cancel({process_pid, {monitor_ref, inner_ref}}, :done, [:noconnect])
+    cancel({process_pid, {monitor_ref, inner_ref}}, :normal, [:noconnect])
     Map.put(subscriptions, inner_ref, {:cancel, process_pid})
   end
 
@@ -1297,13 +1325,13 @@ defmodule GenStage do
                   %{producers: producers, monitors: monitors, state: state} = stage) do
     case producers do
       %{^ref => _} ->
-        consumer_cancel(ref, reason, stage)
+        consumer_cancel(ref, :down, reason, stage)
       %{} ->
         case monitors do
           %{^ref => {_, cancel, _, _, _}} ->
             consumer_no_ack(cancel, reason, %{stage | monitors: Map.delete(monitors, ref)})
           %{^ref => consumer_ref} when is_reference(consumer_ref) ->
-            producer_cancel(consumer_ref, reason, reason, stage)
+            producer_cancel(consumer_ref, :down, reason, stage)
           %{} ->
             noreply_callback(:handle_info, [msg, state], stage)
         end
@@ -1345,8 +1373,8 @@ defmodule GenStage do
     end
   end
 
-  def handle_info({:"$gen_producer", {_, ref}, {:cancel, reason} = cancel_reason}, stage) do
-    producer_cancel(ref, reason, cancel_reason, stage)
+  def handle_info({:"$gen_producer", {_, ref}, {:cancel, reason}}, stage) do
+    producer_cancel(ref, :cancel, reason, stage)
   end
 
   ## Consumer messages
@@ -1414,13 +1442,13 @@ defmodule GenStage do
     end
   end
 
-  def handle_info({:"$gen_consumer", {_, ref}, {:cancel, _} = reason},
+  def handle_info({:"$gen_consumer", {_, ref}, {:cancel, reason}},
                   %{monitors: monitors} = stage) do
     case Map.pop(monitors, ref) do
       {{_, cancel, _, _, _}, monitors} ->
         consumer_no_ack(cancel, reason, %{stage | monitors: monitors})
       {nil, _monitors} ->
-        consumer_cancel(ref, reason, stage)
+        consumer_cancel(ref, :cancel, reason, stage)
     end
   end
 
@@ -1511,7 +1539,7 @@ defmodule GenStage do
     end
   end
 
-  defp producer_cancel(ref, reason, cancel_reason, stage) do
+  defp producer_cancel(ref, kind, reason, stage) do
     %{consumers: consumers, monitors: monitors, state: state} = stage
 
     case Map.pop(consumers, ref) do
@@ -1522,7 +1550,7 @@ defmodule GenStage do
         send_noconnect(pid, {:"$gen_consumer", {self(), ref}, {:cancel, reason}})
         stage = %{stage | consumers: consumers, monitors: Map.delete(monitors, mon_ref)}
 
-        case noreply_callback(:handle_cancel, [cancel_reason, {pid, ref}, state], stage) do
+        case noreply_callback(:handle_cancel, [{kind, reason}, {pid, ref}, state], stage) do
           {:noreply, %{dispatcher_state: dispatcher_state} = stage} ->
             # Call the dispatcher after since it may generate demand and the
             # main module must know the consumer is no longer subscribed.
@@ -1854,14 +1882,14 @@ defmodule GenStage do
     end
   end
 
-  defp consumer_cancel(ref, reason, %{producers: producers, state: state} = stage) do
+  defp consumer_cancel(ref, kind, reason, %{producers: producers, state: state} = stage) do
     case Map.pop(producers, ref) do
       {nil, _producers} ->
         {:noreply, stage}
       {{producer_pid, mode, _}, producers} ->
         Process.demonitor(ref, [:flush])
         stage = %{stage | producers: producers}
-        case noreply_callback(:handle_cancel, [reason, {producer_pid, ref}, state], stage) do
+        case noreply_callback(:handle_cancel, [{kind, reason}, {producer_pid, ref}, state], stage) do
           {:noreply, stage} when mode == :permanent ->
             {:stop, reason, stage}
           other ->

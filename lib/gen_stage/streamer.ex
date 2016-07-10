@@ -18,7 +18,7 @@ defmodule GenStage.Streamer do
   def handle_cancel(_, _, {:temporary, _} = state) do
     {:noreply, [], state}
   end
-  def handle_cancel(reason, _, {:permanent, _} = state) do
+  def handle_cancel({_, reason}, _, {:permanent, _} = state) do
     {:stop, reason, state}
   end
 
