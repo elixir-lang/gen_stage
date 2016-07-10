@@ -1099,19 +1099,19 @@ defmodule GenStageTest do
       refute_received {:DOWN, _, _, _, _}
     end
 
-    test "stream exits when there is no named producer and subscription is permanent" do
+    test "exits when there is no named producer and subscription is permanent" do
       assert {:noproc, {GenStage, :init_stream, [_]}} =
              catch_exit(GenStage.stream([:unknown]) |> Enum.take(10))
     end
 
-    test "stream exits when producer is dead and subscription is permanent" do
+    test "exits when producer is dead and subscription is permanent" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
       assert {:noproc, {GenStage, :close_stream, [_]}} =
              catch_exit(GenStage.stream([producer]) |> Enum.take(10))
     end
 
-    test "stream exits when producer does not ack and subscription is permanent" do
+    test "exits when producer does not ack and subscription is permanent" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
           {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
@@ -1122,7 +1122,7 @@ defmodule GenStageTest do
              {{:cancel, :no_thanks}, {GenStage, :close_stream, [%{}]}}
     end
 
-    test "stream exits when producer does not ack and lives and subscription is permanent" do
+    test "exits when producer does not ack and lives and subscription is permanent" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
           {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
@@ -1134,17 +1134,17 @@ defmodule GenStageTest do
              {{:cancel, :no_thanks}, {GenStage, :close_stream, [%{}]}}
     end
 
-    test "stream exits when there is no named producer and subscription is temporary" do
+    test "exits when there is no named producer and subscription is temporary" do
       assert GenStage.stream([{:unknown, cancel: :temporary}]) |> Enum.take(10) == []
     end
 
-    test "stream exits when producer is dead and subscription is temporary" do
+    test "exits when producer is dead and subscription is temporary" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
       assert GenStage.stream([{producer,cancel: :temporary}]) |> Enum.take(10) == []
     end
 
-    test "stream exits when producer does not ack and subscription is temporary" do
+    test "exits when producer does not ack and subscription is temporary" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
           {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
@@ -1154,7 +1154,7 @@ defmodule GenStageTest do
       assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
     end
 
-    test "stream exits when producer does not ack and lives and subscription is temporary" do
+    test "exits when producer does not ack and lives and subscription is temporary" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
           {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
@@ -1165,7 +1165,7 @@ defmodule GenStageTest do
       assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
     end
 
-    test "stream sends termination message on done to permanent producer" do
+    test "sends termination message on done to permanent producer" do
       stream = Stream.iterate(0, & &1 + 1)
       {:ok, producer} = GenStage.from_enumerable(stream, consumers: :permanent)
       assert GenStage.stream([producer]) |> Enum.take(10) ==
@@ -1174,7 +1174,7 @@ defmodule GenStageTest do
       assert_receive {:DOWN, ^ref, _, _, _}
     end
 
-    test "stream sends termination message on halt to permanent producer" do
+    test "sends termination message on halt to permanent producer" do
       stream = Stream.iterate(0, & &1 + 1) |> Stream.take(10)
       {:ok, producer} = GenStage.from_enumerable(stream, consumers: :permanent)
       assert GenStage.stream([producer]) |> Enum.to_list ==
@@ -1183,7 +1183,7 @@ defmodule GenStageTest do
       assert_receive {:DOWN, ^ref, _, _, _}
     end
 
-    test "stream sends termination message on done to temporary producer" do
+    test "sends termination message on done to temporary producer" do
       stream = Stream.iterate(0, & &1 + 1)
       {:ok, producer} = GenStage.from_enumerable(stream, consumers: :temporary)
       assert GenStage.stream([producer]) |> Enum.take(10) ==
@@ -1192,7 +1192,7 @@ defmodule GenStageTest do
       refute_received {:DOWN, ^ref, _, _, _}
     end
 
-    test "stream sends termination message on halt to temporary producer" do
+    test "sends termination message on halt to temporary producer" do
       stream = Stream.iterate(0, & &1 + 1) |> Stream.take(10)
       {:ok, producer} = GenStage.from_enumerable(stream, consumers: :temporary)
       assert GenStage.stream([producer]) |> Enum.to_list ==
