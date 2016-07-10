@@ -1165,6 +1165,42 @@ defmodule GenStageTest do
       assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
     end
 
+    test "stream sends termination message on done to permanent producer" do
+      stream = Stream.iterate(0, & &1 + 1)
+      {:ok, producer} = GenStage.from_enumerable(stream, consumers: :permanent)
+      assert GenStage.stream([producer]) |> Enum.take(10) ==
+             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      ref = Process.monitor(producer)
+      assert_receive {:DOWN, ^ref, _, _, _}
+    end
+
+    test "stream sends termination message on halt to permanent producer" do
+      stream = Stream.iterate(0, & &1 + 1) |> Stream.take(10)
+      {:ok, producer} = GenStage.from_enumerable(stream, consumers: :permanent)
+      assert GenStage.stream([producer]) |> Enum.to_list ==
+             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      ref = Process.monitor(producer)
+      assert_receive {:DOWN, ^ref, _, _, _}
+    end
+
+    test "stream sends termination message on done to temporary producer" do
+      stream = Stream.iterate(0, & &1 + 1)
+      {:ok, producer} = GenStage.from_enumerable(stream, consumers: :temporary)
+      assert GenStage.stream([producer]) |> Enum.take(10) ==
+             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      ref = Process.monitor(producer)
+      refute_received {:DOWN, ^ref, _, _, _}
+    end
+
+    test "stream sends termination message on halt to temporary producer" do
+      stream = Stream.iterate(0, & &1 + 1) |> Stream.take(10)
+      {:ok, producer} = GenStage.from_enumerable(stream, consumers: :temporary)
+      assert GenStage.stream([producer]) |> Enum.to_list ==
+             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      ref = Process.monitor(producer)
+      refute_received {:DOWN, ^ref, _, _, _}
+    end
+
     test "raises on bad options" do
       msg = "invalid options for :unknown producer " <>
             "(expected :max_demand to be equal to or greater than 1, got: 0)"
@@ -1172,6 +1208,24 @@ defmodule GenStageTest do
       assert_raise ArgumentError, msg, fn ->
         GenStage.stream([{:unknown, max_demand: 0}])
       end
+    end
+  end
+
+  describe "from_enumerable/2" do
+    test "accepts a :link option" do
+      {:ok, producer} = GenStage.from_enumerable([])
+      {:links, links} = Process.info(self(), :links)
+      assert producer in links
+
+      {:ok, producer} = GenStage.from_enumerable([], link: false)
+      {:links, links} = Process.info(self(), :links)
+      refute producer in links
+    end
+
+    test "accepts a :name option" do
+      {:ok, producer} = GenStage.from_enumerable([], name: :gen_stage_from_enumerable)
+      assert Process.info(producer, :registered_name) ==
+             {:registered_name, :gen_stage_from_enumerable}
     end
   end
 end

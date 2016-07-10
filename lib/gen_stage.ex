@@ -890,16 +890,24 @@ defmodule GenStage do
   end
 
   @doc """
-  Starts a stage from an enumerable (or stream).
+  Starts a producer stage from an enumerable (or stream).
 
-  This function will started a stage linked to the current process
-  that will remove items from the enumerable when there is demand.
+  This function will start a stage linked to the current process
+  that will take items from the enumerable when there is demand.
   Since streams are enumerables, we can also pass streams as
-  arguments (in fact, streams are the most common argument to a stage).
+  arguments (in fact, streams are the most common argument to
+  this function).
 
-  Keep in mind, however, that streams that require the use of the
-  process inbox to work most likely won't behave as expected with
-  this function since the mailbox is controlled by the stage process
+  When the enumerable finishes or halts, a notification is sent
+  to all consumers in the format of
+  `{subscription_tag, {:producer, :halted | :done}}`. If the stage
+  is meant to be temporary instead of long running, we recommend
+  setting the `:consumers` option to `:permanent` so the stage
+  exits if any of the consumers exits.
+
+  Keep in mind that streams that require the use of the process
+  inbox to work most likely won't behave as expected with this
+  function since the mailbox is controlled by the stage process
   itself.
 
   ## Options
@@ -917,9 +925,8 @@ defmodule GenStage do
   All other options that would be given for `start_link/3` are
   also accepted.
   """
-  # TODO: Test this functionality
   @spec from_enumerable(Enumerable.t, Keyword.t) :: GenServer.on_start
-  def from_enumerable(stream, opts) do
+  def from_enumerable(stream, opts \\ []) do
     case Keyword.pop(opts, :link, true) do
       {true, opts} -> start_link(GenStage.Streamer, {stream, opts}, opts)
       {false, opts} -> start(GenStage.Streamer, {stream, opts}, opts)
@@ -1113,9 +1120,8 @@ defmodule GenStage do
       {{^monitor_ref, inner_ref}, {:down, reason}} ->
         cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
 
-      # TODO: Test me when connecting stream stage with a stream consumer
       {{^monitor_ref, inner_ref}, {:producer, status}}
-          when is_reference(inner_ref) and status in [:halt, :done] ->
+          when is_reference(inner_ref) and status in [:halted, :done] ->
         case subscriptions do
           %{^inner_ref => tuple} ->
             subscriptions = request_to_cancel_stream(inner_ref, tuple, monitor_ref, subscriptions)

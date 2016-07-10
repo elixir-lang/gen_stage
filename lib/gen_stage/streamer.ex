@@ -5,14 +5,14 @@ defmodule GenStage.Streamer do
   use GenStage
 
   def init({stream, opts}) do
-    {consumers, opts} = Keyword.pop(opts, :consumers, :temporary)
+    consumers = Keyword.get(opts, :consumers, :temporary)
 
     continuation = &Enumerable.reduce(stream, &1, fn
       x, {acc, 1} -> {:suspend, {[x | acc], 0}}
       x, {acc, counter} -> {:cont, {[x | acc], counter - 1}}
     end)
 
-    {:producer, {consumers, continuation}, opts}
+    {:producer, {consumers, continuation}, Keyword.take(opts, [:dispatcher])}
   end
 
   def handle_cancel(_, _, {:temporary, _} = state) do
