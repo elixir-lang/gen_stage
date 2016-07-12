@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.0 (2016-07-12)
+
+### Enhancements
+
+  * Support notifications
+  * Introduce `GenStage.stream/1` to stream events as a consumer from a stage
+  * Introduce `GenStage.from_enumerable/2` to start a producer stage that emits events from an enumerable (or a stream)
+
 ## v0.2.1 (2016-07-08)
 
 ### Enhancements

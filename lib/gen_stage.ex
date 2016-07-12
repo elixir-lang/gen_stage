@@ -954,8 +954,8 @@ defmodule GenStage do
   ### from_enumerable
 
   This module also provides a function called `from_enumerable/2`
-  which receives a stream and creates a stage that emits data
-  from the enumerable.
+  which receives an enumerable (like a stream) and creates a stage
+  that emits data from the enumerable.
 
   Given both `GenStage.from_enumerable/2` and `GenStage.stream/1`
   require the process inbox to send and receive messages, it is
