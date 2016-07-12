@@ -7,22 +7,94 @@ defmodule GenStage.Flow do
   although computations will be executed in parallel using
   multiple `GenStage`s.
 
-  Flows are based on the map reduce programming model which
-  we will explore with detail below.
+  As an example, let's implement the classical word counting
+  algorithm using flow. The word counting program will receive
+  one file and count how many times each word appears in the
+  document. Using the `Enum` module it could be implemented
+  as follows:
+
+      File.stream!("path/to/some/file")
+      |> Enum.flat_map(fn line ->
+          String.split(line, " ")
+         end)
+      |> Enum.reduce(%{}, fn word, acc ->
+          Map.update(acc, word, 1, & &1 + 1)
+         end)
+      |> Enum.to_list()
+
+  Unfortunately the implemenation above is not quite efficient
+  as `Enum.flat_map/2` will build a list with all the words in
+  the document before reducing it. If the document is, for example,
+  2GB, we will load 2GB of data into memory.
+
+  We can improve the solution above by using the Stream module:
+
+      File.stream!("path/to/some/file")
+      |> Stream.flat_map(fn line ->
+          String.split(line, " ")
+         end)
+      |> Enum.reduce(%{}, fn word, acc ->
+          Map.update(acc, word, 1, & &1 + 1)
+         end)
+      |> Enum.to_list()
+
+  Now instead of loading the whole set into memory, we will only
+  keep the current line in memory while we process it. While this
+  allows us to process the whole data set efficiently, it does
+  not leverage concurency. Flow solves that:
+
+      alias Experimental.GenStage.Flow
+      File.stream!("path/to/some/file")
+      |> Flow.from_enumerable()
+      |> Flow.flat_map(fn line ->
+        for word <- String.split(" "), do: {word, 1}
+      end)
+      |> Flow.reduce_by_key(& &1 + &2)
+      |> Enum.to_list()
+
+  To convert from stream to flow, we have done two changes:
+
+    1. `flat_map/2` now returns key-value pairs, using the
+       word itself as key
+    2. this allows us to invoke `reduce_by_key/2` which will
+       invoke the given function for each key
+
+  The example above will now use all cores available as well
+  as keep an on going flow of data instead of traversing only
+  line by line. In particular, we could achieve maximal
+  performance to the example above with the following changes:
+
+      alias Experimental.GenStage.Flow
+
+      # Let's compile common patterns for performance
+      empty_space = :binary.compile_pattern(" ") # NEW!
+
+      File.stream!("path/to/some/file", read_ahead: 100_000) # NEW!
+      |> Flow.from_enumerable()
+      |> Flow.flat_map(fn line ->
+        for word <- String.split(empty_space), do: {word, 1}
+      end)
+      |> Flow.partition_with(storage: :ets) # NEW!
+      |> Flow.reduce_by_key(& &1 + &2)
+      |> Enum.to_list()
+
+  We first compiled the binary pattern we use to split lines into
+  words and then changed the `File.stream!` to buffer lines, so we
+  perform less IO operations. We also changed the partition storage
+  to ETS, which will yield better performance in cases like the word
+  counting example above. We will cover those operations in detail
+  over the next sections when we talk about the Map Reduce programming
+  model in which flow is built on top of and when discussing performance.
 
   ## MapReduce
 
-  The MapReduce programming model forces us to break our
-  computations in two stages: map and reduce. The map stage
-  is often quite easy to parallellize because items are processed
-  individually. The reduce stages need to group the data either
-  partially or completely.
+  The MapReduce programming model forces us to break our computations
+  in two stages: map and reduce. The map stage is often quite easy to
+  parallellize because items are processed individually. The reduce
+  stages need to group the data either partially or completely.
 
-  As an example, let's implement the classical word counting
-  algorithm using flow. The word counting program will receive
-  one or more files and find the words that occur more frequently.
-
-  We can write it with flow as shown below:
+  Let's continue exploring the example above but let's add "stop words"
+  which we don't want to count in our results, as shown below:
 
       alias Experimental.GenStage.Flow
 
@@ -32,16 +104,14 @@ defmodule GenStage.Flow do
       # Words for us to ignore from the text
       stop_words = ~w(a an and of the)
 
-      # This is our source file
-      stream = File.stream!("path/to/some/file", read_ahead: 100_000)
-
-      Flow.new
-      |> Flow.from_enumerable(stream) # All streams are enumerable
+      File.stream!("path/to/some/file", read_ahead: 100_000)
+      |> Flow.from_enumerable() # All streams are enumerable
       |> Flow.flat_map(fn line ->
         for word <- String.split(empty_space),
             not word in stop_words,
             do: {word, 1}
       end)
+      |> Flow.partition_with(storage: :ets)
       |> Flow.reduce_by_key(& &1 + &2)
       |> Enum.to_list()
 
@@ -50,18 +120,19 @@ defmodule GenStage.Flow do
   (alongside a read ahead buffer).
 
   We start building the flow with `new/0` and then invoke
-  `from_enumerable/2` which sets the given file stream as the
+  `from_enumerable/1` which sets the given file stream as the
   source of our flow of data. The next function is `flat_map/2`
   which receives every line and converts it into a list of words
   into key-value pairs. For example "the quick brown fox" will
   become `[{"quick", 1}, {"brown", 1}, {"fox", 1}]` (note "the" is
   removed as it is a stop word).
 
-  Breaking the input into key-value pairs allows us to call
-  `reduce_by_key/2` with a callback which will be invoked every
-  time the flow sees a word more than once. For example, if
-  `{"quick", 1}` appears twice, `reduce_by_key/2` will be invoked
-  and it will become `{"quick", 2}` and so forth.
+  Breaking the input into key-value pairs allows us to partition
+  the data where `reduce_by_key/2` will be invoked every time the
+  flow sees a word more than once. For example, if `{"quick", 1}`
+  appears twice, `reduce_by_key/2` will be invoked and it will
+  become `{"quick", 2}` and so forth. We have configured the
+  partition to use ETS storage for performance.
 
   The `flow` itself is also an stream. Once `Enum.to_list/1` is
   called, the whole flow is *materialized* and data starts to flow
@@ -77,7 +148,7 @@ defmodule GenStage.Flow do
   Imagine we executed the example above in a machine with
   two cores, it would become the following processes:
 
-       [file stream]  # Flow.from_enumerable/2 (producer)
+       [file stream]  # Flow.from_enumerable/1 (producer)
           |    |
         [M1]  [M2]    # Flow.flat_map/2 (producer-consumer)
           |\  /|
@@ -108,7 +179,8 @@ defmodule GenStage.Flow do
   Given any mapper will calculate the same hash for a given key,
   it is guaranteed a given word will reach the a reducer stage
   regardless of the mapper that it was on. We call this process
-  *partitioning*.
+  *partitioning*. The partitions can be customized with the
+  `partition_with/2` call.
 
   Once all words have been processed, the reducer stages will
   send information to the process who called `Enum.to_list/1` so
@@ -139,6 +211,7 @@ defmodule GenStage.Flow do
         for word <- String.split(empty_space), do: {word, 1}
       end)
       |> Flow.filter(fn {word, _} -> not word in stop_words end) # NEW!
+      |> Flow.partition_with(storage: :ets)
       |> Flow.reduce_by_key(& &1 + &2)
       |> Flow.map(&IO.inspect/1)                                 # NEW!
       |> Enum.to_list
@@ -149,7 +222,7 @@ defmodule GenStage.Flow do
   with `IO.inspect/1` to print every term before we convert it to
   list. For the example above, the following flow is generated:
 
-       [file stream]  # Flow.from_enumerable/2
+       [file stream]  # Flow.from_enumerable/1
           |    |
         [M1]  [M2]    # Flow.flat_map/2 + Flow.filter/2
           |\  /|
@@ -182,7 +255,7 @@ defmodule GenStage.Flow do
   In this section we will discuss points related to performance
   with flows.
 
-  ### ETS tables
+  ### ETS-based partitions
 
   Since the reducer stages abstracts away the storage with functions
   like `reduce_by_key/2`, it is possible to configure the reducer
@@ -191,27 +264,15 @@ defmodule GenStage.Flow do
   such as integers or atoms and when the number of keys is really
   high.
 
-  In particular, for the word counting algorithm, ETS can
-  considerably speed-up performance, as we typically have a wide
-  range of keys with integer values, fitting both descriptions
-  above. In order to use ETS, we need to call the `partition_with/2`
-  function with the flow and a set of options that configures the
-  partition:
+  For the word counting algorithm, ETS can considerably speed-up
+  performance, as we typically have a wide range of keys with integer
+  values, fitting both scenarios above. In the examples above, we have
+  configured the partitions to use ETS with the `partition_with/2` call.
 
-      Flow.new
-      |> Flow.from_enumerable(stream) # All streams are enumerable
-      |> Flow.flat_map(fn line ->
-        for word <- String.split(empty_space),
-            not word in stop_words,
-            do: {word, 1}
-      end)
-      |> Flow.partition_with(storage: :ets)
-      |> Flow.reduce_by_key(& &1 + &2)
-      |> Enum.to_list()
-
-  See `partition_with/2` to see all options related to partitioning,
-  including the `:hash` option that configures how the data itself
-  is partitioned.
+  Keep in mind it is important to benchmark before choosing a
+  different storage as using ETS for complex key-value pairs will
+  likely reduce performance due to the increasing cost in copying
+  data to and from ETS tables.
 
   ### Avoid single sources
 
@@ -227,8 +288,8 @@ defmodule GenStage.Flow do
         File.stream!("dir/with/files/#{file}", read_ahead: 100_000)
       end
 
-      Flow.new
-      |> Flow.from_enumerables(streams)
+      streams
+      |> Flow.from_enumerables()
       |> Flow.flat_map(fn line ->
         for word <- String.split(empty_space),
             not word in stop_words,
@@ -237,8 +298,8 @@ defmodule GenStage.Flow do
       |> Flow.reduce_by_key(& &1 + &2)
       |> Enum.to_list()
 
-  Instead of calling `from_enumerable/2`, we now called
-  `from_enumerables/2` which expects a list of enumerables to
+  Instead of calling `from_enumerable/1`, we now called
+  `from_enumerables/1` which expects a list of enumerables to
   be used as source. Notice every stream also uses the `:read_ahead`
   option which tells Elixir to buffer file data in memory to
   avoid multiple IO lookups.
@@ -249,11 +310,11 @@ defmodule GenStage.Flow do
   to a machine with two cores, we will have the following topology:
 
       [F1][F2][F3]  # file stream
-      [M1][M2][M3]  # Flow.flat_map/2 (producer-consumer)
-       |\ /\ /|
-       | /\/\ |
-       |//  \\|
-       [R1][R2]    # Flow.reduce_by_key/2
+      [M1][M2][M3]  # Flow.flat_map/2 (producer)
+        |\ /\ /|
+        | /\/\ |
+        |//  \\|
+        [R1][R2]    # Flow.reduce_by_key/2 (consumer)
 
   """
 
