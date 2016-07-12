@@ -6,6 +6,18 @@ defmodule GenStage.PartitionDispatcher do
 
   Keep in mind that, if partitions are not evenly distributed,
   a backed-up partition will slow all other ones.
+
+  ## Options
+
+  The partition dispatcher accepts the following options
+  on initialization:
+
+    * `:partitions` - a required option that sets the number
+      of partitions we will dispatch to
+
+    * `:hash` - the hashing algorithm, defaults to `:erlang.phash2/2`
+      which receives the message and the number of partitions and
+      it must return a number between 0 and `number_of_partitions - 1`
   """
 
   @behaviour GenStage.Dispatcher
@@ -13,7 +25,7 @@ defmodule GenStage.PartitionDispatcher do
 
   @doc false
   def init(opts) do
-    hash = Keyword.get(opts, :hash, &:erlang.phash2/1)
+    hash = Keyword.get(opts, :hash, &:erlang.phash2/2)
     max  = Keyword.get(opts, :partitions) ||
              raise ArgumentError, "the number of :partitions is required when using the partition dispatcher"
 
@@ -116,7 +128,7 @@ defmodule GenStage.PartitionDispatcher do
 
     partitioned =
       Enum.reduce(deliver_now, %{}, fn event, acc ->
-        partition = rem(hash.(event), map_size(partitions))
+        partition = hash.(event, map_size(partitions))
         Map.update(acc, partition, [event], &[event | &1])
       end)
 
