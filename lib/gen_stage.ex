@@ -1676,7 +1676,9 @@ defmodule GenStage do
     Enum.reduce(pending, stage, &dispatch_notification/2)
   end
 
-  defp queue_events(events, queue, counter, counter, :infinity, notifications),
+  defp queue_events(_keep, events, _queue, 0, :infinity, notifications),
+    do: {{0, :queue.from_list(events), length(events)}, [], notifications}
+  defp queue_events(_keep, events, queue, counter, :infinity, notifications),
     do: {queue_infinity(events, queue, counter), [], notifications}
   defp queue_events(:first, events, queue, counter, max, notifications),
     do: {queue_first(events, queue, counter, max), [], notifications}
