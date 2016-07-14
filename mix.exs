@@ -12,7 +12,7 @@ defmodule GenStage.Mixfile do
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      deps: deps(),
-     docs: [main: "GenStage", source_ref: "v#{@version}",
+     docs: [main: "Experimental.GenStage", source_ref: "v#{@version}",
             source_url: "https://github.com/elixir-lang/gen_stage"]]
   end
 

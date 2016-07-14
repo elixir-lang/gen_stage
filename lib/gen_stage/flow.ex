@@ -1,3 +1,5 @@
+alias Experimental.GenStage
+
 defmodule GenStage.Flow do
   @moduledoc ~S"""
   Computational flows with stages.
@@ -320,4 +322,216 @@ defmodule GenStage.Flow do
 
   # TODO: Add consumable: true option to either Flow.new.
   # Alternatively it could be consume: :windows | :events | :none
+
+  defstruct producers: nil, stages: 0, mappers: 0, operations: []
+
+  @doc """
+  Starts a new flow.
+
+  ## Options
+
+    * `:stages` - the default number of stages to start per layer
+      throughout the flow. Defaults to `System.schedulers_online/0`.
+
+    * `:mappers` - the number of mapper stages. Defaults to the
+      number of `:stages`. The number of reducers (partitions)
+      is configured with `partition_with/2`.
+
+  """
+  def new(opts \\ []) do
+    stages = Keyword.get(opts, :stages, System.schedulers_online)
+    mappers = Keyword.get(opts, :mappers, stages)
+    %GenStage.Flow{stages: stages, mappers: mappers}
+  end
+
+  @doc """
+  Starts a flow with the given enumerable as producer.
+
+  It is effectively a shortcut for:
+
+      Flow.new |> Flow.from_enumerables([enumerable])
+
+  ## Examples
+
+      "some/file"
+      |> File.stream!(read_ahead: 100_000)
+      |> Flow.from_enumerable()
+
+  """
+  def from_enumerable(enumerable) do
+    new() |> from_enumerables([enumerable])
+  end
+
+  @doc """
+  Sets the given enumerable as a producer in the given flow.
+
+  ## Examples
+
+      file = File.stream!("some/file", read_ahead: 100_000)
+      Flow.from_enumerable(Flow.new, file)
+
+  """
+  def from_enumerable(flow, enumerable) do
+    flow |> from_enumerables([enumerable])
+  end
+
+  @doc """
+  Starts a flow with the list of enumerables as producers.
+
+  It is effectively a shortcut for:
+
+      Flow.new |> Flow.from_enumerables(enumerables)
+
+  ## Examples
+
+      files = [File.stream!("some/file1", read_ahead: 100_000),
+               File.stream!("some/file2", read_ahead: 100_000),
+               File.stream!("some/file3", read_ahead: 100_000)]
+      Flow.from_enumerable(files)
+
+  """
+  def from_enumerables(enumerables) do
+    new() |> from_enumerables(enumerables)
+  end
+
+  @doc """
+  Sets the given enumerables as producers in the given flow.
+
+  ## Examples
+
+      files = [File.stream!("some/file1", read_ahead: 100_000),
+               File.stream!("some/file2", read_ahead: 100_000),
+               File.stream!("some/file3", read_ahead: 100_000)]
+      Flow.from_enumerable(Flow.new, files)
+  """
+  def from_enumerables(flow, [_ | _] = enumerables) do
+    add_producers(flow, {:enumerables, enumerables})
+  end
+  def from_enumerables(_flow, enumerables) do
+    raise ArgumentError, "from_enumerables/2 expects a non-empty list as argument, got: #{inspect enumerables}"
+  end
+
+  @doc """
+  Applies the given function filtering each input in parallel.
+
+  ## Examples
+
+      iex> flow = [1, 2, 3] |> Flow.from_enumerable() |> Flow.filter(& rem(&1, 2) == 0)
+      iex> Enum.sort(flow) # Call sort as we have no order guarantee
+      [2]
+
+  """
+  def filter(flow, mapper) when is_function(mapper, 1) do
+    add_operation(flow, {:mapper, :filter, [mapper]})
+  end
+
+  @doc """
+  Applies the given function filtering and mapping each input in parallel.
+
+  ## Examples
+
+      iex> flow = [1, 2, 3] |> Flow.from_enumerable() |> Flow.filter_map(& rem(&1, 2) == 0, & &1 * 2)
+      iex> Enum.sort(flow) # Call sort as we have no order guarantee
+      [4]
+
+  """
+  def filter_map(flow, filter, mapper) when is_function(filter, 1) and is_function(mapper, 1) do
+    add_operation(flow, {:mapper, :filter_map, [filter, mapper]})
+  end
+
+  @doc """
+  Applies the given function mapping each input in parallel.
+
+  ## Examples
+
+      iex> flow = [1, 2, 3] |> Flow.from_enumerable() |> Flow.map(& &1 * 2)
+      iex> Enum.sort(flow) # Call sort as we have no order guarantee
+      [2, 4, 6]
+
+      iex> flow = Flow.from_enumerables([[1, 2, 3], 1..3]) |> Flow.map(& &1 * 2)
+      iex> Enum.sort(flow)
+      [2, 2, 4, 4, 6, 6]
+
+  """
+  def map(flow, mapper) when is_function(mapper, 1) do
+    add_operation(flow, {:mapper, :map, [mapper]})
+  end
+
+  @doc """
+  Applies the given function mapping each input in parallel and
+  flattening the result, but only one level deep.
+
+  ## Examples
+
+      iex> flow = [1, 2, 3] |> Flow.from_enumerable() |> Flow.flat_map(fn(x) -> [x, x * 2] end)
+      iex> Enum.sort(flow) # Call sort as we have no order guarantee
+      [1, 2, 2, 3, 4, 6]
+
+  """
+  def flat_map(flow, flat_mapper) when is_function(flat_mapper, 1) do
+    add_operation(flow, {:mapper, :flat_map, [flat_mapper]})
+  end
+
+  @doc false
+  def materialize_for_stream(%{producers: nil}) do
+    raise ArgumentError, "cannot start a flow without producers"
+  end
+
+  # TODO: Start producer-consumers
+  # TODO: Handle stages as producers
+  # TODO: Handle few enumerables as producers
+  def materialize_for_stream(%{producers: {:enumerables, enumerables},
+                               operations: operations}) do
+
+    {mappers, _reducers} = Enum.split_while(operations, &elem(&1, 0) == :mapper)
+
+    # TODO: choose if we will use partition dispatch if we have reducers
+    stages =
+      for enumerable <- enumerables do
+        enumerable =
+          Enum.reduce(mappers, enumerable, fn {:mapper, fun, args}, acc ->
+            apply(Stream, fun, [acc | args])
+          end)
+
+        {:ok, pid} =
+          GenStage.from_enumerable(enumerable, consumers: :permanent)
+
+        pid
+      end
+
+    GenStage.stream(stages)
+  end
+
+  defimpl Enumerable do
+    def reduce(flow, acc, fun) do
+      GenStage.Flow.materialize_for_stream(flow).(acc, fun)
+    end
+
+    def count(_flow) do
+      {:error, __MODULE__}
+    end
+
+    def member?(_flow, _value) do
+      {:error, __MODULE__}
+    end
+  end
+
+  @compile {:inline, add_producers: 2, add_operation: 2}
+
+  defp add_producers(%GenStage.Flow{producers: nil} = flow, producers) do
+    %{flow | producers: producers}
+  end
+  defp add_producers(%GenStage.Flow{producers: producers}, _producers) do
+    raise ArgumentError, "cannot set from_stages/from_enumerable because the flow already has set #{inspect producers} as producers"
+  end
+  defp add_producers(flow, _producers) do
+    raise ArgumentError, "expected a flow as argument, got: #{inspect flow}"
+  end
+
+  defp add_operation(%GenStage.Flow{operations: operations} = flow, operation) do
+    %{flow | operations: [operation | operations]}
+  end
+  defp add_operation(flow, _producers) do
+    raise ArgumentError, "expected a flow as argument, got: #{inspect flow}"
+  end
 end
