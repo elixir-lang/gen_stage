@@ -1481,11 +1481,11 @@ defmodule GenStage do
   def format_status(opt, [pdict, %{mod: mod, state: state}]) do
     case {function_exported?(mod, :format_status, 2), opt} do
       {true, :normal} ->
-        format_status(mod, opt, pdict, state, [data: {~c(State), state}])
+        format_status(mod, opt, pdict, state, [data: [{~c(State), state}]])
       {true, :terminate} ->
         format_status(mod, opt, pdict, state, state)
       {false, :normal} ->
-        [data: {~c(State), state}]
+        [data: [{~c(State), state}]]
       {false, :terminate} ->
         state
     end
