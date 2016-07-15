@@ -11,7 +11,7 @@ defmodule GenStage.Flow.Materialize do
   end
 
   def to_stream(%{operations: operations, mappers: mapper_opts,
-                  producers: producers, stages: stages} = flow) do
+                  producers: producers, stages: stages}) do
     {mapper_ops, _reducer_ops} = Enum.split_while(Enum.reverse(operations), &elem(&1, 0) == :mapper)
     mappers = start_mappers(producers, mapper_ops, mapper_opts, stages)
     GenStage.stream(mappers)
@@ -55,7 +55,7 @@ defmodule GenStage.Flow.Materialize do
     end
   end
 
-  defp start_enumerable_mappers(enumerables, ops, opts, count) do
+  defp start_enumerable_mappers(enumerables, ops, opts, _count) do
     init_opts = [consumers: :permanent] ++ Keyword.take(opts, @mapper_opts)
 
     for enumerable <- enumerables do
@@ -70,8 +70,8 @@ defmodule GenStage.Flow.Materialize do
   end
 
   # Merge mapper computations for mapper stage.
-  defp mapper({:mapper, :map, [mapper]}, fun) do
-    fn x, acc -> fun.(mapper.(x), acc) end
+ defp mapper({:mapper, :each, [each]}, fun) do
+    fn x, acc -> each.(x); fun.(x, acc) end
   end
   defp mapper({:mapper, :filter, [filter]}, fun) do
     fn x, acc ->
@@ -95,6 +95,9 @@ defmodule GenStage.Flow.Materialize do
     fn x, acc ->
       Enum.reduce(flat_mapper.(x), acc, fun)
     end
+  end
+  defp mapper({:mapper, :map, [mapper]}, fun) do
+    fn x, acc -> fun.(mapper.(x), acc) end
   end
   defp mapper({:mapper, :reject, [filter]}, fun) do
     fn x, acc ->

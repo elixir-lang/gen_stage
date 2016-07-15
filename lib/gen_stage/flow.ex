@@ -63,8 +63,12 @@ defmodule GenStage.Flow do
 
   The example above will now use all cores available as well
   as keep an on going flow of data instead of traversing only
-  line by line. In particular, we could achieve maximal
-  performance to the example above with the following changes:
+  line by line. We gain concurrency but we lose ordering and
+  locality as the same function will be executed by different
+  processes.
+
+  We could further improve the flow above to achieve maximum
+  performance with the following changes:
 
       alias Experimental.GenStage.Flow
 
@@ -323,6 +327,8 @@ defmodule GenStage.Flow do
 
   defstruct producers: nil, stages: 0, mappers: 0, operations: []
 
+  ## Building
+
   @doc """
   Starts a new flow.
 
@@ -472,6 +478,26 @@ defmodule GenStage.Flow do
   end
   def from_stages(_flow, stages) do
     raise ArgumentError, "from_stages/2 expects a non-empty list as argument, got: #{inspect stages}"
+  end
+
+  ## Mappers
+
+  @doc """
+  Applies the given function to each input without modifying it.
+
+  ## Examples
+
+      iex> parent = self()
+      iex> [1, 2, 3] |> Flow.from_enumerable() |> Flow.each(&send(parent, &1)) |> Enum.sort()
+      [1, 2, 3]
+      iex> receive do
+      ...>   1 -> :ok
+      ...> end
+      :ok
+
+  """
+  def each(flow, each) when is_function(each, 1) do
+    add_operation(flow, {:mapper, :each, [each]})
   end
 
   @doc """
