@@ -256,11 +256,12 @@ defmodule GenStage do
       identify the subscription. It is typically the subscriber monitoring
       reference although it may be any term.
 
-      Once received, the producer MUST monitor the consumer and properly
-      acknoledge or cancel the subscription. The consumer MUST wait until
-      the ack message is received before sending demand. However, if the
-      subscription reference is known, it must send a `:cancel` message
-      to the consumer.
+      Once sent, the consumer MAY immediately send demand to the producer.
+      The `subscription_ref` is unique to identify the subscription.
+
+      Once received, the producer MUST monitor the consumer and call
+      call `dispatcher.subscribe(from, state)`. However, if the subscription
+      reference is known, it must send a `:cancel` message to the consumer.
 
     * `{:"$gen_producer", from :: {pid, subscription_tag}, {:cancel, reason}}` -
       sent by the consumer to cancel a given subscription.
@@ -282,9 +283,6 @@ defmodule GenStage do
 
   The consumer is responsible for starting the subscription
   and sending demand to producers.
-
-    * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, :ack}` -
-      sent by producers to acknowledge a subscription.
 
     * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, {:notification, msg}}` -
       notifications sent by producers.
@@ -993,7 +991,7 @@ defmodule GenStage do
     with {:ok, cancel, opts} <- validate_in(full_opts, :cancel, :permanent, [:temporary, :permanent]),
          {:ok, max, opts} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
          {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
-      {to, cancel, min, max, opts, full_opts}
+      {to, cancel, min, max, opts}
     else
       {:error, message} ->
         raise ArgumentError, "invalid options for #{inspect to} producer (#{message})"
@@ -1018,14 +1016,16 @@ defmodule GenStage do
   end
 
   defp subscriptions_monitor(parent, monitor_ref, subscriptions) do
-    Enum.reduce(subscriptions, %{}, fn {to, cancel, min, max, opts, full_opts}, acc ->
+    Enum.reduce(subscriptions, %{}, fn {to, cancel, min, max, opts}, acc ->
       producer_pid = GenServer.whereis(to)
 
       cond do
         producer_pid != nil ->
           inner_ref = Process.monitor(producer_pid)
-          send_noconnect(producer_pid, {:"$gen_producer", {parent, {monitor_ref, inner_ref}}, {:subscribe, opts}})
-          Map.put(acc, inner_ref, {:ack, producer_pid, cancel, min, max, full_opts})
+          from = {parent, {monitor_ref, inner_ref}}
+          send_noconnect(producer_pid, {:"$gen_producer", from, {:subscribe, opts}})
+          send_noconnect(producer_pid, {:"$gen_producer", from, {:ask, max}})
+          Map.put(acc, inner_ref, {:subscribed, producer_pid, cancel, min, max, max})
         cancel == :temporary ->
           acc
         cancel == :permanent ->
@@ -1086,21 +1086,6 @@ defmodule GenStage do
   defp receive_stream(monitor_ref, subscriptions) do
     receive do
       # TODO: Support redirects
-      {:"$gen_consumer", {producer_pid, {^monitor_ref, inner_ref} = ref}, :ack} ->
-        case subscriptions do
-          %{^inner_ref => {:ack, producer_pid, cancel, min, max, _opts}} ->
-            ask({producer_pid, ref}, max, [:noconnect])
-            subscribed = {:subscribed, producer_pid, cancel, min, max, max}
-            receive_stream(monitor_ref, Map.put(subscriptions, inner_ref, subscribed))
-          %{^inner_ref => {:cancel, _}} ->
-            # We received this message before the cancellation was processed
-            receive_stream(monitor_ref, subscriptions)
-          _ ->
-            # Cancel if messages are out of order or unknown
-            send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
-            receive_stream(monitor_ref, Map.delete(subscriptions, inner_ref))
-        end
-
       {:"$gen_consumer", {producer_pid, {^monitor_ref, inner_ref} = ref}, events} when is_list(events) ->
         case subscriptions do
           %{^inner_ref => {:subscribed, producer_pid, cancel, min, max, demand}} ->
@@ -1321,6 +1306,7 @@ defmodule GenStage do
     case consumer_subscribe(to, opts, stage) do
       {:reply, _, stage}        -> {:noreply, stage}
       {:stop, reason, _, stage} -> {:stop, reason, stage}
+      {:stop, _, _} = stop      -> stop
     end
   end
 
@@ -1336,9 +1322,7 @@ defmodule GenStage do
         consumer_cancel(ref, :down, reason, stage)
       %{} ->
         case monitors do
-          %{^ref => {_, cancel, _, _, _}} ->
-            consumer_no_ack(cancel, reason, %{stage | monitors: Map.delete(monitors, ref)})
-          %{^ref => consumer_ref} when is_reference(consumer_ref) ->
+          %{^ref => consumer_ref} ->
             producer_cancel(consumer_ref, :down, reason, stage)
           %{} ->
             noreply_callback(:handle_info, [msg, state], stage)
@@ -1364,7 +1348,6 @@ defmodule GenStage do
         mon_ref = Process.monitor(consumer_pid)
         stage = put_in stage.monitors[mon_ref], ref
         stage = put_in stage.consumers[ref], {consumer_pid, mon_ref}
-        send_noconnect(consumer_pid, {:"$gen_consumer", {self(), ref}, :ack})
         producer_subscribe(opts, from, stage)
     end
   end
@@ -1386,6 +1369,7 @@ defmodule GenStage do
   end
 
   ## Consumer messages
+  # TODO: Support redirects
 
   def handle_info({:"$gen_consumer", _, _} = msg, %{type: :producer} = stage) do
     :error_logger.error_msg('GenStage producer ~p received $gen_consumer message: ~p~n', [name(), msg])
@@ -1423,41 +1407,8 @@ defmodule GenStage do
     end
   end
 
-  # TODO: Support redirects
-  def handle_info({:"$gen_consumer", {producer_pid, ref}, :ack},
-                  %{monitors: monitors, mod: mod, state: state} = stage) do
-    case Map.pop(monitors, ref) do
-      {{producer_pid, cancel, min, max, opts}, monitors} ->
-        to = {producer_pid, ref}
-        stage = %{stage | monitors: monitors}
-
-        case apply(mod, :handle_subscribe, [:producer, opts, to, state]) do
-          {:automatic, state} ->
-            ask(to, max, [:noconnect])
-            stage = put_in stage.producers[ref], {producer_pid, cancel, {max, min, max}}
-            {:noreply, %{stage | state: state}}
-          {:manual, state} ->
-            stage = put_in stage.producers[ref], {producer_pid, cancel, :manual}
-            {:noreply, %{stage | state: state}}
-          {:stop, reason, state} ->
-            {:stop, reason, %{stage | state: state}}
-          other ->
-            {:stop, {:bad_return_value, other}, stage}
-        end
-      {nil, _monitors} ->
-        send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
-        {:noreply, stage}
-    end
-  end
-
-  def handle_info({:"$gen_consumer", {_, ref}, {:cancel, reason}},
-                  %{monitors: monitors} = stage) do
-    case Map.pop(monitors, ref) do
-      {{_, cancel, _, _, _}, monitors} ->
-        consumer_no_ack(cancel, reason, %{stage | monitors: monitors})
-      {nil, _monitors} ->
-        consumer_cancel(ref, :cancel, reason, stage)
-    end
+  def handle_info({:"$gen_consumer", {_, ref}, {:cancel, reason}}, stage) do
+    consumer_cancel(ref, :cancel, reason, stage)
   end
 
   def handle_info({:"$gen_consumer", {producer_pid, ref} = from, {:notification, msg}},
@@ -1786,6 +1737,7 @@ defmodule GenStage do
         case consumer_subscribe(to, stage) do
           {:reply, _, stage}    -> {:ok, stage}
           {:stop, reason, _, _} -> {:stop, reason}
+          {:stop, reason, _}    -> {:stop, reason}
         end
       _, {:stop, reason} ->
         {:stop, reason}
@@ -1883,8 +1835,7 @@ defmodule GenStage do
         producer_pid != nil ->
           ref = Process.monitor(producer_pid)
           send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}})
-          stage = put_in stage.monitors[ref], {producer_pid, cancel, min, max, full_opts}
-          {:reply, {:ok, ref}, stage}
+          consumer_subscribe(full_opts, ref, producer_pid, cancel, min, max, stage)
         cancel == :temporary ->
           {:reply, {:ok, make_ref()}, stage}
         cancel == :permanent ->
@@ -1897,10 +1848,22 @@ defmodule GenStage do
     end
   end
 
-  defp consumer_no_ack(cancel, reason, stage) do
-    case cancel do
-      :temporary -> {:noreply, stage}
-      :permanent -> {:stop, reason, stage}
+  defp consumer_subscribe(opts, ref, producer_pid, cancel, min, max, stage) do
+    %{mod: mod, state: state} = stage
+    to = {producer_pid, ref}
+
+    case apply(mod, :handle_subscribe, [:producer, opts, to, state]) do
+      {:automatic, state} ->
+        ask(to, max, [:noconnect])
+        stage = put_in stage.producers[ref], {producer_pid, cancel, {max, min, max}}
+        {:reply, {:ok, ref}, %{stage | state: state}}
+      {:manual, state} ->
+        stage = put_in stage.producers[ref], {producer_pid, cancel, :manual}
+        {:reply, {:ok, ref}, %{stage | state: state}}
+      {:stop, reason, state} ->
+        {:stop, reason, %{stage | state: state}}
+      other ->
+        {:stop, {:bad_return_value, other}, stage}
     end
   end
 
