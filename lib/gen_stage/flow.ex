@@ -250,7 +250,8 @@ defmodule GenStage.Flow do
   possibly without producers or without consumers later on.
 
   TODO: Add an example with start_link/1. Talk about hot code
-  swaps and anonymous functions.
+  swaps and anonymous functions. Talk about attaching your own
+  producer and your own consumer.
 
   ## Performance discussions
 
@@ -320,9 +321,6 @@ defmodule GenStage.Flow do
 
   """
 
-  # TODO: Add consumable: true option to either Flow.new.
-  # Alternatively it could be consume: :windows | :events | :none
-
   defstruct producers: nil, stages: 0, mappers: 0, operations: []
 
   @doc """
@@ -330,17 +328,21 @@ defmodule GenStage.Flow do
 
   ## Options
 
-    * `:stages` - the default number of stages to start per layer
-      throughout the flow. Defaults to `System.schedulers_online/0`.
+    * `:stages` - the default number of stages to start per mapper and
+      reducer layers throughout the flow. Defaults to `System.schedulers_online/0`.
 
-    * `:mappers` - the number of mapper stages. Defaults to the
-      number of `:stages`. The number of reducers (partitions)
-      is configured with `partition_with/2`.
+    * `:mappers` - configures the mapper stages. It accepts the following options:
 
+        * `:stages` - the number of mapper stages
+        * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
+        * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
+
+      All remaining options are sent during subscription, allowing developers
+      to customize `:min_demand`, `:max_demand` and others.
   """
   def new(opts \\ []) do
     stages = Keyword.get(opts, :stages, System.schedulers_online)
-    mappers = Keyword.get(opts, :mappers, stages)
+    mappers = Keyword.get(opts, :mappers, [])
     %GenStage.Flow{stages: stages, mappers: mappers}
   end
 
@@ -547,93 +549,9 @@ defmodule GenStage.Flow do
     add_operation(flow, {:mapper, :reject, [filter]})
   end
 
-  @doc false
-  def materialize_for_stream(%{producers: nil}) do
-    raise ArgumentError, "cannot start a flow without producers"
-  end
-
-  # TODO: Start producer-consumers
-  # TODO: Handle stages as producers
-  # TODO: Handle few enumerables as producers
-  # TODO: Configure mapper subscription options
-  def materialize_for_stream(%{producers: {:enumerables, enumerables},
-                               operations: operations, mappers: mappers_count}) do
-    {mappers, _reducers} = Enum.split_while(Enum.reverse(operations), &elem(&1, 0) == :mapper)
-
-    if mappers_count > length(enumerables) do
-      producers =
-        for enumerable <- enumerables do
-          {:ok, pid} =
-            GenStage.from_enumerable(enumerable, consumers: :permanent)
-          pid
-        end
-
-      init = {Enum.reduce(Enum.reverse(mappers), &[&1 | &2], &mapper/2), producers}
-
-      mappers =
-        for _ <- 1..mappers_count do
-          {:ok, pid} = GenStage.start_link(GenStage.Flow.Mapper, init)
-          pid
-        end
-
-      GenStage.stream(mappers)
-    else
-      stages =
-        for enumerable <- enumerables do
-          enumerable =
-            Enum.reduce(mappers, enumerable, fn {:mapper, fun, args}, acc ->
-              apply(Stream, fun, [acc | args])
-            end)
-
-          {:ok, pid} =
-            GenStage.from_enumerable(enumerable, consumers: :permanent)
-
-          pid
-        end
-
-      GenStage.stream(stages)
-    end
-  end
-
-  defp mapper({:mapper, :map, [mapper]}, fun) do
-    fn x, acc -> fun.(mapper.(x), acc) end
-  end
-  defp mapper({:mapper, :filter, [filter]}, fun) do
-    fn x, acc ->
-      if filter.(x) do
-        fun.(x, acc)
-      else
-        acc
-      end
-    end
-  end
-  defp mapper({:mapper, :filter_map, [filter, mapper]}, fun) do
-    fn x, acc ->
-      if filter.(x) do
-        fun.(mapper.(x), acc)
-      else
-        acc
-      end
-    end
-  end
-  defp mapper({:mapper, :flat_map, [flat_mapper]}, fun) do
-    fn x, acc ->
-      Enum.reduce(flat_mapper.(x), acc, fun)
-    end
-  end
-  defp mapper({:mapper, :reject, [filter]}, fun) do
-    fn x, acc ->
-      if filter.(x) do
-        acc
-      else
-        fun.(x, acc)
-      end
-    end
-  end
-
   defimpl Enumerable do
     def reduce(flow, acc, fun) do
-      GenStage.Flow.materialize_for_stream(flow).(acc, fun)
+      GenStage.Flow.Materialize.to_stream(flow).(acc, fun)
     end
 
     def count(_flow) do

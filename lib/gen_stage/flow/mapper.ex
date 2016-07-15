@@ -4,8 +4,8 @@ defmodule GenStage.Flow.Mapper do
   @moduledoc false
   use GenStage
 
-  def init({reducer, producers}) do
-    {:producer_consumer, {[], [], [], reducer}, [subscribe_to: producers]}
+  def init({reducer, opts}) do
+    {:producer_consumer, {[], [], [], reducer}, opts}
   end
 
   def handle_subscribe(:producer, _, {_, ref}, {producers, consumers, done, reducer}) do

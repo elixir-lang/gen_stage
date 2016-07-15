@@ -4,25 +4,31 @@ defmodule GenStage.FlowTest do
   alias Experimental.GenStage.Flow
   doctest Flow
 
-  test "mappers are performed in correct order when unfused" do
-    flow =
-      Flow.new(mappers: 2)
-      |> Flow.from_enumerable(["a"])
-      |> Flow.filter(& &1 == "a")
-      |> Flow.map(fn(x) -> x <> "b" end)
-      |> Flow.map(fn(x) -> x <> "c" end)
+  describe "enumerable-stream" do
+    @flow Flow.new(mappers: [stages: 2])
+          |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
 
-    assert Enum.to_list(flow) == ["abc"]
+    test "keeps ordering" do
+      flow =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.map(fn(x) -> x + 1 end)
+        |> Flow.map(fn(x) -> x * 2 end)
+      assert Enum.sort(flow) == [6, 10, 14]
+    end
   end
 
-  test "mappers are performed in correct order when fused" do
-    flow =
-      Flow.new(mappers: 2)
-      |> Flow.from_enumerables([["a", 1], [2, "a"]])
-      |> Flow.filter(& &1 == "a")
-      |> Flow.map(fn(x) -> x <> "b" end)
-      |> Flow.map(fn(x) -> x <> "c" end)
+  describe "enumerable-mappers-stream" do
+    @flow Flow.new(mappers: [stages: 4])
+          |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
 
-    assert Enum.to_list(flow) == ["abc", "abc"]
+    test "keeps ordering" do
+      flow =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.map(fn(x) -> x + 1 end)
+        |> Flow.map(fn(x) -> x * 2 end)
+      assert Enum.sort(flow) == [6, 10, 14]
+    end
   end
 end
