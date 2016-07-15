@@ -483,7 +483,7 @@ defmodule GenStage.Flow do
   def materialize_for_stream(%{producers: {:enumerables, enumerables},
                                operations: operations}) do
 
-    {mappers, _reducers} = Enum.split_while(operations, &elem(&1, 0) == :mapper)
+    {mappers, _reducers} = Enum.split_while(Enum.reverse(operations), &elem(&1, 0) == :mapper)
 
     # TODO: choose if we will use partition dispatch if we have reducers
     stages =
