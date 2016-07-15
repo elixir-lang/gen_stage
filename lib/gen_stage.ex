@@ -662,8 +662,9 @@ defmodule GenStage do
   other words, it guarantees the producer has handled the message but not
   that the consumers have received it.
 
-  The given message will be delivered in the format `{ref, msg}`, where
-  `ref` is the subscription reference and `msg` is the message given below.
+  The given message will be delivered in the format
+  `{{producer_pid, subscription_ref, msg}`, where `msg` is the message
+  given below.
 
   This function will return `:ok` as long as the notification request is
   sent. It may return `{:error, :not_a_producer}` in case the stage is not
