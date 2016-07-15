@@ -545,7 +545,7 @@ defmodule GenStage.Flow do
   def materialize_for_stream(%{producers: {:enumerables, enumerables},
                                operations: operations, mappers: mappers_count}) do
 
-    {mappers, _reducers} = Enum.split_while(operations, &elem(&1, 0) == :mapper)
+    {mappers, _reducers} = Enum.split_while(Enum.reverse(operations), &elem(&1, 0) == :mapper)
 
     if mappers_count > length(enumerables) do
       producers =
