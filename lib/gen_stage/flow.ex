@@ -482,8 +482,8 @@ defmodule GenStage.Flow do
       [2]
 
   """
-  def filter(flow, mapper) when is_function(mapper, 1) do
-    add_operation(flow, {:mapper, :filter, [mapper]})
+  def filter(flow, filter) when is_function(filter, 1) do
+    add_operation(flow, {:mapper, :filter, [filter]})
   end
 
   @doc """
@@ -533,6 +533,20 @@ defmodule GenStage.Flow do
     add_operation(flow, {:mapper, :flat_map, [flat_mapper]})
   end
 
+  @doc """
+  Applies the given function rejecting each input in parallel.
+
+  ## Examples
+
+      iex> flow = [1, 2, 3] |> Flow.from_enumerable() |> Flow.reject(& rem(&1, 2) == 0)
+      iex> Enum.sort(flow) # Call sort as we have no order guarantee
+      [1, 3]
+
+  """
+  def reject(flow, filter) when is_function(filter, 1) do
+    add_operation(flow, {:mapper, :reject, [filter]})
+  end
+
   @doc false
   def materialize_for_stream(%{producers: nil}) do
     raise ArgumentError, "cannot start a flow without producers"
@@ -544,7 +558,6 @@ defmodule GenStage.Flow do
   # TODO: Configure mapper subscription options
   def materialize_for_stream(%{producers: {:enumerables, enumerables},
                                operations: operations, mappers: mappers_count}) do
-
     {mappers, _reducers} = Enum.split_while(Enum.reverse(operations), &elem(&1, 0) == :mapper)
 
     if mappers_count > length(enumerables) do
@@ -555,7 +568,7 @@ defmodule GenStage.Flow do
           pid
         end
 
-      init = {Enum.reduce(mappers, &[&1 | &2], &mapper/2), producers}
+      init = {Enum.reduce(Enum.reverse(mappers), &[&1 | &2], &mapper/2), producers}
 
       mappers =
         for _ <- 1..mappers_count do
@@ -606,6 +619,15 @@ defmodule GenStage.Flow do
   defp mapper({:mapper, :flat_map, [flat_mapper]}, fun) do
     fn x, acc ->
       Enum.reduce(flat_mapper.(x), acc, fun)
+    end
+  end
+  defp mapper({:mapper, :reject, [filter]}, fun) do
+    fn x, acc ->
+      if filter.(x) do
+        acc
+      else
+        fun.(x, acc)
+      end
     end
   end
 
