@@ -412,6 +412,67 @@ defmodule GenStage.Flow do
   end
 
   @doc """
+  Starts a flow with the given stage as producer.
+
+  It is effectively a shortcut for:
+
+      Flow.new |> Flow.from_stages([stage])
+
+  ## Examples
+
+      Flow.from_stage(MyStage)
+
+  """
+  def from_stage(stage) do
+    new() |> from_stages([stage])
+  end
+
+  @doc """
+  Sets the given stage as a producer in the given flow.
+
+  ## Examples
+
+      Flow.from_stage(Flow.new, MyStage)
+
+  """
+  def from_stage(flow, stage) do
+    flow |> from_stages([stage])
+  end
+
+  @doc """
+  Starts a flow with the list of stages as producers.
+
+  It is effectively a shortcut for:
+
+      Flow.new |> Flow.from_stages(stages)
+
+  ## Examples
+
+      stages = [pid1, pid2, pid3]
+      Flow.from_stage(stages)
+
+  """
+  def from_stages(stages) do
+    new() |> from_stages(stages)
+  end
+
+  @doc """
+  Sets the given stages as producers in the given flow.
+
+  ## Examples
+
+      stages = [pid1, pid2, pid3]
+      Flow.from_stage(Flow.new, stages)
+
+  """
+  def from_stages(flow, [_ | _] = stages) do
+    add_producers(flow, {:stages, stages})
+  end
+  def from_stages(_flow, stages) do
+    raise ArgumentError, "from_stages/2 expects a non-empty list as argument, got: #{inspect stages}"
+  end
+
+  @doc """
   Applies the given function filtering each input in parallel.
 
   ## Examples
@@ -480,26 +541,72 @@ defmodule GenStage.Flow do
   # TODO: Start producer-consumers
   # TODO: Handle stages as producers
   # TODO: Handle few enumerables as producers
+  # TODO: Configure mapper subscription options
   def materialize_for_stream(%{producers: {:enumerables, enumerables},
-                               operations: operations}) do
+                               operations: operations, mappers: mappers_count}) do
 
     {mappers, _reducers} = Enum.split_while(operations, &elem(&1, 0) == :mapper)
 
-    # TODO: choose if we will use partition dispatch if we have reducers
-    stages =
-      for enumerable <- enumerables do
-        enumerable =
-          Enum.reduce(mappers, enumerable, fn {:mapper, fun, args}, acc ->
-            apply(Stream, fun, [acc | args])
-          end)
+    if mappers_count > length(enumerables) do
+      producers =
+        for enumerable <- enumerables do
+          {:ok, pid} =
+            GenStage.from_enumerable(enumerable, consumers: :permanent)
+          pid
+        end
 
-        {:ok, pid} =
-          GenStage.from_enumerable(enumerable, consumers: :permanent)
+      init = {Enum.reduce(mappers, &[&1 | &2], &mapper/2), producers}
 
-        pid
+      mappers =
+        for _ <- 1..mappers_count do
+          {:ok, pid} = GenStage.start_link(GenStage.Flow.Mapper, init)
+          pid
+        end
+
+      GenStage.stream(mappers)
+    else
+      stages =
+        for enumerable <- enumerables do
+          enumerable =
+            Enum.reduce(mappers, enumerable, fn {:mapper, fun, args}, acc ->
+              apply(Stream, fun, [acc | args])
+            end)
+
+          {:ok, pid} =
+            GenStage.from_enumerable(enumerable, consumers: :permanent)
+
+          pid
+        end
+
+      GenStage.stream(stages)
+    end
+  end
+
+  defp mapper({:mapper, :map, [mapper]}, fun) do
+    fn x, acc -> fun.(mapper.(x), acc) end
+  end
+  defp mapper({:mapper, :filter, [filter]}, fun) do
+    fn x, acc ->
+      if filter.(x) do
+        fun.(x, acc)
+      else
+        acc
       end
-
-    GenStage.stream(stages)
+    end
+  end
+  defp mapper({:mapper, :filter_map, [filter, mapper]}, fun) do
+    fn x, acc ->
+      if filter.(x) do
+        fun.(mapper.(x), acc)
+      else
+        acc
+      end
+    end
+  end
+  defp mapper({:mapper, :flat_map, [flat_mapper]}, fun) do
+    fn x, acc ->
+      Enum.reduce(flat_mapper.(x), acc, fun)
+    end
   end
 
   defimpl Enumerable do

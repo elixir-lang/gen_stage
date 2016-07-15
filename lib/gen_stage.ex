@@ -286,6 +286,9 @@ defmodule GenStage do
     * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, :ack}` -
       sent by producers to acknowledge a subscription.
 
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, {:notification, msg}}` -
+      notifications sent by producers.
+
     * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, {:cancel, reason}}` -
       sent by producers to cancel a given subscription.
 
@@ -901,9 +904,8 @@ defmodule GenStage do
   When the enumerable finishes or halts, a notification is sent
   to all consumers in the format of
   `{subscription_tag, {:producer, :halted | :done}}`. If the stage
-  is meant to be temporary instead of long running, we recommend
-  setting the `:consumers` option to `:permanent` so the stage
-  exits if any of the consumers exits.
+  is meant to terminate when there are no more consumers, we recomemnd
+  setting the `:consumers` option to `:permanent`.
 
   Keep in mind that streams that require the use of the process
   inbox to work most likely won't behave as expected with this
@@ -915,8 +917,8 @@ defmodule GenStage do
     * `:link` - when false, does not link the stage to the current
       process. Defaults to `true`
 
-    * `:consumers` - when `:permanent`, the stage exits when a
-      consumer exits. Defaults to `:temporary`
+    * `:consumers` - when `:permanent`, the stage exits when there
+      are no more consumers. Defaults to `:temporary`
 
     * `:dispatcher` - the dispatcher responsible for handling demands.
       Defaults to `GenStage.DemandDispatch`. May be either an atom or
@@ -1117,11 +1119,7 @@ defmodule GenStage do
       {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, _} = reason} ->
         cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
 
-      {{^monitor_ref, inner_ref}, {:down, reason}} ->
-        cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
-
-      {{^monitor_ref, inner_ref}, {:producer, status}}
-          when is_reference(inner_ref) and status in [:halted, :done] ->
+      {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:notification, {:producer, _}}} ->
         case subscriptions do
           %{^inner_ref => tuple} ->
             subscriptions = request_to_cancel_stream(inner_ref, tuple, monitor_ref, subscriptions)
@@ -1129,6 +1127,9 @@ defmodule GenStage do
           %{} ->
             receive_stream(monitor_ref, subscriptions)
         end
+
+      {{^monitor_ref, inner_ref}, {:down, reason}} ->
+        cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
     end
   end
 
@@ -1458,6 +1459,19 @@ defmodule GenStage do
     end
   end
 
+  def handle_info({:"$gen_consumer", {producer_pid, ref} = from, {:notification, msg}},
+                  %{producers: producers, events: events, state: state} = stage) do
+    case producers do
+      %{^ref => _} when is_integer(events) ->
+        noreply_callback(:handle_info, [{from, msg}, state], stage)
+      %{^ref => _} ->
+        {:noreply, %{stage | events: :queue.in({:notification, {from, msg}}, events)}}
+      _ ->
+        send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
+        {:noreply, stage}
+    end
+  end
+
   ## Catch-all messages
 
   def handle_info(msg, %{state: state} = stage) do
@@ -1587,7 +1601,6 @@ defmodule GenStage do
   defp handle_demand(counter, %{events: events} = stage) when is_integer(events) do
     {:noreply, %{stage | events: events + counter}}
   end
-
   defp handle_demand(counter, %{events: events} = stage) do
     take_pc_events(events, counter, stage)
   end
@@ -1948,6 +1961,16 @@ defmodule GenStage do
         {now, later} = Enum.split(events, counter)
         events = put_pc_events(later, ref, queue)
         send_pc_events(now, ref, %{stage | events: events})
+      {{:value, {:notification, from_msg}}, queue} ->
+        %{state: state} = stage
+        case noreply_callback(:handle_info, [from_msg, state], stage) do
+          {:noreply, stage} ->
+            take_pc_events(queue, counter, stage)
+          {:noreply, stage, :hibernate} ->
+            take_pc_events(queue, counter, stage)
+          {:stop, _, _} = stop ->
+            stop
+        end
       {:empty, _queue} ->
         {:noreply, %{stage | events: 0}}
     end

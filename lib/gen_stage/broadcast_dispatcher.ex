@@ -16,7 +16,7 @@ defmodule GenStage.BroadcastDispatcher do
   @doc false
   def notify(msg, {demands, _} = state) do
     Enum.each(demands, fn {_, pid, ref} ->
-      Process.send(pid, {ref, msg}, [:noconnect])
+      Process.send(pid, {:"$gen_consumer", {self(), ref}, {:notification, msg}}, [:noconnect])
     end)
     {:ok, state}
   end
@@ -78,8 +78,7 @@ defmodule GenStage.BroadcastDispatcher do
   defp adjust_demand(min, demands),
     do: Enum.map(demands, fn {counter, pid, key} -> {counter - min, pid, key} end)
 
-  defp add_demand(counter, pid, ref, demands)
-       when is_integer(counter) and is_pid(pid) and is_reference(ref) do
+  defp add_demand(counter, pid, ref, demands) when is_integer(counter) and is_pid(pid) do
     [{counter, pid, ref} | demands]
   end
 

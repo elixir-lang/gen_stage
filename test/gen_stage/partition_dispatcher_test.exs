@@ -138,8 +138,8 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, notify_disp} = D.notify(:hello, disp)
     assert disp == notify_disp
 
-    assert_received {^ref0, :hello}
-    assert_received {^ref1, :hello}
+    assert_received {:"$gen_consumer", {_, ^ref0}, {:notification, :hello}}
+    assert_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
   end
 
   test "queues notifications to backed up consumers" do
@@ -155,14 +155,14 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, [], disp} = D.dispatch([1, 2, 5], disp)
 
     {:ok, disp} = D.notify(:hello, disp)
-    refute_received {^ref0, :hello}
-    assert_received {^ref1, :hello}
+    refute_received {:"$gen_consumer", {_, ^ref0}, {:notification, :hello}}
+    assert_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
 
     {:ok, 5, _}  = D.ask(5, {pid0, ref0}, disp)
 
     assert Process.info(self(), :messages) == {:messages, [
       {:"$gen_consumer", {self(), ref0}, [1, 2, 5]},
-      {ref0, :hello}
+      {:"$gen_consumer", {self(), ref0}, {:notification, :hello}}
     ]}
   end
 

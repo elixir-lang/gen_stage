@@ -474,10 +474,10 @@ defmodule GenStageTest do
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
 
       :ok = GenStage.sync_notify(producer, :sync)
-      assert_receive {^ref, :sync}
+      assert_receive {{_, ^ref}, :sync}
 
       :ok = GenStage.async_notify(producer, :async)
-      assert_receive {^ref, :async}
+      assert_receive {{_, ^ref}, :async}
     end
 
     test "delivers notifications eventually with infinity buffer size" do
@@ -488,7 +488,7 @@ defmodule GenStageTest do
 
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b, :c]}
-      assert_receive {^ref, :done}
+      assert_receive {{_, ^ref}, :done}
     end
 
     test "delivers notifications eventually with one-item filled buffer" do
@@ -499,7 +499,7 @@ defmodule GenStageTest do
 
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a]}
-      assert_receive {^ref, :done}
+      assert_receive {{_, ^ref}, :done}
     end
 
     test "delivers notifications eventually with mid filled buffer" do
@@ -510,7 +510,7 @@ defmodule GenStageTest do
 
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b]}
-      assert_receive {^ref, :done}
+      assert_receive {{_, ^ref}, :done}
     end
 
     test "delivers notifications eventually with filled buffer" do
@@ -521,7 +521,7 @@ defmodule GenStageTest do
 
       {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b, :c]}
-      assert_receive {^ref, :done}
+      assert_receive {{_, ^ref}, :done}
     end
 
     test "delivers notifications eventually with moving buffer" do
@@ -538,7 +538,7 @@ defmodule GenStageTest do
       # Ask for event and notification
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 2}}
       assert_receive {:"$gen_consumer", {_, ^ref}, [:a, :b]}
-      refute_received {^ref, :done1}
+      refute_received {{_, ^ref}, :done1}
 
       # Queue more events and another notification
       Counter.sync_queue(producer, [:d, :e])
@@ -548,9 +548,9 @@ defmodule GenStageTest do
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 1}}
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 2}}
       assert_receive {:"$gen_consumer", {_, ^ref}, [:c]}
-      assert_receive {^ref, :done1}
+      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done1}}
       assert_receive {:"$gen_consumer", {_, ^ref}, [:d, :e]}
-      assert_receive {^ref, :done2}
+      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done2}}
     end
 
     @tag :capture_log
@@ -562,7 +562,7 @@ defmodule GenStageTest do
       ref = make_ref()
       send producer, {:"$gen_producer", {self(), ref}, {:subscribe, []}}
       Counter.sync_queue(producer, [:c, :d, :e])
-      assert_receive {^ref, :done}
+      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done}}
     end
   end
 

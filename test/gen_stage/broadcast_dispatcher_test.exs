@@ -131,7 +131,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, notify_disp} = D.notify(:hello, disp)
     assert disp == notify_disp
 
-    assert_received {^ref1, :hello}
-    assert_received {^ref2, :hello}
+    assert_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
+    assert_received {:"$gen_consumer", {_, ^ref2}, {:notification, :hello}}
   end
 end
