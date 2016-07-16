@@ -661,7 +661,7 @@ defmodule GenStage do
   that the consumers have received it.
 
   The given message will be delivered in the format
-  `{{producer_pid, subscription_ref, msg}`, where `msg` is the message
+  `{producer_pid, subscription_ref, msg}`, where `msg` is the message
   given below.
 
   This function will return `:ok` as long as the notification request is
@@ -674,7 +674,11 @@ defmodule GenStage do
   end
 
   @doc """
-  Asks the consumer to subscribe to the given producer asynchronously.
+  Asks the producer to send a notification to all consumers asynchronously.
+
+  The given message will be delivered in the format
+  `{producer_pid, subscription_ref, msg}`, where `msg` is the message
+  given below.
 
   This call returns `:ok` regardless if the notification has been
   received by the producer or sent. It is typically called from
