@@ -1089,7 +1089,6 @@ defmodule GenStage do
   end
   defp receive_stream(monitor_ref, subscriptions) do
     receive do
-      # TODO: Support redirects
       {:"$gen_consumer", {producer_pid, {^monitor_ref, inner_ref} = ref}, events} when is_list(events) ->
         case subscriptions do
           %{^inner_ref => {:subscribed, producer_pid, cancel, min, max, demand}} ->
@@ -1373,7 +1372,6 @@ defmodule GenStage do
   end
 
   ## Consumer messages
-  # TODO: Support redirects
 
   def handle_info({:"$gen_consumer", _, _} = msg, %{type: :producer} = stage) do
     :error_logger.error_msg('GenStage producer ~p received $gen_consumer message: ~p~n', [name(), msg])

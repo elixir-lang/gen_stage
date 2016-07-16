@@ -39,7 +39,6 @@ defmodule DynamicSupervisorTest do
            {:supervisor, Supervisor.Default, [:Argument__1]}
   end
 
-  # TODO: Verify this on Erlang 19
   if function_exported?(:supervisor, :get_callback_module, 1) do
     test "returns the callback module" do
       {:ok, pid} = Supervisor.start_link([], strategy: :one_for_one)
