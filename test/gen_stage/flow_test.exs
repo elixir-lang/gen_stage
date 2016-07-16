@@ -119,50 +119,52 @@ defmodule GenStage.FlowTest do
 
   describe "stages-mappers-stream" do
     @flow Flow.new(mappers: [stages: 1])
-          |> Flow.from_stage(Counter)
+
+    @report [:counter]
 
     setup do
-      GenStage.start_link(Counter, 0, name: Counter)
-      :ok
+      {:ok, pid} = GenStage.start_link(Counter, 0)
+      {:ok, counter: pid}
     end
 
-    test "each" do
+    test "each", %{counter: pid} do
       parent = self()
-      assert @flow |> Flow.each(&send(parent, &1)) |> Enum.take(5) |> Enum.sort() ==
+      assert @flow |> Flow.from_stage(pid) |> Flow.each(&send(parent, &1)) |> Enum.take(5) |> Enum.sort() ==
              [0, 1, 2, 3, 4]
       assert_received 1
       assert_received 2
       assert_received 3
     end
 
-    test "filter" do
-      assert @flow |> Flow.filter(&rem(&1, 2) == 0) |> Enum.take(5) |> Enum.sort() ==
+    test "filter", %{counter: pid} do
+      assert @flow |> Flow.from_stage(pid) |> Flow.filter(&rem(&1, 2) == 0) |> Enum.take(5) |> Enum.sort() ==
              [0, 2, 4, 6, 8]
     end
 
-    test "filter_map" do
-      assert @flow |> Flow.filter_map(&rem(&1, 2) == 0, & &1 * 2) |> Enum.take(5) |> Enum.sort() ==
+    test "filter_map", %{counter: pid} do
+      assert @flow |> Flow.from_stage(pid) |> Flow.filter_map(&rem(&1, 2) == 0, & &1 * 2) |> Enum.take(5) |> Enum.sort() ==
              [0, 4, 8, 12, 16]
     end
 
-    test "flat_map" do
-      assert @flow |> Flow.flat_map(&[&1, &1]) |> Enum.take(5) |> Enum.sort() ==
+    test "flat_map", %{counter: pid} do
+      assert @flow |> Flow.from_stage(pid) |> Flow.flat_map(&[&1, &1]) |> Enum.take(5) |> Enum.sort() ==
              [0, 0, 1, 1, 2]
     end
 
-    test "map" do
-      assert @flow |> Flow.map(& &1 * 2) |> Enum.take(5) |> Enum.sort() ==
+    test "map", %{counter: pid} do
+      assert @flow |> Flow.from_stage(pid) |> Flow.map(& &1 * 2) |> Enum.take(5) |> Enum.sort() ==
              [0, 2, 4, 6, 8]
     end
 
-    test "reject" do
-      assert @flow |> Flow.reject(&rem(&1, 2) == 0) |> Enum.take(5) |> Enum.sort() ==
+    test "reject", %{counter: pid} do
+      assert @flow |> Flow.from_stage(pid) |> Flow.reject(&rem(&1, 2) == 0) |> Enum.take(5) |> Enum.sort() ==
              [1, 3, 5, 7, 9]
     end
 
-    test "keeps ordering" do
+    test "keeps ordering", %{counter: pid} do
       flow =
         @flow
+        |> Flow.from_stage(pid)
         |> Flow.filter(&rem(&1, 2) == 0)
         |> Flow.map(fn(x) -> x + 1 end)
         |> Flow.map(fn(x) -> x * 2 end)

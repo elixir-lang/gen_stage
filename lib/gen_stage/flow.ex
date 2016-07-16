@@ -575,18 +575,24 @@ defmodule GenStage.Flow do
     add_operation(flow, {:mapper, :reject, [filter]})
   end
 
-  defimpl Enumerable do
-    def reduce(flow, acc, fun) do
-      GenStage.Flow.Materialize.to_stream(flow).(acc, fun)
-    end
+  ## Reducers
 
-    def count(_flow) do
-      {:error, __MODULE__}
-    end
+  @doc """
+  Partitions the flow with the given options.
 
-    def member?(_flow, _value) do
-      {:error, __MODULE__}
-    end
+  Every time this function is called, a new partition
+  is created. Therefore it is recommended to invoke it
+  before any reducer operation.
+  """
+  def partition_with(flow, opts) when is_list(opts) do
+    add_operation(flow, {:partition, opts})
+  end
+
+  @doc """
+  Reduces the matching keys with the given function.
+  """
+  def reduce_by_key(flow, reducer) when is_function(reducer, 2) do
+    add_operation(flow, {:reducer, :reduce_by_key, [reducer]})
   end
 
   @compile {:inline, add_producers: 2, add_operation: 2}
@@ -606,5 +612,19 @@ defmodule GenStage.Flow do
   end
   defp add_operation(flow, _producers) do
     raise ArgumentError, "expected a flow as argument, got: #{inspect flow}"
+  end
+
+  defimpl Enumerable do
+    def reduce(flow, acc, fun) do
+      GenStage.Flow.Materialize.to_stream(flow).(acc, fun)
+    end
+
+    def count(_flow) do
+      {:error, __MODULE__}
+    end
+
+    def member?(_flow, _value) do
+      {:error, __MODULE__}
+    end
   end
 end

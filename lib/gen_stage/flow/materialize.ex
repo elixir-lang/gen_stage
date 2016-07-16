@@ -5,6 +5,9 @@ defmodule GenStage.Flow.Materialize do
 
   @mapper_opts [:buffer_keep, :buffer_size, :dispatch]
 
+  @doc """
+  Materializes a flow for stream consumption.
+  """
   def to_stream(%{producers: nil}) do
     raise ArgumentError, "cannot enumerable a flow without producers, " <>
                          "please call `from_enumerable` or `from_stage` accordingly"
@@ -12,10 +15,55 @@ defmodule GenStage.Flow.Materialize do
 
   def to_stream(%{operations: operations, mappers: mapper_opts,
                   producers: producers, stages: stages}) do
-    {mapper_ops, _reducer_ops} = Enum.split_while(Enum.reverse(operations), &elem(&1, 0) == :mapper)
-    mappers = start_mappers(producers, mapper_ops, mapper_opts, stages)
+    {mapper_ops, reducer_ops} = split_operations(operations, stages)
+    mappers = start_mappers(producers, mapper_ops, dispatcher(mapper_opts, reducer_ops), stages)
     GenStage.stream(mappers)
   end
+
+  ## Helpers
+
+  @doc """
+  Splits the flow operations into layers of stages.
+  """
+  def split_operations(operations, stages) do
+    {mappers, reducers} = Enum.split_while(Enum.reverse(operations), &elem(&1, 0) == :mapper)
+    {mappers, split_reducers(reducers, stages)}
+  end
+
+  defp split_reducers([{:partition, opts} | operations], stages),
+    do: split_reducers(operations, true, [], opts, stages)
+  defp split_reducers([_ | _] = operations, stages),
+    do: split_reducers(operations, true, [], [], stages)
+  defp split_reducers([], _stages),
+    do: []
+
+  defp split_reducers([], _reducer?, acc_ops, acc_opts, stages) do
+    [reducer(acc_ops, acc_opts, stages)]
+  end
+  defp split_reducers([{:partition, opts} | operations], _reducer?, acc_ops, acc_opts, stages) do
+    [reducer(acc_ops, acc_opts, stages) | split_reducers(operations, true, [], opts, stages)]
+  end
+  defp split_reducers([{:reducer, _, _} = op | operations], false, acc_ops, acc_opts, stages) do
+    [reducer(acc_ops, acc_opts, stages) | split_reducers(operations, true, [op], [], stages)]
+  end
+  defp split_reducers([{:reducer, _, _} = op | operations], true, acc_ops, acc_opts, stages) do
+    split_reducers(operations, true, [op | acc_ops], acc_opts, stages)
+  end
+  defp split_reducers([op | operations], _reducer?, acc_ops, acc_opts, stages) do
+    split_reducers(operations, false, [op | acc_ops], acc_opts, stages)
+  end
+
+  defp reducer(ops, opts, stages) do
+    {Enum.reverse(ops), Keyword.put_new(opts, :stages, stages)}
+  end
+
+  defp dispatcher(opts, []), do: opts
+  defp dispatcher(opts, [{_reducer_ops, reducer_opts} | _]) do
+    partitions = Keyword.fetch!(reducer_opts, :stages)
+    put_in opts[:dispatcher], {GenStage.PartitionDispatcher, partitions: partitions}
+  end
+
+  ## Mappers
 
   defp start_mappers({:stages, stages}, ops, opts, count) do
     start_producer_consumer_mappers(stages, ops, opts, count)
@@ -70,7 +118,7 @@ defmodule GenStage.Flow.Materialize do
   end
 
   # Merge mapper computations for mapper stage.
- defp mapper({:mapper, :each, [each]}, fun) do
+  defp mapper({:mapper, :each, [each]}, fun) do
     fn x, acc -> each.(x); fun.(x, acc) end
   end
   defp mapper({:mapper, :filter, [filter]}, fun) do
