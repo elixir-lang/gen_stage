@@ -3,7 +3,8 @@ alias Experimental.GenStage
 defmodule GenStage.Flow.Materialize do
   @moduledoc false
 
-  @mapper_opts [:buffer_keep, :buffer_size, :dispatch]
+  @mapper_opts [:buffer_keep, :buffer_size, :dispatcher]
+  @reducer_opts [:buffer_keep, :buffer_size, :dispatcher]
 
   @doc """
   Materializes a flow for stream consumption.
@@ -17,7 +18,8 @@ defmodule GenStage.Flow.Materialize do
                   producers: producers, stages: stages}) do
     {mapper_ops, reducer_ops} = split_operations(operations, stages)
     mappers = start_mappers(producers, mapper_ops, dispatcher(mapper_opts, reducer_ops), stages)
-    GenStage.stream(mappers)
+    consumers = start_reducers(reducer_ops, mappers)
+    GenStage.stream(consumers)
   end
 
   ## Helpers
@@ -60,7 +62,15 @@ defmodule GenStage.Flow.Materialize do
   defp dispatcher(opts, []), do: opts
   defp dispatcher(opts, [{_reducer_ops, reducer_opts} | _]) do
     partitions = Keyword.fetch!(reducer_opts, :stages)
-    put_in opts[:dispatcher], {GenStage.PartitionDispatcher, partitions: partitions}
+    hash = Keyword.get(reducer_opts, :hash, &hash/2)
+    put_in opts[:dispatcher], {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}
+  end
+
+  defp hash({key, _}, max) do
+    :erlang.phash2(key, max)
+  end
+  defp hash(other, _max) do
+    raise "flow expects {key, value} pairs on partitioning, got: #{inspect other}"
   end
 
   ## Mappers
@@ -155,5 +165,32 @@ defmodule GenStage.Flow.Materialize do
         fun.(x, acc)
       end
     end
+  end
+
+  ## Reducers
+
+  defp start_reducers([], stages) do
+    stages
+  end
+  defp start_reducers([{ops, opts} | rest], stages) do
+    opts = dispatcher(opts, rest)
+    {count, opts} = Keyword.pop(opts, :stages)
+    {init_opts, subscribe_opts} = Keyword.split(opts, @reducer_opts)
+
+    [{:reducer, :reduce_by_key, [reducer]}] = ops
+
+    stages =
+      for i <- 0..count-1 do
+        producers =
+          for stage <- stages do
+            {stage, [partition: i] ++ subscribe_opts}
+          end
+
+        {:ok, pid} = GenStage.start_link(GenStage.Flow.Reducer,
+                                         {reducer, [subscribe_to: producers] ++ init_opts})
+        pid
+      end
+
+    start_reducers(rest, stages)
   end
 end

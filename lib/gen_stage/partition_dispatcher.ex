@@ -37,11 +37,13 @@ defmodule GenStage.PartitionDispatcher do
   def notify(msg, {tag, hash, waiting, pending, partitions, references}) do
     partitions =
       Enum.reduce(partitions, partitions, fn
-        {_, {pid, ref, demand}}, acc when is_integer(demand) ->
+        {partition, @init}, acc ->
+          Map.put(acc, partition, {nil, nil, :queue.in({tag, msg}, :queue.new)})
+        {partition, {pid, ref, queue}}, acc when not is_integer(queue) ->
+          Map.put(acc, partition, {pid, ref, :queue.in({tag, msg}, queue)})
+        {_, {pid, ref, demand}}, acc ->
           Process.send(pid, {:"$gen_consumer", {self(), ref}, {:notification, msg}}, [:noconnect])
           acc
-        {partition, {pid, ref, queue}}, acc ->
-          Map.put(acc, partition, {pid, ref, :queue.in({tag, msg}, queue)})
       end)
 
     {:ok, {tag, hash, waiting, pending, partitions, references}}

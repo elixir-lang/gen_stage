@@ -906,7 +906,7 @@ defmodule GenStage do
 
   When the enumerable finishes or halts, a notification is sent
   to all consumers in the format of
-  `{subscription_tag, {:producer, :halted | :done}}`. If the stage
+  `{{pid, subscription_tag}, {:producer, :halted | :done}}`. If the stage
   is meant to terminate when there are no more consumers, we recomemnd
   setting the `:consumers` option to `:permanent`.
 
@@ -1107,6 +1107,9 @@ defmodule GenStage do
 
       {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, _} = reason} ->
         cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
+
+      {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, {:stream, stream}}} ->
+        {stream, {:receive, monitor_ref, subscriptions}}
 
       {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:notification, {:producer, _}}} ->
         case subscriptions do
@@ -1382,14 +1385,15 @@ defmodule GenStage do
                   %{type: :producer_consumer, events: demand_or_queue, producers: producers} = stage) when is_list(events) do
     case producers do
       %{^ref => _entry} ->
-        {events, demand_or_queue} =
+        {counter, queue} =
           case demand_or_queue do
             demand when is_integer(demand) ->
-              split_pc_events(events, ref, demand, [])
+              {demand, :queue.new}
             queue ->
-              {[], put_pc_events(events, ref, queue)}
+              {0, queue}
           end
-        send_pc_events(events, ref, %{stage | events: demand_or_queue})
+        queue = put_pc_events(events, ref, queue)
+        take_pc_events(queue, counter, stage)
       _ ->
         send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
@@ -1402,7 +1406,8 @@ defmodule GenStage do
       %{^ref => entry} ->
         {producer_pid, _, _} = entry
         {batches, stage} = consumer_receive(from, entry, events, stage)
-        consumer_dispatch(batches, from, mod, state, stage, false)
+        {_, reply} = consumer_dispatch(batches, from, mod, state, stage, 0, false)
+        reply
       _ ->
         send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
@@ -1751,9 +1756,6 @@ defmodule GenStage do
     stage = put_in stage.producers[ref], {producer_id, cancel, {demand, min, max}}
     {batches, stage}
   end
-  defp consumer_receive(_, {_, _, :producer_consumer}, events, stage) do
-    {[{events, 0}], stage}
-  end
   defp consumer_receive(_, {_, _, :manual}, events, stage) do
     {[{events, 0}], stage}
   end
@@ -1794,28 +1796,28 @@ defmodule GenStage do
   defp split_events([event | events], limit, counter, acc),
     do: split_events(events, limit, counter + 1, [event | acc])
 
-  defp consumer_dispatch([{batch, ask} | batches], from, mod, state, stage, _hibernate?) do
+  defp consumer_dispatch([{batch, ask} | batches], from, mod, state, stage, count, _hibernate?) do
     case mod.handle_events(batch, from, state) do
       {:noreply, events, state} when is_list(events) ->
         stage = dispatch_events(events, stage)
         ask > 0 and ask(from, ask, [:noconnect])
-        consumer_dispatch(batches, from, mod, state, stage, false)
+        consumer_dispatch(batches, from, mod, state, stage, count + length(events), false)
       {:noreply, events, state, :hibernate} when is_list(events) ->
         stage = dispatch_events(events, stage)
         ask > 0 and ask(from, ask, [:noconnect])
-        consumer_dispatch(batches, from, mod, state, stage, true)
+        consumer_dispatch(batches, from, mod, state, stage, count + length(events), true)
       {:stop, reason, state} ->
-        {:stop, reason, %{stage | state: state}}
+        {count, {:stop, reason, %{stage | state: state}}}
       other ->
-        {:stop, {:bad_return_value, other}, %{stage | state: state}}
+        {count, {:stop, {:bad_return_value, other}, %{stage | state: state}}}
     end
   end
 
-  defp consumer_dispatch([], _from, _mod, state, stage, false) do
-    {:noreply, %{stage | state: state}}
+  defp consumer_dispatch([], _from, _mod, state, stage, count, false) do
+    {count, {:noreply, %{stage | state: state}}}
   end
-  defp consumer_dispatch([], _from, _mod, state, stage, true) do
-    {:noreply, %{stage | state: state}, :hibernate}
+  defp consumer_dispatch([], _from, _mod, state, stage, count, true) do
+    {count, {:noreply, %{stage | state: state}, :hibernate}}
   end
 
   defp consumer_subscribe({to, opts}, stage) when is_list(opts),
@@ -1887,15 +1889,8 @@ defmodule GenStage do
 
   ## Producer consumer helpers
 
-  defp split_pc_events(events, ref, 0, acc),
-    do: {Enum.reverse(acc), put_pc_events(events, ref, :queue.new)}
-  defp split_pc_events([], _from, counter, acc),
-    do: {Enum.reverse(acc), counter}
-  defp split_pc_events([event | events], ref, counter, acc),
-    do: split_pc_events(events, ref, counter - 1, [event | acc])
-
   defp put_pc_events(events, ref, queue) do
-    :queue.in({events, length(events), ref}, queue)
+    :queue.in({events, ref}, queue)
   end
 
   defp send_pc_events(events, ref,
@@ -1905,28 +1900,15 @@ defmodule GenStage do
         {producer_id, _, _} = entry
         from = {producer_id, ref}
         {batches, stage} = consumer_receive(from, entry, events, stage)
-        consumer_dispatch(batches, from, mod, state, stage, false)
+        consumer_dispatch(batches, from, mod, state, stage, 0, false)
       %{} ->
         # We queued but producer was removed
-        consumer_dispatch([{events, 0}], :unused, mod, state, stage, false)
+        consumer_dispatch([{events, 0}], :unused, mod, state, stage, 0, false)
     end
   end
 
-  defp take_pc_events(queue, counter, stage) do
+  defp take_pc_events(queue, counter, stage) when counter > 0 do
     case :queue.out(queue) do
-      {{:value, {events, length, ref}}, queue} when length < counter ->
-        case send_pc_events(events, ref, stage) do
-          {:noreply, stage} ->
-            take_pc_events(queue, counter - length, stage)
-          {:noreply, stage, :hibernate} ->
-            take_pc_events(queue, counter - length, stage)
-          {:stop, _, _} = stop ->
-            stop
-        end
-      {{:value, {events, _length, ref}}, queue} ->
-        {now, later} = Enum.split(events, counter)
-        events = put_pc_events(later, ref, queue)
-        send_pc_events(now, ref, %{stage | events: events})
       {{:value, {:notification, from_msg}}, queue} ->
         %{state: state} = stage
         case noreply_callback(:handle_info, [from_msg, state], stage) do
@@ -1937,8 +1919,25 @@ defmodule GenStage do
           {:stop, _, _} = stop ->
             stop
         end
+      {{:value, {events, ref}}, queue} ->
+        case send_pc_events(events, ref, stage) do
+          {sent, {:noreply, stage}} ->
+            take_pc_events(queue, counter - sent, stage)
+          {sent, {:noreply, stage, :hibernate}} ->
+            take_pc_events(queue, counter - sent, stage)
+          {_, {:stop, _, _} = stop} ->
+            stop
+        end
       {:empty, _queue} ->
-        {:noreply, %{stage | events: 0}}
+        {:noreply, %{stage | events: counter}}
     end
+  end
+
+  # It is OK to send more events than the consumer has
+  # asked because those will always be buffered. Once
+  # we have taken from the buffer, the event queue will
+  # be adjusted again.
+  defp take_pc_events(queue, _counter, stage) do
+    {:noreply, %{stage | events: queue}}
   end
 end

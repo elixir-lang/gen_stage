@@ -142,6 +142,29 @@ defmodule GenStage.PartitionDispatcherTest do
     assert_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
   end
 
+  test "queues notifications for non-existing consumers" do
+    pid0 = self()
+    ref0 = make_ref()
+    pid1 = self()
+    ref1 = make_ref()
+    disp = dispatcher(partitions: 2)
+
+    {:ok, disp} = D.notify(:hello, disp)
+    refute_received {:"$gen_consumer", {_, ^ref0}, {:notification, :hello}}
+    refute_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
+
+    {:ok, 0, disp}  = D.subscribe([partition: 0], {pid0, ref0}, disp)
+    {:ok, 0, disp}  = D.subscribe([partition: 1], {pid0, ref1}, disp)
+    {:ok, 3, disp}  = D.ask(3, {pid0, ref0}, disp)
+    {:ok, 3, disp}  = D.ask(3, {pid1, ref1}, disp)
+    _ = disp
+
+    assert Process.info(self(), :messages) == {:messages, [
+      {:"$gen_consumer", {pid0, ref0}, {:notification, :hello}},
+      {:"$gen_consumer", {pid1, ref1}, {:notification, :hello}}
+    ]}
+  end
+
   test "queues notifications to backed up consumers" do
     pid0 = self()
     ref0 = make_ref()

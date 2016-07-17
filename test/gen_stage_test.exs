@@ -116,6 +116,27 @@ defmodule GenStageTest do
     end
   end
 
+  defmodule Discarder do
+    @moduledoc """
+    Multiples every event by two.
+    """
+
+    use GenStage
+
+    def start_link(init, opts \\ []) do
+      GenStage.start_link(__MODULE__, init, opts)
+    end
+
+    def init(init) do
+      init
+    end
+
+    def handle_events(events, _from, recipient) do
+      send recipient, {:producer_consumed, events}
+      {:noreply, [], recipient}
+    end
+  end
+
   defmodule Forwarder do
     @moduledoc """
     A consumer that forwards messages to the given process.
@@ -276,7 +297,7 @@ defmodule GenStageTest do
       assert_receive {:producer_consumed, ^batch}
       batch = Enum.flat_map(120..124, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(125..149, &[&1, &1])
+      batch = Enum.flat_map(125..139, &[&1, &1])
       assert_receive {:consumed, ^batch}
     end
 
@@ -295,7 +316,7 @@ defmodule GenStageTest do
       assert_receive {:consumed, ^batch}
       batch = Enum.flat_map(50..74, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.to_list(100..149)
+      batch = Enum.to_list(100..179)
       assert_receive {:producer_consumed, ^batch}
     end
 
@@ -319,7 +340,7 @@ defmodule GenStageTest do
       assert_receive {:producer_consumed, ^batch}
       batch = Enum.flat_map(120..124, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.flat_map(125..149, &[&1, &1])
+      batch = Enum.flat_map(125..139, &[&1, &1])
       assert_receive {:consumed, ^batch}
     end
 
@@ -340,7 +361,22 @@ defmodule GenStageTest do
       assert_receive {:consumed, ^batch}
       batch = Enum.flat_map(50..74, &[&1, &1])
       assert_receive {:consumed, ^batch}
-      batch = Enum.to_list(100..149)
+      batch = Enum.to_list(100..179)
+      assert_receive {:producer_consumed, ^batch}
+    end
+
+    test "keeps emitting events even when discarded" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, doubler} = Discarder.start_link({:producer_consumer, self(),
+                                            subscribe_to: [{producer, max_demand: 100, min_demand: 80}]})
+      {:ok, _} = Forwarder.start_link({:consumer, self(),
+                                       subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]})
+
+      batch = Enum.to_list(0..19)
+      assert_receive {:producer_consumed, ^batch}
+      batch = Enum.to_list(100..119)
+      assert_receive {:producer_consumed, ^batch}
+      batch = Enum.to_list(1000..1019)
       assert_receive {:producer_consumed, ^batch}
     end
 

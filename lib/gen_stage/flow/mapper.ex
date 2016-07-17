@@ -5,44 +5,45 @@ defmodule GenStage.Flow.Mapper do
   use GenStage
 
   def init({reducer, opts}) do
-    {:producer_consumer, {[], [], [], reducer}, opts}
+    notify = not match?({GenStage.PartitionDispatcher, _}, opts[:dispatcher])
+    {:producer_consumer, {[], [], [], notify, reducer}, opts}
   end
 
-  def handle_subscribe(:producer, _, {_, ref}, {producers, consumers, done, reducer}) do
-    {:automatic, {[ref | producers], consumers, [ref | done], reducer}}
+  def handle_subscribe(:producer, _, {_, ref}, {producers, consumers, done, notify, reducer}) do
+    {:automatic, {[ref | producers], consumers, [ref | done], notify, reducer}}
   end
-  def handle_subscribe(:consumer, _, {pid, ref}, {producers, consumers, done, reducer}) do
-    if is_atom(reducer) do
+  def handle_subscribe(:consumer, _, {pid, ref}, {producers, consumers, done, notify, reducer}) do
+    if is_atom(reducer) and notify do
       msg = {:producer, reducer}
       Process.send(pid, {:"$gen_consumer", {self(), ref}, {:notification, msg}}, [:noconnect])
     end
-    {:automatic, {producers, [ref | consumers], done, reducer}}
+    {:automatic, {producers, [ref | consumers], done, notify, reducer}}
   end
 
-  def handle_cancel(_, {_, ref}, {producers, consumers, done, reducer} = state) do
+  def handle_cancel(_, {_, ref}, {producers, consumers, done, notify, reducer} = state) do
     cond do
       ref in producers ->
         {done, reducer} = maybe_notify(done, reducer, ref)
-        {:noreply, [], {List.delete(producers, ref), consumers, done, reducer}}
+        {:noreply, [], {List.delete(producers, ref), consumers, done, notify, reducer}}
       consumers == [ref] ->
         {:stop, :normal, state}
       true ->
-        {:noreply, [], {producers, List.delete(consumers, ref), done, reducer}}
+        {:noreply, [], {producers, List.delete(consumers, ref), done, notify, reducer}}
     end
   end
 
-  def handle_info({{_, ref}, {:producer, _}}, {producers, consumers, done, reducer}) do
+  def handle_info({{_, ref}, {:producer, _}}, {producers, consumers, done, notify, reducer}) do
     {done, reducer} = maybe_notify(done, reducer, ref)
-    {:noreply, [], {producers, consumers, done, reducer}}
+    {:noreply, [], {producers, consumers, done, notify, reducer}}
   end
   def handle_info(_msg, state) do
     {:noreply, [], state}
   end
 
-  def handle_events(_events, _from, {_, _, _, :done} = state) do
+  def handle_events(_events, _from, {_, _, _, _, :done} = state) do
     {:noreply, [], state}
   end
-  def handle_events(events, _from, {_, _, _, reducer} = state) do
+  def handle_events(events, _from, {_, _, _, _, reducer} = state) do
     {:noreply, Enum.reverse(Enum.reduce(events, [], reducer)), state}
   end
 

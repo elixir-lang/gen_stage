@@ -583,6 +583,12 @@ defmodule GenStage.Flow do
   Every time this function is called, a new partition
   is created. Therefore it is recommended to invoke it
   before any reducer operation.
+
+  ## Options
+
+    * `:stages` - the number of partitions (reducer stages)
+    * `:hash` - the hash to use when partitioning
+
   """
   def partition_with(flow, opts) when is_list(opts) do
     add_operation(flow, {:partition, opts})
@@ -590,6 +596,18 @@ defmodule GenStage.Flow do
 
   @doc """
   Reduces the matching keys with the given function.
+
+  ## Examples
+
+      iex> flow = Flow.from_enumerable(["the quick brown fox"]) |> Flow.flat_map(fn word ->
+      ...>    for grapheme <- String.graphemes(word), do: {grapheme, 1}
+      ...> end)
+      iex> flow |> Flow.reduce_by_key(&+/2) |> Enum.sort()
+      [{" ", 3}, {"b", 1}, {"c", 1}, {"e", 1}, {"f", 1},
+       {"h", 1}, {"i", 1}, {"k", 1}, {"n", 1}, {"o", 2},
+       {"q", 1}, {"r", 1}, {"t", 1}, {"u", 1}, {"w", 1},
+       {"x", 1}]
+
   """
   def reduce_by_key(flow, reducer) when is_function(reducer, 2) do
     add_operation(flow, {:reducer, :reduce_by_key, [reducer]})
