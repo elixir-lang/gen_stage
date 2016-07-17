@@ -1117,8 +1117,8 @@ defmodule GenStage do
             receive_stream(monitor_ref, subscriptions)
         end
 
-      {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, {:stream, stream}}} ->
-        {stream, {:receive, monitor_ref, subscriptions}}
+      {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, {:enumerable, enumerable}}} ->
+        {enumerable, {:receive, monitor_ref, subscriptions}}
 
       # Discard remaining notification as to not pollute the inbox
       {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, _}} ->

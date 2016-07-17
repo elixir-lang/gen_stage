@@ -610,16 +610,23 @@ defmodule GenStage.Flow do
   @doc """
   Reduces the given values with the given accumulator.
 
+  This operation will create a partition if one was not yet
+  created explicitly by another partition function or by
+  calling `partition_with/2`.
+
   The accumulator must be a function that receives no arguments
-  and returns the actual accumulator. This function is executed
-  inside the partitioned process.
+  and returns the actual accumulator. The accumulator function
+  is executed inside the partitioned process.
+
+  Once reducing is done, the returned accumulator will be
+  the new state of the partition.
 
   ## Examples
 
       iex> flow = Flow.from_enumerable(["the quick brown fox"]) |> Flow.flat_map(fn word ->
       ...>    String.graphemes(word)
       ...> end)
-      iex> flow = flow |> Flow.reduce(fn -> %{} end, fn grapheme, map ->
+      iex> flow = flow |> Flow.reduce_partition(fn -> %{} end, fn grapheme, map ->
       ...>   Map.update(map, grapheme, 1, & &1 + 1)
       ...> end)
       iex> Enum.sort(flow)
@@ -629,9 +636,9 @@ defmodule GenStage.Flow do
        {"x", 1}]
 
   """
-  def reduce(flow, acc, reducer) when is_function(reducer, 2) do
+  def reduce_partition(flow, acc, reducer) when is_function(reducer, 2) do
     if is_function(acc, 0) do
-      add_operation(flow, {:reducer, :reduce, [acc, reducer]})
+      add_operation(flow, {:partition, :reduce, [acc, reducer]})
     else
       raise ArgumentError, "GenStage.Flow.reduce/3 expects the accumulator to be given as a function"
     end

@@ -45,10 +45,10 @@ defmodule GenStage.Flow.Materialize do
   defp split_reducers([{:partition, opts} | operations], _reducer?, acc_ops, acc_opts, stages) do
     [reducer(acc_ops, acc_opts, stages) | split_reducers(operations, true, [], opts, stages)]
   end
-  defp split_reducers([{:reducer, _, _} = op | operations], false, acc_ops, acc_opts, stages) do
+  defp split_reducers([{:partition, _, _} = op | operations], false, acc_ops, acc_opts, stages) do
     [reducer(acc_ops, acc_opts, stages) | split_reducers(operations, true, [op], [], stages)]
   end
-  defp split_reducers([{:reducer, _, _} = op | operations], true, acc_ops, acc_opts, stages) do
+  defp split_reducers([{:partition, _, _} = op | operations], true, acc_ops, acc_opts, stages) do
     split_reducers(operations, true, [op | acc_ops], acc_opts, stages)
   end
   defp split_reducers([op | operations], _reducer?, acc_ops, acc_opts, stages) do
@@ -177,9 +177,9 @@ defmodule GenStage.Flow.Materialize do
   end
 
   defp start_reducers(ops, opts, producers) do
-    [{:reducer, :reduce, [acc, reducer]}] = ops
+    [{:partition, :reduce, [acc, reducer]}] = ops
     change = fn current, acc, _index ->
-      GenStage.async_notify(self(), {:stream, acc})
+      GenStage.async_notify(self(), {:enumerable, acc})
       GenStage.async_notify(self(), current)
       {[], acc}
     end

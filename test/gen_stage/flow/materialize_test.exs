@@ -38,34 +38,34 @@ defmodule GenStage.Flow.MaterializeTest do
 
     test "accumulates reducer operations" do
       assert {[],
-              [{[{:reducer, :reduce, [_, _]},
-                 {:reducer, :reduce, [_, _]}], [stages: 2]}]} =
+              [{[{:partition, :reduce, [_, _]},
+                 {:partition, :reduce, [_, _]}], [stages: 2]}]} =
              Flow.new
-             |> Flow.reduce(fn -> 0 end, & &1 + &2)
-             |> Flow.reduce(fn -> 0 end, & &1 * &2)
+             |> Flow.reduce_partition(fn -> 0 end, & &1 + &2)
+             |> Flow.reduce_partition(fn -> 0 end, & &1 * &2)
              |> split()
     end
 
     test "accumulates reducer operations unless mapper is between" do
       assert {[],
-              [{[{:reducer, :reduce, [_, _]},
+              [{[{:partition, :reduce, [_, _]},
                  {:mapper, :map, [_]}], [stages: 2]},
-               {[{:reducer, :reduce, [_, _]}], [stages: 2]}]} =
+               {[{:partition, :reduce, [_, _]}], [stages: 2]}]} =
              Flow.new
-             |> Flow.reduce(fn -> 0 end, & &1 + &2)
+             |> Flow.reduce_partition(fn -> 0 end, & &1 + &2)
              |> Flow.map(& &1)
-             |> Flow.reduce(fn -> 0 end, & &1 * &2)
+             |> Flow.reduce_partition(fn -> 0 end, & &1 * &2)
              |> split()
     end
 
     test "accumulates reducer operations unless partition is between" do
       assert {[],
-              [{[{:reducer, :reduce, [_, _]}], [stages: 2]},
-               {[{:reducer, :reduce, [_, _]}], [stages: 10]}]} =
+              [{[{:partition, :reduce, [_, _]}], [stages: 2]},
+               {[{:partition, :reduce, [_, _]}], [stages: 10]}]} =
              Flow.new
-             |> Flow.reduce(fn -> 0 end, & &1 + &2)
+             |> Flow.reduce_partition(fn -> 0 end, & &1 + &2)
              |> Flow.partition_with(stages: 10)
-             |> Flow.reduce(fn -> 0 end, & &1 * &2)
+             |> Flow.reduce_partition(fn -> 0 end, & &1 * &2)
              |> split()
     end
   end
