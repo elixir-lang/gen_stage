@@ -1108,9 +1108,6 @@ defmodule GenStage do
       {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, _} = reason} ->
         cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
 
-      {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, {:stream, stream}}} ->
-        {stream, {:receive, monitor_ref, subscriptions}}
-
       {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:notification, {:producer, _}}} ->
         case subscriptions do
           %{^inner_ref => tuple} ->
@@ -1119,6 +1116,13 @@ defmodule GenStage do
           %{} ->
             receive_stream(monitor_ref, subscriptions)
         end
+
+      {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, {:stream, stream}}} ->
+        {stream, {:receive, monitor_ref, subscriptions}}
+
+      # Discard remaining notification as to not pollute the inbox
+      {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, _}} ->
+        receive_stream(monitor_ref, subscriptions)
 
       {{^monitor_ref, inner_ref}, {:down, reason}} ->
         cancel_stream(inner_ref, reason, monitor_ref, subscriptions)

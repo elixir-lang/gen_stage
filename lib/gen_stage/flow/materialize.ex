@@ -3,8 +3,7 @@ alias Experimental.GenStage
 defmodule GenStage.Flow.Materialize do
   @moduledoc false
 
-  @mapper_opts [:buffer_keep, :buffer_size, :dispatcher]
-  @reducer_opts [:buffer_keep, :buffer_size, :dispatcher]
+  @map_reducer_opts [:buffer_keep, :buffer_size, :dispatcher]
 
   @doc """
   Materializes a flow for stream consumption.
@@ -17,7 +16,8 @@ defmodule GenStage.Flow.Materialize do
   def to_stream(%{operations: operations, mappers: mapper_opts,
                   producers: producers, stages: stages}) do
     {mapper_ops, reducer_ops} = split_operations(operations, stages)
-    mappers = start_mappers(producers, mapper_ops, dispatcher(mapper_opts, reducer_ops), stages)
+    mapper_opts = mapper_opts |> Keyword.put_new(:stages, stages) |> dispatcher(reducer_ops)
+    mappers = start_mappers(producers, mapper_ops, mapper_opts)
     consumers = start_reducers(reducer_ops, mappers)
     GenStage.stream(consumers)
   end
@@ -73,55 +73,62 @@ defmodule GenStage.Flow.Materialize do
     raise "flow expects {key, value} pairs on partitioning, got: #{inspect other}"
   end
 
-  ## Mappers
+  defp start_map_reducers(type, producers, opts, change, acc, reducer) do
+    {stages, opts} = Keyword.pop(opts, :stages)
+    {init_opts, subscribe_opts} = Keyword.split(opts, @map_reducer_opts)
 
-  defp start_mappers({:stages, stages}, ops, opts, count) do
-    start_producer_consumer_mappers(stages, ops, opts, count)
+    for i <- 0..stages-1 do
+      subscriptions =
+        for producer <- producers do
+          {producer, [partition: i] ++ subscribe_opts}
+        end
+
+      arg = {type, [subscribe_to: subscriptions] ++ init_opts, i, change, acc, reducer}
+      {:ok, pid} = GenStage.start_link(GenStage.Flow.MapReducer, arg)
+      pid
+    end
   end
 
-  defp start_mappers({:enumerables, enumerables}, ops, opts, count) do
-    count = Keyword.get(opts, :stages, count)
+  ## Mappers
 
-    if count > length(enumerables) do
-      stages =
+  defp start_mappers({:stages, producers}, ops, opts) do
+    start_producer_consumer_mappers(producers, ops, opts)
+  end
+
+  defp start_mappers({:enumerables, enumerables}, ops, opts) do
+    if Keyword.fetch!(opts, :stages) > length(enumerables) do
+      producers =
         for enumerable <- enumerables do
           {:ok, pid} =
             GenStage.from_enumerable(enumerable, consumers: :permanent)
           pid
         end
-      start_producer_consumer_mappers(stages, ops, opts, count)
+      start_producer_consumer_mappers(producers, ops, opts)
     else
-      start_enumerable_mappers(enumerables, ops, opts, count)
+      start_enumerable_mappers(enumerables, ops, opts)
     end
   end
 
-  defp start_producer_consumer_mappers(stages, ops, opts, count) do
-    {count, opts} = Keyword.pop(opts, :stages, count)
-    {init_opts, subscribe_opts} = Keyword.split(opts, @mapper_opts)
-
-    producers =
-      for stage <- stages do
-        {stage, subscribe_opts}
-      end
-
-    init = {Enum.reduce(Enum.reverse(ops), &[&1 | &2], &mapper/2),
-            [subscribe_to: producers] ++ init_opts}
-
-    for _ <- 1..count do
-      {:ok, pid} = GenStage.start_link(GenStage.Flow.Mapper, init)
-      pid
+  defp start_producer_consumer_mappers(producers, ops, opts) do
+    reducer = Enum.reduce(Enum.reverse(ops), &[&1 | &2], &mapper/2)
+    change = fn current, acc, _index ->
+      GenStage.async_notify(self(), current)
+      {[], acc}
     end
+    acc = fn -> [] end
+    start_map_reducers(:producer_consumer, producers, opts, change, acc, fn events, [] ->
+      {Enum.reverse(Enum.reduce(events, [], reducer)), []}
+    end)
   end
 
-  defp start_enumerable_mappers(enumerables, ops, opts, _count) do
-    init_opts = [consumers: :permanent] ++ Keyword.take(opts, @mapper_opts)
+  defp start_enumerable_mappers(enumerables, ops, opts) do
+    init_opts = [consumers: :permanent] ++ Keyword.take(opts, @map_reducer_opts)
 
     for enumerable <- enumerables do
       enumerable =
         Enum.reduce(ops, enumerable, fn {:mapper, fun, args}, acc ->
           apply(Stream, fun, [acc | args])
         end)
-
       {:ok, pid} = GenStage.from_enumerable(enumerable, init_opts)
       pid
     end
@@ -169,28 +176,30 @@ defmodule GenStage.Flow.Materialize do
 
   ## Reducers
 
-  defp start_reducers([], stages) do
-    stages
+  defp start_reducers([], producers) do
+    producers
   end
-  defp start_reducers([{ops, opts} | rest], stages) do
-    opts = dispatcher(opts, rest)
-    {count, opts} = Keyword.pop(opts, :stages)
-    {init_opts, subscribe_opts} = Keyword.split(opts, @reducer_opts)
+  defp start_reducers([{ops, opts} | rest], producers) do
+    start_reducers(rest, start_reducers(ops, dispatcher(opts, rest), producers))
+  end
 
+  defp start_reducers(ops, opts, producers) do
     [{:reducer, :reduce_by_key, [reducer]}] = ops
-
-    stages =
-      for i <- 0..count-1 do
-        producers =
-          for stage <- stages do
-            {stage, [partition: i] ++ subscribe_opts}
-          end
-
-        {:ok, pid} = GenStage.start_link(GenStage.Flow.Reducer,
-                                         {reducer, [subscribe_to: producers] ++ init_opts})
-        pid
+    change = fn current, acc, _index ->
+      GenStage.async_notify(self(), {:stream, :ets.tab2list(acc)})
+      GenStage.async_notify(self(), current)
+      {[], acc}
+    end
+    acc = fn -> :ets.new(:reducer, [:protected, :set]) end
+    start_map_reducers(:producer_consumer, producers, opts, change, acc, fn events, acc ->
+      for event <- events do
+        {key, new} = event
+        case :ets.lookup(acc, key) do
+          [{^key, old}] -> :ets.insert(acc, {key, reducer.(old, new)})
+          [] -> :ets.insert(acc, event)
+        end
       end
-
-    start_reducers(rest, stages)
+      {[], acc}
+    end)
   end
 end
