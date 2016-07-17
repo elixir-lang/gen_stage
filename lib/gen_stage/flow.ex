@@ -262,6 +262,10 @@ defmodule GenStage.Flow do
   In this section we will discuss points related to performance
   with flows.
 
+  ### Configuration (demand and the number of stages)
+
+  TODO: Write me
+
   ### ETS-based partitions
 
   Since the reducer stages abstracts away the storage with functions
@@ -587,30 +591,50 @@ defmodule GenStage.Flow do
   ## Options
 
     * `:stages` - the number of partitions (reducer stages)
-    * `:hash` - the hash to use when partitioning
+    * `:hash` - the hash to use when partitioning. It is a function
+      that receives two arguments: the event to partition on and the
+      maximum number of partitions. However, to facilitate customization,
+      `:hash` also allows common values, such `{:elem, 0}`, to specify
+      the hash should be calculated on the first element of a tuple.
+      See more information on the "Hash shortcuts" section below.
+      The default value hashing function `:erlang.phash2/2`.
 
+  ## Hash shortcuts
+
+  TODO: Implement this.
   """
   def partition_with(flow, opts) when is_list(opts) do
     add_operation(flow, {:partition, opts})
   end
 
   @doc """
-  Reduces the matching keys with the given function.
+  Reduces the given values with the given accumulator.
+
+  The accumulator must be a function that receives no arguments
+  and returns the actual accumulator. This function is executed
+  inside the partitioned process.
 
   ## Examples
 
       iex> flow = Flow.from_enumerable(["the quick brown fox"]) |> Flow.flat_map(fn word ->
-      ...>    for grapheme <- String.graphemes(word), do: {grapheme, 1}
+      ...>    String.graphemes(word)
       ...> end)
-      iex> flow |> Flow.reduce_by_key(&+/2) |> Enum.sort()
+      iex> flow = flow |> Flow.reduce(fn -> %{} end, fn grapheme, map ->
+      ...>   Map.update(map, grapheme, 1, & &1 + 1)
+      ...> end)
+      iex> Enum.sort(flow)
       [{" ", 3}, {"b", 1}, {"c", 1}, {"e", 1}, {"f", 1},
        {"h", 1}, {"i", 1}, {"k", 1}, {"n", 1}, {"o", 2},
        {"q", 1}, {"r", 1}, {"t", 1}, {"u", 1}, {"w", 1},
        {"x", 1}]
 
   """
-  def reduce_by_key(flow, reducer) when is_function(reducer, 2) do
-    add_operation(flow, {:reducer, :reduce_by_key, [reducer]})
+  def reduce(flow, acc, reducer) when is_function(reducer, 2) do
+    if is_function(acc, 0) do
+      add_operation(flow, {:reducer, :reduce, [acc, reducer]})
+    else
+      raise ArgumentError, "GenStage.Flow.reduce/3 expects the accumulator to be given as a function"
+    end
   end
 
   @compile {:inline, add_producers: 2, add_operation: 2}

@@ -62,15 +62,8 @@ defmodule GenStage.Flow.Materialize do
   defp dispatcher(opts, []), do: opts
   defp dispatcher(opts, [{_reducer_ops, reducer_opts} | _]) do
     partitions = Keyword.fetch!(reducer_opts, :stages)
-    hash = Keyword.get(reducer_opts, :hash, &hash/2)
+    hash = Keyword.get(reducer_opts, :hash, &:erlang.phash2/2)
     put_in opts[:dispatcher], {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}
-  end
-
-  defp hash({key, _}, max) do
-    :erlang.phash2(key, max)
-  end
-  defp hash(other, _max) do
-    raise "flow expects {key, value} pairs on partitioning, got: #{inspect other}"
   end
 
   defp start_map_reducers(type, producers, opts, change, acc, reducer) do
@@ -184,22 +177,14 @@ defmodule GenStage.Flow.Materialize do
   end
 
   defp start_reducers(ops, opts, producers) do
-    [{:reducer, :reduce_by_key, [reducer]}] = ops
+    [{:reducer, :reduce, [acc, reducer]}] = ops
     change = fn current, acc, _index ->
-      GenStage.async_notify(self(), {:stream, :ets.tab2list(acc)})
+      GenStage.async_notify(self(), {:stream, acc})
       GenStage.async_notify(self(), current)
       {[], acc}
     end
-    acc = fn -> :ets.new(:reducer, [:protected, :set]) end
     start_map_reducers(:producer_consumer, producers, opts, change, acc, fn events, acc ->
-      for event <- events do
-        {key, new} = event
-        case :ets.lookup(acc, key) do
-          [{^key, old}] -> :ets.insert(acc, {key, reducer.(old, new)})
-          [] -> :ets.insert(acc, event)
-        end
-      end
-      {[], acc}
+      {[], Enum.reduce(events, acc, reducer)}
     end)
   end
 end
