@@ -254,4 +254,20 @@ defmodule GenStage.FlowTest do
       assert flow |> Enum.take(5) |> Enum.sort() == [2, 6, 10, 14, 18]
     end
   end
+
+  describe "partition" do
+    test "allows custom partitioning" do
+      assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+             |> Flow.partition(hash: fn _, _ -> 0 end, stages: 4)
+             |> Flow.map_stage(&[Enum.sort(&1)])
+             |> Enum.filter(& &1 != []) == [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
+    end
+
+    test "allows element based partitioning" do
+      assert Flow.from_enumerables([[{1, 1}, {2, 2}, {3, 3}], [{1, 4}, {2, 5}, {3, 6}]])
+             |> Flow.partition(hash: {:elem, 0}, stages: 2)
+             |> Flow.map_stage(fn acc -> [acc |> Enum.map(&elem(&1, 1)) |> Enum.sort()] end)
+             |> Enum.sort() == [[1, 2, 4, 5], [3, 6]]
+    end
+  end
 end

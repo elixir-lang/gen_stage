@@ -607,9 +607,31 @@ defmodule GenStage.Flow do
 
   ## Hash shortcuts
 
-  TODO: Implement this.
+  The following shortcuts can be given to the `:hash` option:
+
+    * `{:elem, pos}` - apply the hash function to the element
+      at position `pos` in the given tuple
+
   """
   def partition(flow, opts \\ []) when is_list(opts) do
+    hash =
+      case Keyword.get(opts, :hash, &:erlang.phash2/2) do
+        fun when is_function(fun, 2) ->
+          fun
+        {:elem, pos} when pos >= 0 ->
+          pos = pos + 1
+          &:erlang.phash2(:erlang.element(pos, &1), &2)
+        other ->
+          raise ArgumentError, """
+          expected :hash to be one of:
+
+            * a function expecting two arguments
+            * {:elem, pos} when pos >= 0
+
+          instead got: #{inspect other}
+          """
+      end
+    opts = Keyword.put(opts, :hash, hash)
     add_operation(flow, {:partition, opts})
   end
 
@@ -647,15 +669,17 @@ defmodule GenStage.Flow do
   end
 
   @doc """
-  Applies the given function over the state stage.
+  Applies the given function over the stage state.
 
-  The stage stage is either a list of all events processed
-  so far or the value of a previous `reduce/3` computation.
+  The stage stage is either a list of all events processed or
+  the value of a previous `reduce/3` computation.
 
   The `mapper` function may have arity 1 or 2:
 
     * when one, the state is given as argument
     * when two, the state and the current stage index are given as arguments
+
+  The value returned by this function becomes the new stage state.
 
   ## Examples
 
@@ -678,6 +702,36 @@ defmodule GenStage.Flow do
   end
   def map_stage(flow, mapper) when is_function(mapper, 1) do
     add_operation(flow, {:map_stage, fn acc, _ -> mapper.(acc) end})
+  end
+
+  @doc """
+  Applies the given function over the stage state without changing its value.
+
+  It is similar to `map_stage/2` except that the value returned by `mapper`
+  is ignored.
+
+      iex> parent = self()
+      iex> flow = Flow.from_enumerable(["the quick brown fox"]) |> Flow.flat_map(fn word ->
+      ...>    String.graphemes(word)
+      ...> end)
+      iex> flow = flow |> Flow.partition(stages: 2) |> Flow.reduce(fn -> %{} end, &Map.put(&2, &1, true))
+      iex> flow = flow |> Flow.each_stage(fn map -> send(parent, map_size(map)) end)
+      iex> Flow.run(flow)
+      iex> receive do
+      ...>   6 -> :ok
+      ...> end
+      :ok
+      iex> receive do
+      ...>   10 -> :ok
+      ...> end
+      :ok
+
+  """
+  def each_stage(flow, mapper) when is_function(mapper, 2) do
+    add_operation(flow, {:map_stage, fn acc, index -> mapper.(acc, index); acc end})
+  end
+  def each_stage(flow, mapper) when is_function(mapper, 1) do
+    add_operation(flow, {:map_stage, fn acc, _index -> mapper.(acc); acc end})
   end
 
   @compile {:inline, add_producers: 2, add_operation: 2}
