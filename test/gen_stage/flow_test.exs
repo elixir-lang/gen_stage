@@ -107,6 +107,11 @@ defmodule GenStage.FlowTest do
              [1, 3, 5]
     end
 
+    test "reduce" do
+      assert @flow |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_stage(&[&1]) |> Enum.sum() ==
+             21
+    end
+
     test "keeps ordering" do
       flow =
         @flow
@@ -114,6 +119,84 @@ defmodule GenStage.FlowTest do
         |> Flow.map(fn(x) -> x + 1 end)
         |> Flow.map(fn(x) -> x * 2 end)
       assert Enum.sort(flow) == [6, 10, 14]
+    end
+  end
+
+  describe "enumerable-partition-stream" do
+    @flow Flow.new(stages: 4)
+          |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+          |> Flow.partition(stages: 4)
+
+    test "each" do
+      parent = self()
+      assert @flow |> Flow.each(&send(parent, &1)) |> Enum.sort() ==
+             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      assert_received 1
+      assert_received 2
+      assert_received 3
+    end
+
+    test "filter" do
+      assert @flow |> Flow.filter(&rem(&1, 2) == 0) |> Enum.sort() ==
+             [2, 4, 6, 8, 10]
+    end
+
+    test "filter_map" do
+      assert @flow |> Flow.filter_map(&rem(&1, 2) == 0, & &1 * 2) |> Enum.sort() ==
+             [4, 8, 12, 16, 20]
+    end
+
+    test "flat_map" do
+      assert @flow |> Flow.flat_map(&[&1, &1]) |> Enum.sort() ==
+             [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10]
+    end
+
+    test "map" do
+      assert @flow |> Flow.map(& &1 * 2) |> Enum.sort() ==
+             [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+    end
+
+    test "reject" do
+      assert @flow |> Flow.reject(&rem(&1, 2) == 0) |> Enum.sort() ==
+             [1, 3, 5, 7, 9]
+    end
+
+    test "reduce" do
+      assert @flow |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_stage(&[&1]) |> Enum.sort() ==
+             [7, 10, 16, 22]
+
+      assert @flow |> Flow.reject(&rem(&1, 2) == 0) |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_stage(&[&1]) |> Enum.sort() ==
+             [0, 0, 3, 22]
+    end
+
+    test "keeps ordering" do
+      flow =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.map(fn(x) -> x + 1 end)
+        |> Flow.map(fn(x) -> x * 2 end)
+      assert Enum.sort(flow) == [6, 10, 14, 18, 22]
+    end
+
+    test "keeps ordering after reduce" do
+      flow =
+        @flow
+        |> Flow.reduce(fn -> [] end, &[&1 | &2])
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.map(fn(x) -> x + 1 end)
+        |> Flow.map(fn(x) -> x * 2 end)
+      assert Enum.sort(flow) == [6, 10, 14, 18, 22]
+    end
+
+    test "keeps ordering after reduce + map_stage" do
+      flow =
+        @flow
+        |> Flow.reduce(fn -> [] end, &[&1 | &2])
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.map(fn(x) -> x + 1 end)
+        |> Flow.map(fn(x) -> x * 2 end)
+        |> Flow.map_stage(&[Enum.sort(&1)])
+      assert Enum.sort(flow) == [[], [6, 14, 18], [10], [22]]
     end
   end
 
