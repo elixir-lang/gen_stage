@@ -22,7 +22,7 @@ defmodule GenStage.FlowTest do
   end
 
   describe "enumerable-stream" do
-    @flow Flow.new(mappers: [stages: 2])
+    @flow Flow.new(stages: 2)
           |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
 
     test "each" do
@@ -70,7 +70,7 @@ defmodule GenStage.FlowTest do
   end
 
   describe "enumerable-mappers-stream" do
-    @flow Flow.new(mappers: [stages: 4])
+    @flow Flow.new(stages: 4)
           |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
 
     test "each" do
@@ -118,7 +118,7 @@ defmodule GenStage.FlowTest do
   end
 
   describe "stages-mappers-stream" do
-    @flow Flow.new(mappers: [stages: 1])
+    @flow Flow.new(stages: 1)
 
     @report [:counter]
 

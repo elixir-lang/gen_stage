@@ -16,12 +16,10 @@ defmodule GenStage.Flow do
   as follows:
 
       File.stream!("path/to/some/file")
-      |> Enum.flat_map(fn line ->
-          String.split(line, " ")
-         end)
+      |> Enum.flat_map(&String.split(&1, " "))
       |> Enum.reduce(%{}, fn word, acc ->
-          Map.update(acc, word, 1, & &1 + 1)
-         end)
+        Map.update(acc, word, 1, & &1 + 1)
+      end)
       |> Enum.to_list()
 
   Unfortunately the implemenation above is not quite efficient
@@ -32,12 +30,10 @@ defmodule GenStage.Flow do
   We can improve the solution above by using the Stream module:
 
       File.stream!("path/to/some/file")
-      |> Stream.flat_map(fn line ->
-          String.split(line, " ")
-         end)
+      |> Stream.flat_map(&String.split(&1, " "))
       |> Enum.reduce(%{}, fn word, acc ->
-          Map.update(acc, word, 1, & &1 + 1)
-         end)
+        Map.update(acc, word, 1, & &1 + 1)
+      end)
       |> Enum.to_list()
 
   Now instead of loading the whole set into memory, we will only
@@ -48,111 +44,87 @@ defmodule GenStage.Flow do
       alias Experimental.GenStage.Flow
       File.stream!("path/to/some/file")
       |> Flow.from_enumerable()
-      |> Flow.flat_map(fn line ->
-        for word <- String.split(" "), do: {word, 1}
+      |> Flow.flat_map(&String.split(&1, " "))
+      |> Flow.partition()
+      |> Flow.reduce(fn -> %{} end, fn word, acc ->
+        Map.update(acc, word, 1, & &1 + 1)
       end)
-      |> Flow.reduce_by_key(& &1 + &2)
       |> Enum.to_list()
 
   To convert from stream to flow, we have done two changes:
 
-    1. `flat_map/2` now returns key-value pairs, using the
-       word itself as key
-    2. this allows us to invoke `reduce_by_key/2` which will
-       invoke the given function for each key
+    1. We have replaced the calls to `Stream` by `Flow`
+    2. We called `partition/1` so words are properly partitioned between stages
 
   The example above will now use all cores available as well
-  as keep an on going flow of data instead of traversing only
-  line by line. We gain concurrency but we lose ordering and
-  locality as the same function will be executed by different
-  processes.
+  as keep an on going flow of data instead of traversing them
+  line by line. Once all data is computed, it is sent to the
+  process which invoked `Enum.to_list/1`.
 
-  We could further improve the flow above to achieve maximum
-  performance with the following changes:
+  While we gain concurrency by calling `Flow`, many of the
+  benefits in using flow is in the partioning the data. We will
+  discuss the need for data partioning next. Lastly, we will
+  comment on possible optimizations to the example above.
+
+  ## Partitioning
+
+  To understand the need to partion the data, let's change the
+  example above and remove the partition call:
 
       alias Experimental.GenStage.Flow
-
-      # Let's compile common patterns for performance
-      empty_space = :binary.compile_pattern(" ") # NEW!
-
-      File.stream!("path/to/some/file", read_ahead: 100_000) # NEW!
+      File.stream!("path/to/some/file")
       |> Flow.from_enumerable()
-      |> Flow.flat_map(fn line ->
-        for word <- String.split(empty_space), do: {word, 1}
+      |> Flow.flat_map(&String.split(&1, " "))
+      |> Flow.reduce(fn -> %{} end, fn word, acc ->
+        Map.update(acc, word, 1, & &1 + 1)
       end)
-      |> Flow.partition_with(storage: :ets) # NEW!
-      |> Flow.reduce_by_key(& &1 + &2)
       |> Enum.to_list()
 
-  We first compiled the binary pattern we use to split lines into
-  words and then changed the `File.stream!` to buffer lines, so we
-  perform less IO operations. We also changed the partition storage
-  to ETS, which will yield better performance in cases like the word
-  counting example above. We will cover those operations in detail
-  over the next sections when we talk about the Map Reduce programming
-  model in which flow is built on top of and when discussing performance.
+  The example above will execute the `flat_map` and `reduce`
+  operations in parallel inside multiple stages. When running
+  on a machine with two cores:
 
-  ## MapReduce
+       [file stream]  # Flow.from_enumerable/1 (producer)
+          |    |
+        [M1]  [M2]    # Flow.flat_map/2 + Flow.reduce/3 (consumer)
 
-  The MapReduce programming model forces us to break our computations
-  in two stages: map and reduce. The map stage is often quite easy to
-  parallellize because items are processed individually. The reduce
-  stages need to group the data either partially or completely.
+  Now imagine that the `M1` and `M2` stages above receive the
+  following lines:
 
-  Let's continue exploring the example above but let's add "stop words"
-  which we don't want to count in our results, as shown below:
+      M1 - "roses are red"
+      M2 - "violets are blue"
+
+  `flat_map/2` will break them into:
+
+      M1 - ["roses", "are", "red"]
+      M2 - ["violets", "are", "blue"]
+
+  Then `reduce/3` will make each stage have the following state:
+
+      M1 - %{"roses" => 1, "are" => 1, "red" => 1}
+      M2 - %{"violets" => 1, "are" => 1, "blue" => 1}
+
+  Although both stages have performed word counting, we have words
+  like "are" that appears on both stages. This means we would need
+  to perform yet another pass on the data merging the duplicated
+  words accross stages.
+
+  Partioning solves this by introducing a new set of stages and
+  making sure the same word is always mapped to the same stage
+  with the help of a hash function. Let's introduce the call to
+  `partition/1` back:
 
       alias Experimental.GenStage.Flow
-
-      # Let's compile common patterns for performance
-      empty_space = :binary.compile_pattern(" ")
-
-      # Words for us to ignore from the text
-      stop_words = ~w(a an and of the)
-
-      File.stream!("path/to/some/file", read_ahead: 100_000)
-      |> Flow.from_enumerable() # All streams are enumerable
-      |> Flow.flat_map(fn line ->
-        for word <- String.split(empty_space),
-            not word in stop_words,
-            do: {word, 1}
+      File.stream!("path/to/some/file")
+      |> Flow.from_enumerable()
+      |> Flow.flat_map(&String.split(&1, " "))
+      |> Flow.partition()
+      |> Flow.reduce(fn -> %{} end, fn word, acc ->
+        Map.update(acc, word, 1, & &1 + 1)
       end)
-      |> Flow.partition_with(storage: :ets)
-      |> Flow.reduce_by_key(& &1 + &2)
       |> Enum.to_list()
 
-  In the example above, we start with the path to a given file,
-  convert it to a stream so we can read the file line by line
-  (alongside a read ahead buffer).
-
-  We start building the flow with `new/0` and then invoke
-  `from_enumerable/1` which sets the given file stream as the
-  source of our flow of data. The next function is `flat_map/2`
-  which receives every line and converts it into a list of words
-  into key-value pairs. For example "the quick brown fox" will
-  become `[{"quick", 1}, {"brown", 1}, {"fox", 1}]` (note "the" is
-  removed as it is a stop word).
-
-  Breaking the input into key-value pairs allows us to partition
-  the data where `reduce_by_key/2` will be invoked every time the
-  flow sees a word more than once. For example, if `{"quick", 1}`
-  appears twice, `reduce_by_key/2` will be invoked and it will
-  become `{"quick", 2}` and so forth. We have configured the
-  partition to use ETS storage for performance.
-
-  The `flow` itself is also an stream. Once `Enum.to_list/1` is
-  called, the whole flow is *materialized* and data starts to flow
-  through. `Enum.to_list/1` will effectively load the whole data
-  set into memory. Loading the whole data into memory is OK for
-  short examples although we would like to avoid such for large
-  data.
-
-  ### Materializing the flow
-
-  Materializing the flow is the act of converting the flow we
-  have defined above effectively into stages (processes).
-  Imagine we executed the example above in a machine with
-  two cores, it would become the following processes:
+  Now we will have the following topology:
 
        [file stream]  # Flow.from_enumerable/1 (producer)
           |    |
@@ -160,130 +132,151 @@ defmodule GenStage.Flow do
           |\  /|
           | \/ |
           |/ \ |
-        [R1]  [R2]    # Flow.reduce_by_key/2 (consumer)
+        [R1]  [R2]    # Flow.reduce/3 (consumer)
 
-  Where `M?` are the mapper stages and `R?` are the reducer
-  stages. If our machine had four cores, we would have `M1`,
-  `M2`, `M3` and `M4` and similar for reducers.
+  If the `M1` and `M2` stages receive the same lines and break
+  them into words as before:
 
-  The idea behind the mapper stages is that they are embarrassingly
-  parallel. Because the `flat_map/2` function works line by line,
+      M1 - ["roses", "are", "red"]
+      M2 - ["violets", "are", "blue"]
+
+  Now any given word will be consistently routed to `R1` or `R2`
+  regardless of its origin. The default hashing function will route
+  them such as:
+
+      R1 - ["roses", "are", "red", "are"]
+      R2 - ["violets", "blue"]
+
+  Resulting in the reduced state of:
+
+      R1 - %{"roses" => 1, "are" => 2, "red" => 1}
+      R2 - %{"violets" => 1, "blue" => 1}
+
+  In a way that each stage has a distinct subset of the data.
+  This way, we know we don't need to merge the data later on
+  as the word in each stage is guaranteed to be unique.
+
+  Partioning the data is a very useful technique. For example,
+  if we want to count the number of unique elements in a dataset,
+  we could perform such count in each partition and then later
+  sum their results as the partitioning guarantees the data on
+  each partition won't overlap. A unique element would never
+  be counted twice.
+
+  The topology above alongside partitioning is very common in
+  the MapReduce programming model which we will briefly discuss
+  next.
+
+  ## MapReduce
+
+  The MapReduce programming model forces us to break our computations
+  in two stages: map and reduce. The map stage is often quite easy to
+  parallellize because events are processed individually and in isolation.
+  The reduce stages need to group the data either partially or completely.
+
+  In the example above, the stages executing `flat_map/2` are the
+  mapper stages. Because the `flat_map/2` function works line by line,
   we can have two, four, eight or more mapper processes that will
   break line by line into words without any need for coordination.
 
-  However, the reducing stage is a bit more complicated. Imagine
-  the file we are processing has the "the quick brown fox" line
-  twice. One line is sent to stage M1 and the other one is sent
-  to stage M2. When counting words, however, we need to make sure
-  both M1 and M2 send the words "quick" to the same reducer stage
-  (for example R1). Similar should happen with the words "brown"
-  and "fox" (which could have gone to R2).
-
-  Luckily this is done automatically by flow since we broke each
-  line into key-value pairs. The mapper uses the hash of the key
-  to figure out which reducer stage should receive a given word.
-  Given any mapper will calculate the same hash for a given key,
-  it is guaranteed a given word will reach the a reducer stage
-  regardless of the mapper that it was on. We call this process
-  *partitioning*. The partitions can be customized with the
-  `partition_with/2` call.
-
-  Once all words have been processed, the reducer stages will
-  send information to the process who called `Enum.to_list/1` so
-  it can effectively build a list. It is important to emphasize
-  that the reducer stages are only done after they have processed
-  the whole collection. After all, if the reducer stage is counting
-  words, we can only know how many words we have seen after we
-  have analyzed the whole dataset.
+  However, the reducing stage is a bit more complicated. Reducer
+  stages typically compute some result based on its inputs. This
+  implies reducer computations need to look at the whole data set
+  and, in order to so efficiently, we want to partition the data
+  to guarantee each reducer stage has a distinct subset of the data.
 
   Generally speaking, the performance of our flow will be limited
   by the amount of work we can perform without having a need to
-  look at the whole collection. Both `flat_map/2` and `reduce_by_key/2`
-  functions work on an item-bases. Some operations like `each_partition/2`
-  and `map_partition/2` are applied to whole partitions on every
-  reducing stage. They are still parallel but must await for the data
-  to be processed. Finally, all operations in `Enum` will necessarily
-  work with the whole dataset.
+  look at the whole collection. Both `flat_map/2` and `reduce/3`
+  functions work on item-per-item. Some operations like `each_stage/2`
+  and `map_stage/2` are applied to whole data in the stage. They are
+  still parallel but must await for the data to be processed.
 
-  ### Fusing stages
-
-  Flow will do its best to ensure the minimum amount of stages are
-  created to avoid unecessary copying of data. For example, imagine
-  we rewrote the flow above to the following:
-
-      Flow.new
-      |> Flow.from_enumerable(stream)
-      |> Flow.flat_map(fn line ->
-        for word <- String.split(empty_space), do: {word, 1}
-      end)
-      |> Flow.filter(fn {word, _} -> not word in stop_words end) # NEW!
-      |> Flow.partition_with(storage: :ets)
-      |> Flow.reduce_by_key(& &1 + &2)
-      |> Flow.map(&IO.inspect/1)                                 # NEW!
-      |> Enum.to_list
-
-  We have done two changes to the flow above. Instead of doing the
-  word filtering inside `flat_map/2`, we are now performing a call
-  to `filter/2` afterwards. We are now also calling `Flow.map/2`
-  with `IO.inspect/1` to print every term before we convert it to
-  list. For the example above, the following flow is generated:
-
-       [file stream]  # Flow.from_enumerable/1
-          |    |
-        [M1]  [M2]    # Flow.flat_map/2 + Flow.filter/2
-          |\  /|
-          | \/ |
-          |/ \ |
-        [R1]  [R2]    # Flow.reduce_by_key/2
-        [M1]  [M2]    # Flow.map/2
-
-  Flow knows `flat_map/2` and `filter/2` can be merged
-  together and has done so. Also flow did not create new mapper
-  stages for the extra `map/2` called after `reduce_by_key/2`.
-  Instead, when reducing is done, it will simply start mapping
-  the items directly from the reducing stages to avoid copying.
-
-  Generally speaking, new stages are only created when we need
-  to partition the data.
+  Calling any function from `Enum` in a flow will start its
+  execution and send the computed dataset to the caller process.
 
   ## Long running-flows
 
   In the examples so far we have started a flow dynamically
-  and consumed it using `Enum.to_list/1`. However, in many
-  situations we want to start a flow as a separate process,
-  possibly without producers or without consumers later on.
+  and consumed it using `Enum.to_list/1`. Unfortunately calling
+  a function from `Enum` will cause the computed dataset to be
+  sent to a single process.
+
+  In many situations, this is either too expensive or completely
+  undesired. For example, in data-processing pipelines, it is
+  common to constantly receive data from external sources. This
+  data is either written to disk or to another storage after
+  processed, without a need to be sent to a single process.
+
+  Flow allows computations to be started as a group of processes
+  which may run indefinitely.
 
   TODO: Add an example with start_link/1. Talk about hot code
   swaps and anonymous functions. Talk about attaching your own
-  producer and your own consumer.
+  producer.
 
   ## Performance discussions
 
   In this section we will discuss points related to performance
   with flows.
 
+  ### Know your code
+
+  There are many optimizations we could perform in the flow above
+  that are not necessarily related to flows themselves. Let's rewrite
+  the flow above using some of them:
+
+      alias Experimental.GenStage.Flow
+
+      # The parent process which will own the table
+      parent = self()
+
+      # Let's compile common patterns for performance
+      empty_space = :binary.compile_pattern(" ") # BINARY
+
+      File.stream!("path/to/some/file", read_ahead: 100_000) # READ_AHEAD
+      |> Flow.from_enumerable()
+      |> Enum.flat_map(&String.split(&1, empty_space)) # BINARY
+      |> Flow.partition()
+      |> Flow.reduce(fn -> :ets.new(:words, []) end, fn word, ets -> # ETS
+        :ets.update_counter(ets, word, {2, 1}, {word, 0})
+        ets
+      end)
+      |> Flow.map_stage(fn ets ->         # ETS
+        :ets.give_away(ets, parent, [])
+        [ets]
+      end)
+      |> Enum.to_list()
+
+  We have performed three optimizations:
+
+    * BINARY - the first optimization is to compile the pattern we use
+      to split the string on
+
+    * READ_AHEAD - the second optimization is to use the `:read_ahead`
+      option for file streams allowing us to do less IO operations by
+      reading large chunks of data at once
+
+    * ETS - the third stores the data in a ETS table and uses its counter
+      operations. For counters and large dataset this provide a great
+      performance benefit as it generates less garbage. At the end, we
+      call `map_stage/2` to transger the ETS table to the parent process
+      and wrap the table in a list so we can access it on `Enum.to_list/1`.
+      Such step is not strictly required. For example, one could write the
+      table to disk with `:ets.tab2file/2` at the end of the computation
+
   ### Configuration (demand and the number of stages)
 
-  TODO: Write me
+  Both `new/1` and `partition/2` allows a set of options to configure
+  how flows work. In particular, we recommend developers to play with
+  the `:min_demand` and `:max_demand` options, which control the amount
+  of data sent between stages.
 
-  ### ETS-based partitions
-
-  Since the reducer stages abstracts away the storage with functions
-  like `reduce_by_key/2`, it is possible to configure the reducer
-  to use ETS tables for some computations. This is particularly
-  useful when the values in our key-value pairs are "atomic" values
-  such as integers or atoms and when the number of keys is really
-  high.
-
-  For the word counting algorithm, ETS can considerably speed-up
-  performance, as we typically have a wide range of keys with integer
-  values, fitting both scenarios above. In the examples above, we have
-  configured the partitions to use ETS with the `partition_with/2` call.
-
-  Keep in mind it is important to benchmark before choosing a
-  different storage as using ETS for complex key-value pairs will
-  likely reduce performance due to the increasing cost in copying
-  data to and from ETS tables.
+  If the stages may perform IO computations, we also recommend increasing
+  the number of stages. The default value is `System.schedulers_online/0`,
+  which is a good default if the stages are CPU bound, however, if stages
+  are waiting on external resources or other processes, increasing the
+  number of stages may be helpful.
 
   ### Avoid single sources
 
@@ -301,12 +294,10 @@ defmodule GenStage.Flow do
 
       streams
       |> Flow.from_enumerables()
-      |> Flow.flat_map(fn line ->
-        for word <- String.split(empty_space),
-            not word in stop_words,
-            do: {word, 1}
+      |> Flow.flat_map(&String.split(&1, " "))
+      |> Flow.reduce(fn -> %{} end, fn word, acc ->
+        Map.update(acc, word, 1, & &1 + 1)
       end)
-      |> Flow.reduce_by_key(& &1 + &2)
       |> Enum.to_list()
 
   Instead of calling `from_enumerable/1`, we now called
@@ -329,7 +320,7 @@ defmodule GenStage.Flow do
 
   """
 
-  defstruct producers: nil, stages: 0, mappers: 0, operations: []
+  defstruct producers: nil, options: [], operations: []
 
   ## Building
 
@@ -338,22 +329,15 @@ defmodule GenStage.Flow do
 
   ## Options
 
-    * `:stages` - the default number of stages to start per mapper and
-      reducer layers throughout the flow. Defaults to `System.schedulers_online/0`.
+    * `:stages` - the number of stages before partitioning
+    * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
+    * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
 
-    * `:mappers` - configures the mapper stages. It accepts the following options:
-
-        * `:stages` - the number of mapper stages
-        * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
-        * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
-
-      All remaining options are sent during subscription, allowing developers
-      to customize `:min_demand`, `:max_demand` and others.
+  All remaining options are sent during subscription, allowing developers
+  to customize `:min_demand`, `:max_demand` and others.
   """
-  def new(opts \\ []) do
-    stages = Keyword.get(opts, :stages, System.schedulers_online)
-    mappers = Keyword.get(opts, :mappers, [])
-    %GenStage.Flow{stages: stages, mappers: mappers}
+  def new(options \\ []) do
+    %GenStage.Flow{options: options}
   end
 
   @doc """
@@ -585,8 +569,8 @@ defmodule GenStage.Flow do
   Partitions the flow with the given options.
 
   Every time this function is called, a new partition
-  is created. Therefore it is recommended to invoke it
-  before any reducer operation.
+  is created. It is typically recommended to invoke it
+  before `reduce/3` so similar data is routed accordingly.
 
   ## Options
 
@@ -603,30 +587,26 @@ defmodule GenStage.Flow do
 
   TODO: Implement this.
   """
-  def partition_with(flow, opts) when is_list(opts) do
+  def partition(flow, opts \\ []) when is_list(opts) do
     add_operation(flow, {:partition, opts})
   end
 
   @doc """
   Reduces the given values with the given accumulator.
 
-  This operation will create a partition if one was not yet
-  created explicitly by another partition function or by
-  calling `partition_with/2`.
-
   The accumulator must be a function that receives no arguments
   and returns the actual accumulator. The accumulator function
-  is executed inside the partitioned process.
+  is executed inside per stage inside each stage.
 
   Once reducing is done, the returned accumulator will be
-  the new state of the partition.
+  the new state of the stage for the given window.
 
   ## Examples
 
       iex> flow = Flow.from_enumerable(["the quick brown fox"]) |> Flow.flat_map(fn word ->
       ...>    String.graphemes(word)
       ...> end)
-      iex> flow = flow |> Flow.reduce_partition(fn -> %{} end, fn grapheme, map ->
+      iex> flow = flow |> Flow.partition |> Flow.reduce(fn -> %{} end, fn grapheme, map ->
       ...>   Map.update(map, grapheme, 1, & &1 + 1)
       ...> end)
       iex> Enum.sort(flow)
@@ -636,9 +616,9 @@ defmodule GenStage.Flow do
        {"x", 1}]
 
   """
-  def reduce_partition(flow, acc, reducer) when is_function(reducer, 2) do
+  def reduce(flow, acc, reducer) when is_function(reducer, 2) do
     if is_function(acc, 0) do
-      add_operation(flow, {:partition, :reduce, [acc, reducer]})
+      add_operation(flow, {:reducer, :reduce, [acc, reducer]})
     else
       raise ArgumentError, "GenStage.Flow.reduce/3 expects the accumulator to be given as a function"
     end
