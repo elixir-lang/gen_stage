@@ -16,7 +16,7 @@ defmodule GenStage.Flow.Materialize do
   def to_stream(%{operations: operations, options: options, producers: producers}) do
     ops = split_operations(operations, options)
     {producers, ops} = start_producers(producers, ops)
-    consumers = start_stages(ops, producers)
+    consumers = start_stages(ops, :stream, producers)
     GenStage.stream(consumers)
   end
 
@@ -58,25 +58,44 @@ defmodule GenStage.Flow.Materialize do
 
   ## Stages
 
-  defp start_stages([], producers) do
+  defp start_stages([], _last, producers) do
     producers
   end
-  defp start_stages([{type, ops, opts} | rest], producers) do
-    start_stages(rest, start_stages(type, ops, dispatcher(opts, rest), producers))
+  defp start_stages([{type, ops, opts} | rest], last, producers) do
+    next = if rest == [], do: last, else: :stage
+    start_stages(rest, last, start_stages(type, next, ops, dispatcher(opts, rest), producers))
   end
 
-  defp start_stages(:reducer, ops, opts, producers) do
-    [{:reducer, :reduce, [acc, reducer]}] = ops
-    change = fn current, acc, _index ->
-      GenStage.async_notify(self(), {:enumerable, acc})
-      GenStage.async_notify(self(), current)
-      {[], acc}
-    end
-    start_stages(:producer_consumer, producers, opts, change, acc, fn events, acc ->
-      {[], Enum.reduce(events, acc, reducer)}
+  defp start_stages(:reducer, next, ops, opts, producers) do
+    type = if next == :nothing, do: :consumer, else: :producer_consumer
+    {reducer_acc, reducer_fun, map_stages} = split_reducers(ops)
+
+    change =
+      fn current, acc, index ->
+        acc =
+          Enum.reduce(map_stages, acc, & &1.(&2, index))
+
+        events =
+          case next do
+            :stage ->
+              GenStage.async_notify(self(), current)
+              acc
+            :stream ->
+              GenStage.async_notify(self(), {:enumerable, acc})
+              GenStage.async_notify(self(), current)
+              []
+            :nothing ->
+              []
+          end
+
+        {events, reducer_acc.()}
+      end
+
+    start_stages(type, producers, opts, change, reducer_acc, fn events, reducer_acc ->
+      {[], Enum.reduce(events, reducer_acc, reducer_fun)}
     end)
   end
-  defp start_stages(:mapper, ops, opts, producers) do
+  defp start_stages(:mapper, _next, ops, opts, producers) do
     reducer = Enum.reduce(Enum.reverse(ops), &[&1 | &2], &mapper/2)
     change = fn current, acc, _index ->
       GenStage.async_notify(self(), current)
@@ -102,6 +121,44 @@ defmodule GenStage.Flow.Materialize do
       pid
     end
   end
+
+  ## Reducers
+
+  defp split_reducers(ops) do
+    {acc, fun, ops} = merge_reducer([], merge_mappers(ops))
+    {acc, fun, Enum.map(ops, &build_map_stage/1)}
+  end
+
+  defp build_map_stage({:reduce, acc, fun}) do
+    fn old_acc, _ -> Enum.reduce(old_acc, acc.(), fun) end
+  end
+  defp build_map_stage({:map_stage, fun}) do
+    fun
+  end
+
+  defp merge_mappers(ops) do
+    case take_mappers(ops, []) do
+      {[], [op | ops]} ->
+        [op | merge_mappers(ops)]
+      {[], []} ->
+        []
+      {mappers, ops} ->
+        {acc, fun, ops} = merge_reducer(mappers, ops)
+        [{:reduce, acc, fun} | merge_mappers(ops)]
+    end
+  end
+
+  defp merge_reducer(mappers, [{:reduce, acc, fun} | ops]) do
+    {acc, Enum.reduce(mappers, fun, &mapper/2), ops}
+  end
+  defp merge_reducer(mappers, ops) do
+    {fn -> [] end, Enum.reduce(mappers, &[&1 | &2], &mapper/2), ops}
+  end
+
+  defp take_mappers([{:mapper, _, _} = mapper | ops], acc),
+    do: take_mappers(ops, [mapper | acc])
+  defp take_mappers(ops, acc),
+    do: {acc, ops}
 
   ## Mappers
 

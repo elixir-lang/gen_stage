@@ -594,9 +594,9 @@ defmodule GenStage.Flow do
   @doc """
   Reduces the given values with the given accumulator.
 
-  The accumulator must be a function that receives no arguments
-  and returns the actual accumulator. The accumulator function
-  is executed inside per stage inside each stage.
+  `acc` is a function that receives no arguments and returns
+  the actual accumulator. The `acc` function is executed per stage
+  inside each stage.
 
   Once reducing is done, the returned accumulator will be
   the new state of the stage for the given window.
@@ -618,10 +618,44 @@ defmodule GenStage.Flow do
   """
   def reduce(flow, acc, reducer) when is_function(reducer, 2) do
     if is_function(acc, 0) do
-      add_operation(flow, {:reducer, :reduce, [acc, reducer]})
+      add_operation(flow, {:reduce, acc, reducer})
     else
       raise ArgumentError, "GenStage.Flow.reduce/3 expects the accumulator to be given as a function"
     end
+  end
+
+  @doc """
+  Applies the given function over the state stage.
+
+  The stage stage is either a list of all events processed
+  so far or the value of a previous `reduce/3` computation.
+
+  The `mapper` function may have arity 1 or 2:
+
+    * when one, the state is given as argument
+    * when two, the state and the current stage index are given as arguments
+
+  ## Examples
+
+  We can use `map_stage/2` to transform the collection after
+  processing. For example, if we want to count the amount of
+  unique letters in a sentence, we can partition the data,
+  then reduce over the unique entries and finally return the
+  size of each stage, summing it all:
+
+      iex> flow = Flow.from_enumerable(["the quick brown fox"]) |> Flow.flat_map(fn word ->
+      ...>    String.graphemes(word)
+      ...> end)
+      iex> flow = flow |> Flow.partition |> Flow.reduce(fn -> %{} end, &Map.put(&2, &1, true))
+      iex> flow |> Flow.map_stage(fn map -> [map_size(map)] end) |> Enum.sum()
+      16
+
+  """
+  def map_stage(flow, mapper) when is_function(mapper, 2) do
+    add_operation(flow, {:map_stage, mapper})
+  end
+  def map_stage(flow, mapper) when is_function(mapper, 1) do
+    add_operation(flow, {:map_stage, fn acc, _ -> mapper.(acc) end})
   end
 
   @compile {:inline, add_producers: 2, add_operation: 2}

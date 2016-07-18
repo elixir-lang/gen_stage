@@ -35,7 +35,7 @@ defmodule GenStage.Flow.MaterializeTest do
     end
 
     test "accumulates reducer stages" do
-      assert [{:reducer, [{:reducer, :reduce, [_, _]}, {:reducer, :reduce, [_, _]}], [stages: @schedulers]}] =
+      assert [{:reducer, [{:reduce, _, _}, {:reduce, _, _}], [stages: @schedulers]}] =
              Flow.new
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.reduce(fn -> 0 end, & &1 * &2)
@@ -44,15 +44,15 @@ defmodule GenStage.Flow.MaterializeTest do
 
     test "accumulates mapper and reducer operations" do
       assert [{:mapper, [{:mapper, :map, [_]}], [stages: @schedulers]},
-              {:reducer, [{:reducer, :reduce, [_, _]}], [stages: 10]}] =
+              {:reducer, [{:reduce, _, _}], [stages: 10]}] =
              Flow.new
              |> Flow.map(& &1)
              |> Flow.partition(stages: 10)
              |> Flow.reduce(fn -> 0 end, & &1 * &2)
              |> split()
 
-      assert [{:reducer, [{:mapper, :map, [_]}, {:reducer, :reduce, [_, _]}], [stages: @schedulers]},
-              {:reducer, [{:reducer, :reduce, [_, _]}], [stages: 10]}] =
+      assert [{:reducer, [{:mapper, :map, [_]}, {:reduce, _, _}], [stages: @schedulers]},
+              {:reducer, [{:reduce, _, _}], [stages: 10]}] =
              Flow.new
              |> Flow.map(& &1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
