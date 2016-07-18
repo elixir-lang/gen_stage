@@ -41,7 +41,7 @@ defmodule GenStage.PartitionDispatcher do
           Map.put(acc, partition, {nil, nil, :queue.in({tag, msg}, :queue.new)})
         {partition, {pid, ref, queue}}, acc when not is_integer(queue) ->
           Map.put(acc, partition, {pid, ref, :queue.in({tag, msg}, queue)})
-        {_, {pid, ref, demand}}, acc ->
+        {_, {pid, ref, _}}, acc ->
           Process.send(pid, {:"$gen_consumer", {self(), ref}, {:notification, msg}}, [:noconnect])
           acc
       end)

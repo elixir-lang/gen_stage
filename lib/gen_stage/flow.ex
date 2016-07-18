@@ -468,6 +468,28 @@ defmodule GenStage.Flow do
     raise ArgumentError, "from_stages/2 expects a non-empty list as argument, got: #{inspect stages}"
   end
 
+  @doc """
+  Runs a given flow.
+
+  This runs the given flow as a stream for its side-effects. No
+  items are sent from the flow to the current process.
+
+  ## Examples
+
+      iex> parent = self()
+      iex> [1, 2, 3] |> Flow.from_enumerable() |> Flow.each(&send(parent, &1)) |> Flow.run()
+      :ok
+      iex> receive do
+      ...>   1 -> :ok
+      ...> end
+      :ok
+
+  """
+  def run(flow) do
+    [] = flow |> map_stage(fn _, _ -> [] end) |> Enum.to_list()
+    :ok
+  end
+
   ## Mappers
 
   @doc """
