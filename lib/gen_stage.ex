@@ -1455,14 +1455,15 @@ defmodule GenStage do
   end
 
   @doc false
-  def format_status(opt, [pdict, %{mod: mod, state: state}]) do
+  def format_status(opt, [pdict, %{mod: mod, state: state} = stage]) do
     case {function_exported?(mod, :format_status, 2), opt} do
       {true, :normal} ->
-        format_status(mod, opt, pdict, state, [data: [{~c(State), state}]])
+        data = format_status_for_stage(stage) ++ [{~c(State), state}]
+        format_status(mod, opt, pdict, state, [data: data])
       {true, :terminate} ->
         format_status(mod, opt, pdict, state, state)
       {false, :normal} ->
-        [data: [{~c(State), state}]]
+        [data: format_status_for_stage(stage) ++ [{~c(State), state}]]
       {false, :terminate} ->
         state
     end
@@ -1476,6 +1477,23 @@ defmodule GenStage do
         default
     end
   end
+
+  defp format_status_for_stage(%{type: :producer} = stage) do
+    {_, counter, _} = stage.buffer
+    [{~c(Consumer count), map_size(stage.consumers)}, {~c(Buffer size), counter}]
+  end
+
+  defp format_status_for_stage(%{type: :producer_consumer} = stage) do
+    {_, counter, _} = stage.buffer
+    [{~c(Consumer count), map_size(stage.consumers)},
+     {~c(Producer count), map_size(stage.producers)},
+     {~c(Buffer size), counter}]
+  end
+
+  defp format_status_for_stage(%{type: :consumer} = stage) do
+    [{~c(Producer count), map_size(stage.producers)}]
+  end
+
 
   ## Shared helpers
 
