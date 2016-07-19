@@ -26,7 +26,7 @@ defmodule GenStage.Flow.Materialize do
   Splits the flow operations into layers of stages.
   """
   def split_operations([], _) do
-    raise ArgumentError, "flow has no operation to perform"
+    []
   end
   def split_operations(operations, opts) do
     split_operations(Enum.reverse(operations), :mapper, [], opts)
@@ -165,16 +165,23 @@ defmodule GenStage.Flow.Materialize do
   defp start_producers({:stages, producers}, ops) do
     {producers, ops}
   end
-  defp start_producers({:enumerables, enumerables}, [{_, _, opts} | _] = ops) do
-    stages = Keyword.fetch!(opts, :stages)
+  defp start_producers({:enumerables, enumerables}, ops) do
+    more_enumerables_than_stages? = more_enumerables_than_stages?(ops, enumerables)
 
     # Fuse mappers into enumerables if we have more enumerables than stages.
     case ops do
-      [{:mapper, mapper_ops, mapper_opts} | ops] when stages < length(enumerables) ->
+      [{:mapper, mapper_ops, mapper_opts} | ops] when more_enumerables_than_stages? ->
         {start_enumerables(enumerables, mapper_ops, dispatcher(mapper_opts, ops)), ops}
       _ ->
         {start_enumerables(enumerables, [], []), ops}
     end
+  end
+
+  defp more_enumerables_than_stages?([{_, _, opts} | _], enumerables) do
+    Keyword.fetch!(opts, :stages) < length(enumerables)
+  end
+  defp more_enumerables_than_stages?([], _enumerables) do
+    false
   end
 
   defp start_enumerables(enumerables, ops, opts) do

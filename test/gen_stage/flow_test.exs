@@ -25,6 +25,10 @@ defmodule GenStage.FlowTest do
     @flow Flow.new(stages: 2)
           |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
 
+    test "only sources"  do
+      assert @flow |> Enum.sort() == [1, 2, 3, 4, 5, 6]
+    end
+
     test "each" do
       parent = self()
       assert @flow |> Flow.each(&send(parent, &1)) |> Enum.sort() ==
@@ -72,6 +76,10 @@ defmodule GenStage.FlowTest do
   describe "enumerable-mappers-stream" do
     @flow Flow.new(stages: 4)
           |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
+
+    test "only sources"  do
+      assert @flow |> Enum.sort() == [1, 2, 3, 4, 5, 6]
+    end
 
     test "each" do
       parent = self()
@@ -208,6 +216,10 @@ defmodule GenStage.FlowTest do
     setup do
       {:ok, pid} = GenStage.start_link(Counter, 0)
       {:ok, counter: pid}
+    end
+
+    test "only sources", %{counter: pid} do
+      assert @flow |> Flow.from_stage(pid) |> Enum.take(5) |> Enum.sort() == [0, 1, 2, 3, 4]
     end
 
     test "each", %{counter: pid} do

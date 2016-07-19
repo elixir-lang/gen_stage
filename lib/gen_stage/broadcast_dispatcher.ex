@@ -2,7 +2,7 @@ alias Experimental.GenStage
 
 defmodule GenStage.BroadcastDispatcher do
   @moduledoc """
-  A dispatcher that accumulates demand from all consumer
+  A dispatcher that accumulates demand from all consumers
   before broadcasting events to all of them.
   """
 
