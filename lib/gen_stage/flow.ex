@@ -5,7 +5,7 @@ defmodule GenStage.Flow do
   Computational flows with stages.
 
   `GenStage.Flow` allows developers to express computations
-  on collections, similar to the `Enum` and `Stream` modules
+  on collections, similar to the `Enum` and `Stream` modules,
   although computations will be executed in parallel using
   multiple `GenStage`s.
 
@@ -188,9 +188,9 @@ defmodule GenStage.Flow do
   Generally speaking, the performance of our flow will be limited
   by the amount of work we can perform without having a need to
   look at the whole collection. Both `flat_map/2` and `reduce/3`
-  functions work on item-per-item. Some operations like `each_stage/2`
-  and `map_stage/2` are applied to whole data in the stage. They are
-  still parallel but must await for the data to be processed.
+  functions work on item-per-item. Some operations like `each_state/2`
+  and `map_state/2` are applied to whole state in the stage. They
+  are still parallel but must await for the data to be processed.
 
   Calling any function from `Enum` in a flow will start its
   execution and send the computed dataset to the caller process.
@@ -242,7 +242,7 @@ defmodule GenStage.Flow do
         :ets.update_counter(ets, word, {2, 1}, {word, 0})
         ets
       end)
-      |> Flow.map_stage(fn ets ->         # ETS
+      |> Flow.map_state(fn ets ->         # ETS
         :ets.give_away(ets, parent, [])
         [ets]
       end)
@@ -260,7 +260,7 @@ defmodule GenStage.Flow do
     * ETS - the third stores the data in a ETS table and uses its counter
       operations. For counters and large dataset this provide a great
       performance benefit as it generates less garbage. At the end, we
-      call `map_stage/2` to transger the ETS table to the parent process
+      call `map_state/2` to transfer the ETS table to the parent process
       and wrap the table in a list so we can access it on `Enum.to_list/1`.
       Such step is not strictly required. For example, one could write the
       table to disk with `:ets.tab2file/2` at the end of the computation
@@ -486,7 +486,7 @@ defmodule GenStage.Flow do
 
   """
   def run(flow) do
-    [] = flow |> map_stage(fn _, _ -> [] end) |> Enum.to_list()
+    [] = flow |> map_state(fn _, _ -> [] end) |> Enum.to_list()
     :ok
   end
 
@@ -683,7 +683,7 @@ defmodule GenStage.Flow do
 
   ## Examples
 
-  We can use `map_stage/2` to transform the collection after
+  We can use `map_state/2` to transform the collection after
   processing. For example, if we want to count the amount of
   unique letters in a sentence, we can partition the data,
   then reduce over the unique entries and finally return the
@@ -693,21 +693,21 @@ defmodule GenStage.Flow do
       ...>    String.graphemes(word)
       ...> end)
       iex> flow = flow |> Flow.partition |> Flow.reduce(fn -> %{} end, &Map.put(&2, &1, true))
-      iex> flow |> Flow.map_stage(fn map -> [map_size(map)] end) |> Enum.sum()
+      iex> flow |> Flow.map_state(fn map -> [map_size(map)] end) |> Enum.sum()
       16
 
   """
-  def map_stage(flow, mapper) when is_function(mapper, 2) do
-    add_operation(flow, {:map_stage, mapper})
+  def map_state(flow, mapper) when is_function(mapper, 2) do
+    add_operation(flow, {:map_state, mapper})
   end
-  def map_stage(flow, mapper) when is_function(mapper, 1) do
-    add_operation(flow, {:map_stage, fn acc, _ -> mapper.(acc) end})
+  def map_state(flow, mapper) when is_function(mapper, 1) do
+    add_operation(flow, {:map_state, fn acc, _ -> mapper.(acc) end})
   end
 
   @doc """
   Applies the given function over the stage state without changing its value.
 
-  It is similar to `map_stage/2` except that the value returned by `mapper`
+  It is similar to `map_state/2` except that the value returned by `mapper`
   is ignored.
 
       iex> parent = self()
@@ -715,7 +715,7 @@ defmodule GenStage.Flow do
       ...>    String.graphemes(word)
       ...> end)
       iex> flow = flow |> Flow.partition(stages: 2) |> Flow.reduce(fn -> %{} end, &Map.put(&2, &1, true))
-      iex> flow = flow |> Flow.each_stage(fn map -> send(parent, map_size(map)) end)
+      iex> flow = flow |> Flow.each_state(fn map -> send(parent, map_size(map)) end)
       iex> Flow.run(flow)
       iex> receive do
       ...>   6 -> :ok
@@ -727,11 +727,11 @@ defmodule GenStage.Flow do
       :ok
 
   """
-  def each_stage(flow, mapper) when is_function(mapper, 2) do
-    add_operation(flow, {:map_stage, fn acc, index -> mapper.(acc, index); acc end})
+  def each_state(flow, mapper) when is_function(mapper, 2) do
+    add_operation(flow, {:map_state, fn acc, index -> mapper.(acc, index); acc end})
   end
-  def each_stage(flow, mapper) when is_function(mapper, 1) do
-    add_operation(flow, {:map_stage, fn acc, _index -> mapper.(acc); acc end})
+  def each_state(flow, mapper) when is_function(mapper, 1) do
+    add_operation(flow, {:map_state, fn acc, _index -> mapper.(acc); acc end})
   end
 
   @compile {:inline, add_producers: 2, add_operation: 2}

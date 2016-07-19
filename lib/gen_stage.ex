@@ -1458,12 +1458,12 @@ defmodule GenStage do
   def format_status(opt, [pdict, %{mod: mod, state: state} = stage]) do
     case {function_exported?(mod, :format_status, 2), opt} do
       {true, :normal} ->
-        data = format_status_for_stage(stage) ++ [{~c(State), state}]
+        data = [{~c(State), state}] ++ format_status_for_stage(stage)
         format_status(mod, opt, pdict, state, [data: data])
       {true, :terminate} ->
         format_status(mod, opt, pdict, state, state)
       {false, :normal} ->
-        [data: format_status_for_stage(stage) ++ [{~c(State), state}]]
+        [data: [{~c(State), state}] ++ format_status_for_stage(stage)]
       {false, :terminate} ->
         state
     end
@@ -1478,22 +1478,30 @@ defmodule GenStage do
     end
   end
 
-  defp format_status_for_stage(%{type: :producer} = stage) do
-    {_, counter, _} = stage.buffer
-    [{~c(Consumer count), map_size(stage.consumers)}, {~c(Buffer size), counter}]
-  end
-
-  defp format_status_for_stage(%{type: :producer_consumer} = stage) do
-    {_, counter, _} = stage.buffer
-    [{~c(Consumer count), map_size(stage.consumers)},
-     {~c(Producer count), map_size(stage.producers)},
+  defp format_status_for_stage(%{type: :producer, consumers: consumers,
+                                 buffer: buffer, dispatcher_mod: dispatcher_mod}) do
+    {_, counter, _} = buffer
+    consumer_pids = Enum.map(consumers, fn {_, {pid, _}} -> pid end)
+    [{~c(Dispatcher), dispatcher_mod},
+     {~c(Consumers), consumer_pids},
      {~c(Buffer size), counter}]
   end
 
-  defp format_status_for_stage(%{type: :consumer} = stage) do
-    [{~c(Producer count), map_size(stage.producers)}]
+  defp format_status_for_stage(%{type: :producer_consumer, producers: producers, consumers: consumers,
+                                 buffer: buffer, dispatcher_mod: dispatcher_mod}) do
+    {_, counter, _} = buffer
+    producer_pids = Enum.map(producers, fn {_, {pid, _, _}} -> pid end)
+    consumer_pids = Enum.map(consumers, fn {_, {pid, _}} -> pid end)
+    [{~c(Dispatcher), dispatcher_mod},
+     {~c(Producers), producer_pids},
+     {~c(Consumers), consumer_pids},
+     {~c(Buffer size), counter}]
   end
 
+  defp format_status_for_stage(%{type: :consumer, producers: producers}) do
+    producer_pids = Enum.map(producers, fn {_, {pid, _, _}} -> pid end)
+    [{~c(Producers), producer_pids}]
+  end
 
   ## Shared helpers
 

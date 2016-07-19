@@ -816,6 +816,15 @@ defmodule GenStageTest do
       :ok = GenStage.stop(pid)
       assert_receive {:terminated, :normal}
     end
+
+    test "format_status/2" do
+      {:ok, producer} = Counter.start_link({:producer, self()})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+
+      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(producer)
+      assert data == [{'State', self()}, {'Dispatcher', GenStage.DemandDispatcher},
+                      {'Consumers', [consumer]}, {'Buffer size', 0}]
+    end
   end
 
   describe "consumer callbacks" do
@@ -912,6 +921,14 @@ defmodule GenStageTest do
       assert capture_log(fn ->
         0 = Counter.sync_queue(consumer, [:f, :g, :h])
       end) =~ "GenStage consumer :gen_stage_error cannot dispatch events"
+    end
+
+    test "format_status/2" do
+      {:ok, producer} = Counter.start_link({:producer, self()})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+
+      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(consumer)
+      assert data == [{'State', self()}, {'Producers', [producer]}]
     end
   end
 
@@ -1027,6 +1044,16 @@ defmodule GenStageTest do
       Process.exit(producer, :kill)
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
       assert_receive {:EXIT, ^consumer, :killed}
+    end
+
+    test "format_status/2" do
+      {:ok, producer} = Counter.start_link({:producer, self()})
+      {:ok, producer_consumer} = Doubler.start_link({:producer_consumer, self(), subscribe_to: [producer]})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
+
+      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(producer_consumer)
+      assert data == [{'State', self()}, {'Dispatcher', GenStage.DemandDispatcher},
+                      {'Producers', [producer]}, {'Consumers', [consumer]}, {'Buffer size', 0}]
     end
   end
 

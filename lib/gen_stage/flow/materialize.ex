@@ -68,12 +68,12 @@ defmodule GenStage.Flow.Materialize do
 
   defp start_stages(:reducer, next, ops, opts, producers) do
     type = if next == :nothing, do: :consumer, else: :producer_consumer
-    {reducer_acc, reducer_fun, map_stages} = split_reducers(ops)
+    {reducer_acc, reducer_fun, map_states} = split_reducers(ops)
 
     change =
       fn current, acc, index ->
         acc =
-          Enum.reduce(map_stages, acc, & &1.(&2, index))
+          Enum.reduce(map_states, acc, & &1.(&2, index))
 
         events =
           case next do
@@ -126,13 +126,13 @@ defmodule GenStage.Flow.Materialize do
 
   defp split_reducers(ops) do
     {acc, fun, ops} = merge_reducer([], merge_mappers(ops))
-    {acc, fun, Enum.map(ops, &build_map_stage/1)}
+    {acc, fun, Enum.map(ops, &build_map_state/1)}
   end
 
-  defp build_map_stage({:reduce, acc, fun}) do
+  defp build_map_state({:reduce, acc, fun}) do
     fn old_acc, _ -> Enum.reduce(old_acc, acc.(), fun) end
   end
-  defp build_map_stage({:map_stage, fun}) do
+  defp build_map_state({:map_state, fun}) do
     fun
   end
 

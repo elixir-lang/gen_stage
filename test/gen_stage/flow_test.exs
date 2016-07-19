@@ -116,7 +116,7 @@ defmodule GenStage.FlowTest do
     end
 
     test "reduce" do
-      assert @flow |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_stage(&[&1]) |> Enum.sum() ==
+      assert @flow |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_state(&[&1]) |> Enum.sum() ==
              21
     end
 
@@ -170,10 +170,10 @@ defmodule GenStage.FlowTest do
     end
 
     test "reduce" do
-      assert @flow |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_stage(&[&1]) |> Enum.sort() ==
+      assert @flow |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_state(&[&1]) |> Enum.sort() ==
              [7, 10, 16, 22]
 
-      assert @flow |> Flow.reject(&rem(&1, 2) == 0) |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_stage(&[&1]) |> Enum.sort() ==
+      assert @flow |> Flow.reject(&rem(&1, 2) == 0) |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_state(&[&1]) |> Enum.sort() ==
              [0, 0, 3, 22]
     end
 
@@ -196,14 +196,14 @@ defmodule GenStage.FlowTest do
       assert Enum.sort(flow) == [6, 10, 14, 18, 22]
     end
 
-    test "keeps ordering after reduce + map_stage" do
+    test "keeps ordering after reduce + map_state" do
       flow =
         @flow
         |> Flow.reduce(fn -> [] end, &[&1 | &2])
         |> Flow.filter(&rem(&1, 2) == 0)
         |> Flow.map(fn(x) -> x + 1 end)
         |> Flow.map(fn(x) -> x * 2 end)
-        |> Flow.map_stage(&[Enum.sort(&1)])
+        |> Flow.map_state(&[Enum.sort(&1)])
       assert Enum.sort(flow) == [[], [6, 14, 18], [10], [22]]
     end
   end
@@ -271,14 +271,14 @@ defmodule GenStage.FlowTest do
     test "allows custom partitioning" do
       assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
              |> Flow.partition(hash: fn _, _ -> 0 end, stages: 4)
-             |> Flow.map_stage(&[Enum.sort(&1)])
+             |> Flow.map_state(&[Enum.sort(&1)])
              |> Enum.filter(& &1 != []) == [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
     end
 
     test "allows element based partitioning" do
       assert Flow.from_enumerables([[{1, 1}, {2, 2}, {3, 3}], [{1, 4}, {2, 5}, {3, 6}]])
              |> Flow.partition(hash: {:elem, 0}, stages: 2)
-             |> Flow.map_stage(fn acc -> [acc |> Enum.map(&elem(&1, 1)) |> Enum.sort()] end)
+             |> Flow.map_state(fn acc -> [acc |> Enum.map(&elem(&1, 1)) |> Enum.sort()] end)
              |> Enum.sort() == [[1, 2, 4, 5], [3, 6]]
     end
   end

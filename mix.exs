@@ -1,14 +1,14 @@
 defmodule GenStage.Mixfile do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
 
   def project do
     [app: :gen_stage,
      version: @version,
      elixir: "~> 1.3",
      package: package(),
-     description: "GenStage specification for Elixir",
+     description: "GenStage specification and computational flow for Elixir",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      deps: deps(),

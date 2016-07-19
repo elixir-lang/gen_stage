@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.0 (2016-07-19)
+
+### Enhancements
+
+  * Introduce `GenStage.Flow` with enumerable/stream based operations
+  * Include more information on `:sys.get_status/1` calls for GenStage
+
+### Bug fixes
+
+  * Fix a bug where a `:producer_consumer` stage which filtered events would eventually halt
+  * Fix `format_status/2` results when inspecting GenStage in `:observer`
+
 ## v0.3.0 (2016-07-12)
 
 ### Enhancements
@@ -26,7 +38,6 @@
 ### Backwards incompatible changes
 
   * Namespace all modules under `Experimental`
-  * Require subscriptions to be explicitly acked by producers
   * Ensure `:cancel` reason does not cascade through the pipeline
 
 ## v0.1.0 (2016-07-03)
