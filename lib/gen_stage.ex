@@ -43,7 +43,7 @@ defmodule GenStage do
 
   A consumer may have multiple producers and a producer may have
   multiple consumers. When a consumer asks for data, each producer
-  is handled separately, with its own demand. When a producer sends
+  is handled separately, with its own demand. When a producer 
   receives demand and sends data to multiple consumers, the demand
   is tracked and the events are sent by a dispatcher. This allows
   producers to send data using different "strategies". See
