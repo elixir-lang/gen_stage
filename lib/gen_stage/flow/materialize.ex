@@ -9,7 +9,7 @@ defmodule GenStage.Flow.Materialize do
   Materializes a flow for stream consumption.
   """
   def to_stream(%{producers: nil}) do
-    raise ArgumentError, "cannot enumerable a flow without producers, " <>
+    raise ArgumentError, "cannot enumerate a flow without producers, " <>
                          "please call `from_enumerable` or `from_stage` accordingly"
   end
 
@@ -32,17 +32,20 @@ defmodule GenStage.Flow.Materialize do
     split_operations(Enum.reverse(operations), :mapper, [], opts)
   end
 
+  @reduce "reduce/group_by"
+  @map_state "map_state/each_state"
+
   defp split_operations([{:partition, opts} | ops], type, acc_ops, acc_opts) do
     [stage(type, acc_ops, acc_opts) | split_operations(ops, :mapper, [], opts)]
   end
   defp split_operations([{:mapper, _, _} = op | ops], :mapper, acc_ops, acc_opts) do
     split_operations(ops, :mapper, [op | acc_ops], acc_opts)
   end
-  defp split_operations([{:reduce, _, _} | _], :reduce, _, _) do
-    raise ArgumentError, "cannot call reduce on flow after a reduce/group_by operation without repartitioning the data"
+  defp split_operations([{:reduce, _, _} | _], :reducer, _, _) do
+    raise ArgumentError, "cannot call #{@reduce} on flow after a #{@reduce} operation without repartitioning the data"
   end
-  defp split_operations([{:map_state, _} | _], :reduce, _, _) do
-    raise ArgumentError, "reduce/group_by must be called before calling map_state/each_state"
+  defp split_operations([{:map_state, _} | _], :mapper, _, _) do
+    raise ArgumentError, "#{@reduce} must be called before calling #{@map_state}"
   end
   defp split_operations([op | ops], _type, acc_ops, acc_opts) do
     split_operations(ops, :reducer, [op | acc_ops], acc_opts)

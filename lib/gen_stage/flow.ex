@@ -568,10 +568,20 @@ defmodule GenStage.Flow do
 
   """
   @spec run(t) :: :ok
-  def run(flow) do
-    [] = flow |> map_state(fn _, _ -> [] end) |> Enum.to_list()
+  def run(%{operations: operations} = flow) do
+    case inject_to_run(operations) do
+      :map_stage ->
+        [] = flow |> map_state(fn _, _ -> [] end) |> Enum.to_list()
+      :reduce ->
+        [] = flow |> reduce(fn -> [] end, fn _, acc -> acc end) |> Enum.to_list()
+    end
     :ok
   end
+
+  defp inject_to_run([{:reduce, _, _} | _]), do: :map_stage
+  defp inject_to_run([{:partition, _} | _]), do: :reduce
+  defp inject_to_run([_ | ops]), do: inject_to_run(ops)
+  defp inject_to_run([]), do: :reduce
 
   ## Mappers
 
