@@ -189,7 +189,7 @@ defmodule GenStage do
 
   Notifications are useful for out-of-band information, for example,
   to notify consumers the producer has sent all events it had to
-  process or that a new batch/window of events is starting.
+  process or that a new batch of events is starting.
 
   Note the notification system should not be used for broadcasting
   events, for such, consider using `GenStage.BroadcastDispatcher`.

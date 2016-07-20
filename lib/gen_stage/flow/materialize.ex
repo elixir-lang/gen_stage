@@ -16,7 +16,7 @@ defmodule GenStage.Flow.Materialize do
   def to_stream(%{operations: operations, options: options, producers: producers}) do
     ops = split_operations(operations, options)
     {producers, ops} = start_producers(producers, ops)
-    consumers = start_stages(ops, :stream, producers)
+    consumers = start_stages(ops, producers)
     GenStage.stream(consumers)
   end
 
@@ -38,6 +38,12 @@ defmodule GenStage.Flow.Materialize do
   defp split_operations([{:mapper, _, _} = op | ops], :mapper, acc_ops, acc_opts) do
     split_operations(ops, :mapper, [op | acc_ops], acc_opts)
   end
+  defp split_operations([{:reduce, _, _} | _], :reduce, _, _) do
+    raise ArgumentError, "cannot call reduce on flow after a reduce/group_by operation without repartitioning the data"
+  end
+  defp split_operations([{:map_state, _} | _], :reduce, _, _) do
+    raise ArgumentError, "reduce/group_by must be called before calling map_state/each_state"
+  end
   defp split_operations([op | ops], _type, acc_ops, acc_opts) do
     split_operations(ops, :reducer, [op | acc_ops], acc_opts)
   end
@@ -46,8 +52,16 @@ defmodule GenStage.Flow.Materialize do
   end
 
   defp stage(type, ops, opts) do
-    {type, Enum.reverse(ops), Keyword.put_new(opts, :stages, System.schedulers_online)}
+    opts =
+      opts
+      |> Keyword.put_new(:stages, System.schedulers_online)
+      |> Keyword.put_new(:emit, :events)
+    {stage_type(type, Keyword.fetch!(opts, :emit)), Enum.reverse(ops), opts}
   end
+
+  defp stage_type(type, :events), do: type
+  defp stage_type(_, :state), do: :reducer
+  defp stage_type(_, other), do: raise ArgumentError, "unknown value #{inspect other} for :emit"
 
   defp dispatcher(opts, []), do: opts
   defp dispatcher(opts, [{_, _stage_ops, stage_opts} | _]) do
@@ -58,51 +72,58 @@ defmodule GenStage.Flow.Materialize do
 
   ## Stages
 
-  defp start_stages([], _last, producers) do
+  defp start_stages([], producers) do
     producers
   end
-  defp start_stages([{type, ops, opts} | rest], last, producers) do
-    next = if rest == [], do: last, else: :stage
-    start_stages(rest, last, start_stages(type, next, ops, dispatcher(opts, rest), producers))
+  defp start_stages([{type, ops, opts} | rest], producers) do
+    start_stages(rest, start_stages(type, ops, dispatcher(opts, rest), producers))
   end
 
-  defp start_stages(:reducer, next, ops, opts, producers) do
-    type = if next == :nothing, do: :consumer, else: :producer_consumer
+  @protocol_undefined "if you would like to emit a modified state from flow, like " <>
+                      "a counter or a custom data-structure, please set the :emit " <>
+                      "option on Flow.new/1 or Flow.partition/2 accordingly"
+
+  defp start_stages(:reducer, ops, opts, producers) do
+    {emit, opts} = Keyword.pop(opts, :emit)
     {reducer_acc, reducer_fun, map_states} = split_reducers(ops)
 
-    change =
-      fn current, acc, index ->
+    trigger =
+      fn acc, index ->
         acc =
           Enum.reduce(map_states, acc, & &1.(&2, index))
 
         events =
-          case next do
-            :stage ->
-              GenStage.async_notify(self(), current)
-              acc
-            :stream ->
-              GenStage.async_notify(self(), {:enumerable, acc})
-              GenStage.async_notify(self(), current)
-              []
-            :nothing ->
-              []
+          case emit do
+            :events ->
+              try do
+                Enum.to_list(acc)
+              rescue
+                e in Protocol.UndefinedError ->
+                  msg = @protocol_undefined
+
+                  e = update_in e.description, fn
+                    "" -> msg
+                    ot -> ot <> " (#{msg})"
+                  end
+
+                  reraise e, System.stacktrace
+              end
+            :state ->
+              [acc]
           end
 
         {events, reducer_acc.()}
       end
 
-    start_stages(type, producers, opts, change, reducer_acc, fn events, reducer_acc ->
+    start_stages(:producer_consumer, producers, opts, trigger, reducer_acc, fn events, reducer_acc ->
       {[], Enum.reduce(events, reducer_acc, reducer_fun)}
     end)
   end
-  defp start_stages(:mapper, _next, ops, opts, producers) do
+  defp start_stages(:mapper, ops, opts, producers) do
     reducer = Enum.reduce(Enum.reverse(ops), &[&1 | &2], &mapper/2)
-    change = fn current, acc, _index ->
-      GenStage.async_notify(self(), current)
-      {[], acc}
-    end
+    trigger = fn acc, _index -> {[], acc} end
     acc = fn -> [] end
-    start_stages(:producer_consumer, producers, opts, change, acc, fn events, [] ->
+    start_stages(:producer_consumer, producers, opts, trigger, acc, fn events, [] ->
       {Enum.reverse(Enum.reduce(events, [], reducer)), []}
     end)
   end
@@ -116,7 +137,7 @@ defmodule GenStage.Flow.Materialize do
         for producer <- producers do
           {producer, [partition: i] ++ subscribe_opts}
         end
-      arg = {type, [subscribe_to: subscriptions] ++ init_opts, i, change, acc, reducer}
+      arg = {type, [subscribe_to: subscriptions] ++ init_opts, {i, stages}, change, acc, reducer}
       {:ok, pid} = GenStage.start_link(GenStage.Flow.MapReducer, arg)
       pid
     end
