@@ -273,13 +273,13 @@ defmodule GenStage.FlowTest do
   describe "partition/2" do
     test "allows emititing events or the whole state" do
       assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
-             |> Flow.partition(emit: :state)
+             |> Flow.partition(emit: :state, stages: 4)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(&Enum.sort(&1))
              |> Enum.sort() == [[1, 5, 7, 9], [2, 6, 8], [3, 4], [10]]
 
       assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
-             |> Flow.partition(emit: :events)
+             |> Flow.partition(emit: :events, stages: 4)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(&Enum.sort(&1))
              |> Enum.sort() == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
