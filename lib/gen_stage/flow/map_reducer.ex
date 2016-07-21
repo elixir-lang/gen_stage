@@ -14,8 +14,8 @@ defmodule GenStage.Flow.MapReducer do
     {type, {status, index, acc_fun.(), reducer}, opts}
   end
 
-  defp start_trigger({:trigger, time, _, _} = trigger) do
-    {:ok, _} = :timer.send_interval(time, self(), trigger)
+  defp start_trigger({:trigger, time, op, name}) do
+    {:ok, _} = :timer.send_interval(time, self(), {:trigger, op, name})
   end
   defp start_trigger(:none) do
     :none
@@ -60,7 +60,7 @@ defmodule GenStage.Flow.MapReducer do
     end
   end
 
-  def handle_info({:trigger, _, keep_or_reset, name}, {status, index, acc, reducer}) do
+  def handle_info({:trigger, keep_or_reset, name}, {status, index, acc, reducer}) do
     %{trigger: trigger, acc_fun: acc_fun} = status
     events = trigger.(acc, index, name)
     acc =
