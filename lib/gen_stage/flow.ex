@@ -888,7 +888,35 @@ defmodule GenStage.Flow do
   @doc """
   Calculates when to emit a trigger.
 
-  Triggers must be set after partitions and before the call to `reduce/3`.
+  Triggers are set per partition and used to temporarily halt the
+  upcoming `reduce/3` step allowing the next operations in a stage
+  to execute before reducing is resumed.
+
+  Triggers must be set after a call to `partition/2` and before
+  the call to `reduce/3`. `trigger/3` expects the flow as first
+  argument, an accumulator function that returns the accumulator
+  when the partition starts and the trigger function.
+
+  The trigger function receives the current batch of events sent
+  by the producer and its own accumulator and it must return one
+  of the two values:
+
+    * `{:cont, acc}` - the reduce operation should continue as usual.
+       `acc` is the trigger state.
+
+    * `{:trigger, name, pre, operation, pos, acc}` - the reduce operation
+      should consume the events contained in `pre` and then a trigger with
+      name `name` is emitted. The trigger implies `reduce/3` will halt and
+      the following `map/2`, `map_state/2` and so on will be invoked for
+      this partition.
+
+      Once the trigger is processed, `reduce/3` will resume
+      and `operation` is either `:keep`, meaning the reducing accumulator
+      should be kept, or `:reset`, implying a new accumulator should be
+      generated. Afterwards, the remaining `pos` events are processed.
+
+  We recommend looking at the implementation of `trigger_every/3` for
+  `:events` as an example of a custom trigger.
   """
   @spec trigger(t, (() -> acc), ([term], acc -> trigger)) :: t
         when trigger: {:cont, acc} | {:trigger, name, pre, :keep | :reset, pos, acc},
