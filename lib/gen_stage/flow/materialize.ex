@@ -3,7 +3,7 @@ alias Experimental.GenStage
 defmodule GenStage.Flow.Materialize do
   @moduledoc false
 
-  @map_reducer_opts [:buffer_keep, :buffer_size, :dispatcher]
+  @map_reducer_opts [:buffer_keep, :buffer_size, :dispatcher, :trigger]
 
   @doc """
   Materializes a flow for stream consumption.
@@ -29,58 +29,70 @@ defmodule GenStage.Flow.Materialize do
     []
   end
   def split_operations(operations, opts) do
-    split_operations(Enum.reverse(operations), false, false, [], opts)
+    split_operations(Enum.reverse(operations), :mapper, :none, [], opts)
   end
 
   @reduce "reduce/group_by"
   @map_state "map_state/each_state/emit"
   @trigger "trigger/trigger_every"
 
-  defp split_operations([{:partition, opts} | ops], reducer?, trigger?, acc_ops, acc_opts) do
-    [stage(reducer?, trigger?, acc_ops, acc_opts) | split_operations(ops, false, false, [], opts)]
+  defp split_operations([{:partition, opts} | ops], type, trigger, acc_ops, acc_opts) do
+    [stage(type, trigger, acc_ops, acc_opts) | split_operations(ops, :mapper, :none, [], opts)]
   end
 
   # reducing? is false
-  defp split_operations([{:mapper, _, _} = op | ops], false, trigger?, acc_ops, acc_opts) do
-    split_operations(ops, false, trigger?, [op | acc_ops], acc_opts)
+  defp split_operations([{:mapper, _, _} = op | ops], :mapper, trigger, acc_ops, acc_opts) do
+    split_operations(ops, :mapper, trigger, [op | acc_ops], acc_opts)
   end
-  defp split_operations([{:map_state, _} | _], false, _, _, _) do
+  defp split_operations([{:map_state, _} | _], :mapper, _, _, _) do
     raise ArgumentError, "#{@map_state} must be called after a #{@reduce} operation"
   end
-  defp split_operations([{:punctuation, _, _} = op| ops], false, false, acc_ops, acc_opts) do
-    split_operations(ops, false, true, [op | acc_ops], acc_opts)
+  defp split_operations([{:punctuation, _, _} = op| ops], :mapper, :none, acc_ops, acc_opts) do
+    split_operations(ops, :mapper, op, [op | acc_ops], acc_opts)
   end
-  defp split_operations([{:punctuation, _, _}| _], false, true, _, _) do
+  defp split_operations([{:punctuation, _, _}| _], :mapper, _, _, _) do
+    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@trigger} operation"
+  end
+  defp split_operations([{:trigger, _, _, _} = op| ops], :mapper, :none, acc_ops, acc_opts) do
+    split_operations(ops, :mapper, op, acc_ops, acc_opts)
+  end
+  defp split_operations([{:trigger, _, _, _}| _], :mapper, _, _, _) do
     raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@trigger} operation"
   end
 
   # reducing? is true
-  defp split_operations([{:reduce, _, _} | _], true, _, _, _) do
+  defp split_operations([{:reduce, _, _} | _], :reducer, _, _, _) do
     raise ArgumentError, "cannot call #{@reduce} on a flow after a #{@reduce} operation (consider using #{@map_state})"
   end
-  defp split_operations([{:punctuation, _, _} | _], true, _, _, _) do
+  defp split_operations([{:punctuation, _, _} | _], :reducer, _, _, _) do
+    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@reduce} operation (consider doing it earlier)"
+  end
+  defp split_operations([{:trigger, _, _, _} | _], :reducer, _, _, _) do
     raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@reduce} operation (consider doing it earlier)"
   end
 
   # Remaining
-  defp split_operations([op | ops], _reducer?, trigger?, acc_ops, acc_opts) do
-    split_operations(ops, true, trigger?, [op | acc_ops], acc_opts)
+  defp split_operations([op | ops], _type, trigger, acc_ops, acc_opts) do
+    split_operations(ops, :reducer, trigger, [op | acc_ops], acc_opts)
   end
-  defp split_operations([], reducer?, trigger?, acc_ops, acc_opts) do
-    [stage(reducer?, trigger?, acc_ops, acc_opts)]
+  defp split_operations([], type, trigger, acc_ops, acc_opts) do
+    [stage(type, trigger, acc_ops, acc_opts)]
   end
 
-  defp stage(reducer?, trigger?, ops, opts) do
+  defp stage(type, trigger, ops, opts) do
     opts = Keyword.put_new(opts, :stages, System.schedulers_online)
-    {stage_type(reducer?, trigger?), Enum.reverse(ops), opts}
+    {stage_type(type, trigger), Enum.reverse(ops), stage_opts(opts, trigger)}
   end
 
-  defp stage_type(false, true),
+  defp stage_type(:mapper, trigger) when trigger != :none,
     do: raise ArgumentError, "cannot invoke #{@trigger} without a #{@reduce} operation"
-  defp stage_type(false, _),
-    do: :mapper
-  defp stage_type(true, _),
-    do: :reducer
+  defp stage_type(type, _),
+    do: type
+
+  defp stage_opts(opts, {:trigger, _, _, _} = trigger),
+    do: Keyword.put(opts, :trigger, trigger)
+  defp stage_opts(opts, _),
+    do: Keyword.delete(opts, :trigger)
 
   defp dispatcher(opts, []), do: opts
   defp dispatcher(opts, [{_, _stage_ops, stage_opts} | _]) do

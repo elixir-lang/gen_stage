@@ -4,12 +4,21 @@ defmodule GenStage.Flow.MapReducer do
   @moduledoc false
   use GenStage
 
-  def init({type, opts, index, trigger, acc, reducer}) do
+  def init({type, opts, index, trigger, acc_fun, reducer}) do
+    {trigger_opts, opts} = Keyword.pop(opts, :trigger, :none)
+    start_trigger(trigger_opts)
     partitioned? = match?({GenStage.PartitionDispatcher, _}, opts[:dispatcher])
     consumers = if type == :consumer, do: :none, else: []
     status = %{producers: [], consumers: consumers, done: [], done?: false,
-               trigger: trigger, partitioned?: partitioned?}
-    {type, {status, index, acc.(), reducer}, opts}
+               trigger: trigger, partitioned?: partitioned?, acc_fun: acc_fun}
+    {type, {status, index, acc_fun.(), reducer}, opts}
+  end
+
+  defp start_trigger({:trigger, time, _, _} = trigger) do
+    {:ok, _} = :timer.send_interval(time, self(), trigger)
+  end
+  defp start_trigger(:none) do
+    :none
   end
 
   def handle_subscribe(:producer, _, {_, ref}, {status, index, acc, reducer}) do
@@ -51,6 +60,16 @@ defmodule GenStage.Flow.MapReducer do
     end
   end
 
+  def handle_info({:trigger, _, keep_or_reset, name}, {status, index, acc, reducer}) do
+    %{trigger: trigger, acc_fun: acc_fun} = status
+    events = trigger.(acc, index, name)
+    acc =
+      case keep_or_reset do
+        :keep  -> acc
+        :reset -> acc_fun.()
+      end
+    {:noreply, events, {status, index, acc, reducer}}
+  end
   def handle_info({{_, ref}, {:producer, state}}, {status, index, acc, reducer}) when state in [:halt, :done] do
     {events, done, done?} = maybe_notify(status, index, acc, ref)
     status = %{status | done: done, done?: done?}

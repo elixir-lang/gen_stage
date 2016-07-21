@@ -243,8 +243,9 @@ defmodule GenStage.Flow do
 
     * Punctuation - hand-written triggers based on the data
 
-  Currently flow supports only explicit triggers via the `trigger/2`
-  function (event count triggers can be emulated with such).
+  Flow supports all triggers above although event time triggers must
+  be explicitly written with the `trigger/3` function. Event count
+  and processing time based tirggers are defined through `trigger_every/4`.
 
   Once a trigger is emitted, the `reduce` step halts and invokes
   the remaining steps for that stage, such as `map/2` and `filter/2`
@@ -932,15 +933,44 @@ defmodule GenStage.Flow do
   @trigger_operation [:keep, :reset]
 
   @doc """
-  Emit a trigger every `count` `unit`.
+  Emits a trigger every `count` `unit`.
 
   `count` must be a positive integer and `unit` is one of:
 
-    * `:events` - emit a trigger every `count` events
+    * `:events` - emits a trigger every `count` events per partition
 
-  The trigger will be named `{:every, count, unit}` and
-  `keep_or_reset` must be one of `:keep` or `:reset` as
-  described in `trigger/2`.
+    * `:microseconds`, `:seconds`, `:minutes`, `:hours` - emits a trigger
+      every `count` second, minute or hour per partition. Notice such
+      times are an estimate and intrinsically innacurate as they are based
+      on the processing time. There is also no guarantee partitions triggers
+      will be aligned as they may trigger at different times. In other
+      words, they are useful for checkpointing but not for partitioning
+      the data into time windows
+
+  The trigger will be named `{:every, count, unit}` and `keep_or_reset`
+  must be one of `:keep` or `:reset` as described in `trigger/2`.
+
+  ## Examples
+
+  Below is an example that checkpoints sums the items from 1 to 100
+  emitting a trigger with the state every 10 items. The extra 5050
+  value at the end is the trigger emitted because processing is done.
+
+      iex> flow = Flow.from_enumerable(1..100)
+      iex> flow = flow |> Flow.partition(stages: 1) |> Flow.trigger_every(10, :events)
+      iex> flow = flow |> Flow.reduce(fn -> 0 end, & &1 + &2)
+      iex> flow |> Flow.emit(:state) |> Enum.sort()
+      [955, 1810, 2565, 3220, 3775, 4230, 4585, 4840, 4995, 5050, 5050]
+
+  Now let's see an example similar to above except we reset the counter
+  on every trigger. At the end, the sum of all values is still 5050:
+
+      iex> flow = Flow.from_enumerable(1..100)
+      iex> flow = flow |> Flow.partition(stages: 1) |> Flow.trigger_every(10, :events, :reset)
+      iex> flow = flow |> Flow.reduce(fn -> 0 end, & &1 + &2)
+      iex> flow |> Flow.emit(:state) |> Enum.sort()
+      [0, 55, 155, 255, 355, 455, 555, 655, 755, 855, 955]
+
   """
   def trigger_every(flow, count, unit, keep_or_reset \\ :keep)
 
@@ -958,6 +988,17 @@ defmodule GenStage.Flow do
       end
     end)
   end
+
+  def trigger_every(flow, count, unit, keep_or_reset)
+      when count > 0 and keep_or_reset in @trigger_operation do
+    add_operation(flow, {:trigger, to_seconds(count, unit), keep_or_reset, {:every, count, unit}})
+  end
+
+  defp to_seconds(count, :microseconds), do: count
+  defp to_seconds(count, :seconds), do: count * 1000
+  defp to_seconds(count, :minutes), do: count * 1000 * 60
+  defp to_seconds(count, :hours), do: count * 1000 * 60 * 60
+  defp to_seconds(_count, unit), do: raise ArgumentError, "unknown unit #{inspect unit}"
 
   @compile {:inline, add_producers: 2, add_operation: 2}
 
