@@ -10,7 +10,7 @@ defmodule GenStage.Flow.Materialize do
   """
   def to_stream(%{producers: nil}) do
     raise ArgumentError, "cannot enumerate a flow without producers, " <>
-                         "please call `from_enumerable` or `from_stage` accordingly"
+                         "please call \"from_enumerable\" or \"from_stage\" accordingly"
   end
 
   def to_stream(%{operations: operations, options: options, producers: producers}) do
@@ -29,42 +29,65 @@ defmodule GenStage.Flow.Materialize do
     []
   end
   def split_operations(operations, opts) do
-    split_operations(Enum.reverse(operations), :mapper, [], opts)
+    split_operations(Enum.reverse(operations), false, false, [], opts)
   end
 
   @reduce "reduce/group_by"
   @map_state "map_state/each_state"
+  @trigger "trigger"
 
-  defp split_operations([{:partition, opts} | ops], type, acc_ops, acc_opts) do
-    [stage(type, acc_ops, acc_opts) | split_operations(ops, :mapper, [], opts)]
+  defp split_operations([{:partition, opts} | ops], reducer?, trigger?, acc_ops, acc_opts) do
+    [stage(reducer?, trigger?, acc_ops, acc_opts) | split_operations(ops, false, false, [], opts)]
   end
-  defp split_operations([{:mapper, _, _} = op | ops], :mapper, acc_ops, acc_opts) do
-    split_operations(ops, :mapper, [op | acc_ops], acc_opts)
+
+  # reducing? is false
+  defp split_operations([{:mapper, _, _} = op | ops], false, trigger?, acc_ops, acc_opts) do
+    split_operations(ops, false, trigger?, [op | acc_ops], acc_opts)
   end
-  defp split_operations([{:reduce, _, _} | _], :reducer, _, _) do
-    raise ArgumentError, "cannot call #{@reduce} on flow after a #{@reduce} operation without repartitioning the data"
-  end
-  defp split_operations([{:map_state, _} | _], :mapper, _, _) do
+  defp split_operations([{:map_state, _} | _], false, _, _, _) do
     raise ArgumentError, "#{@reduce} must be called before calling #{@map_state}"
   end
-  defp split_operations([op | ops], _type, acc_ops, acc_opts) do
-    split_operations(ops, :reducer, [op | acc_ops], acc_opts)
+  defp split_operations([{:punctuation, _, _} = op| ops], false, false, acc_ops, acc_opts) do
+    split_operations(ops, false, true, [op | acc_ops], acc_opts)
   end
-  defp split_operations([], type, acc_ops, acc_opts) do
-    [stage(type, acc_ops, acc_opts)]
+  defp split_operations([{:punctuation, _, _}| _], false, true, _, _) do
+    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@trigger} operation"
   end
 
-  defp stage(type, ops, opts) do
+  # reducing? is true
+  defp split_operations([{:reduce, _, _} | _], true, _, _, _) do
+    raise ArgumentError, "cannot call #{@reduce} on a flow after a #{@reduce} operation (consider using #{@map_state})"
+  end
+  defp split_operations([{:punctuation, _, _} | _], true, _, _, _) do
+    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@reduce} operation (consider doing it earlier)"
+  end
+
+  # Remaining
+  defp split_operations([op | ops], _reducer?, trigger?, acc_ops, acc_opts) do
+    split_operations(ops, true, trigger?, [op | acc_ops], acc_opts)
+  end
+  defp split_operations([], reducer?, trigger?, acc_ops, acc_opts) do
+    [stage(reducer?, trigger?, acc_ops, acc_opts)]
+  end
+
+  defp stage(reducer?, trigger?, ops, opts) do
     opts =
       opts
       |> Keyword.put_new(:stages, System.schedulers_online)
       |> Keyword.put_new(:emit, :events)
-    {stage_type(type, Keyword.fetch!(opts, :emit)), Enum.reverse(ops), opts}
+    {stage_type(reducer?, trigger?, Keyword.fetch!(opts, :emit)), Enum.reverse(ops), opts}
   end
 
-  defp stage_type(type, :events), do: type
-  defp stage_type(_, :state), do: :reducer
-  defp stage_type(_, other), do: raise ArgumentError, "unknown value #{inspect other} for :emit"
+  defp stage_type(false, true, _) do
+    raise ArgumentError, "cannot invoke #{@trigger} without a #{@reduce} operation"
+  end
+  defp stage_type(true, _, :state),   do: :reducer
+  defp stage_type(true, _, :events),  do: :reducer
+  defp stage_type(false, _, :state),  do: :reducer
+  defp stage_type(false, _, :events), do: :mapper
+  defp stage_type(_reducer?, _trigger?, other) do
+    raise ArgumentError, "unknown value #{inspect other} for :emit"
+  end
 
   defp dispatcher(opts, []), do: opts
   defp dispatcher(opts, [{_, _stage_ops, stage_opts} | _]) do
@@ -88,50 +111,19 @@ defmodule GenStage.Flow.Materialize do
 
   defp start_stages(:reducer, ops, opts, producers) do
     {emit, opts} = Keyword.pop(opts, :emit)
-    {reducer_acc, reducer_fun, map_states} = split_reducers(ops)
-
-    trigger =
-      fn acc, index ->
-        acc =
-          Enum.reduce(map_states, acc, & &1.(&2, index))
-
-        events =
-          case emit do
-            :events ->
-              try do
-                Enum.to_list(acc)
-              rescue
-                e in Protocol.UndefinedError ->
-                  msg = @protocol_undefined
-
-                  e = update_in e.description, fn
-                    "" -> msg
-                    ot -> ot <> " (#{msg})"
-                  end
-
-                  reraise e, System.stacktrace
-              end
-            :state ->
-              [acc]
-          end
-
-        {events, reducer_acc.()}
-      end
-
-    start_stages(:producer_consumer, producers, opts, trigger, reducer_acc, fn events, reducer_acc ->
-      {[], Enum.reduce(events, reducer_acc, reducer_fun)}
-    end)
+    {reducer_acc, reducer_fun, trigger} = split_reducers(ops, emit)
+    start_stages(:producer_consumer, producers, opts, trigger, reducer_acc, reducer_fun)
   end
   defp start_stages(:mapper, ops, opts, producers) do
     reducer = Enum.reduce(Enum.reverse(ops), &[&1 | &2], &mapper/2)
-    trigger = fn acc, _index -> {[], acc} end
+    trigger = fn _acc, _index -> [] end
     acc = fn -> [] end
-    start_stages(:producer_consumer, producers, opts, trigger, acc, fn events, [] ->
+    start_stages(:producer_consumer, producers, opts, trigger, acc, fn events, [], _index ->
       {Enum.reverse(Enum.reduce(events, [], reducer)), []}
     end)
   end
 
-  defp start_stages(type, producers, opts, change, acc, reducer) do
+  defp start_stages(type, producers, opts, trigger, acc, reducer) do
     {stages, opts} = Keyword.pop(opts, :stages)
     {init_opts, subscribe_opts} = Keyword.split(opts, @map_reducer_opts)
 
@@ -140,7 +132,7 @@ defmodule GenStage.Flow.Materialize do
         for producer <- producers do
           {producer, [partition: i] ++ subscribe_opts}
         end
-      arg = {type, [subscribe_to: subscriptions] ++ init_opts, {i, stages}, change, acc, reducer}
+      arg = {type, [subscribe_to: subscriptions] ++ init_opts, {i, stages}, trigger, acc, reducer}
       {:ok, pid} = GenStage.start_link(GenStage.Flow.MapReducer, arg)
       pid
     end
@@ -148,35 +140,102 @@ defmodule GenStage.Flow.Materialize do
 
   ## Reducers
 
-  defp split_reducers(ops) do
-    {acc, fun, ops} = merge_reducer([], merge_mappers(ops))
-    {acc, fun, Enum.map(ops, &build_map_state/1)}
+  defp split_reducers(ops, emit) do
+    case take_mappers(ops, []) do
+      {mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} ->
+        {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops, emit)}
+      {punctuation_mappers, [{:punctuation, punctuation_acc, punctuation_fun} | ops]} ->
+        {reducer_mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} = take_mappers(ops, [])
+        trigger = build_trigger(ops, emit)
+        acc = fn -> {punctuation_acc.(), reducer_acc.()} end
+        fun = build_punctuated_reducer(punctuation_mappers, punctuation_fun,
+                                       reducer_mappers, reducer_acc, reducer_fun, trigger)
+        {acc, fun, unpunctuate_trigger(trigger)}
+      {mappers, ops} ->
+        {fn -> [] end, build_reducer(mappers, &[&1 | &2]), build_trigger(ops, emit)}
+    end
   end
 
-  defp build_map_state({:reduce, acc, fun}) do
-    fn old_acc, _ -> Enum.reduce(old_acc, acc.(), fun) end
+  defp build_punctuated_reducer(punctuation_mappers, punctuation_fun,
+                                reducer_mappers, reducer_acc, reducer_fun, trigger) do
+    pre_reducer = Enum.reduce(punctuation_mappers, &[&1 | &2], &mapper/2)
+    pos_reducer = Enum.reduce(reducer_mappers, reducer_fun, &mapper/2)
+
+    fn events, {pun_acc, red_acc}, index ->
+      events
+      |> Enum.reduce([], pre_reducer)
+      |> maybe_punctuate(punctuation_fun, reducer_acc, pun_acc,
+                         red_acc, pos_reducer, index, trigger, [])
+    end
   end
-  defp build_map_state({:map_state, fun}) do
-    fun
+
+  defp maybe_punctuate(events, punctuation_fun, reducer_acc, pun_acc,
+                       red_acc, red_fun, index, trigger, acc) do
+    case punctuation_fun.(events, pun_acc) do
+      {:trigger, pre, op, pos, pun_acc} ->
+        red_acc = Enum.reduce(pre, red_acc, red_fun)
+        emit    = trigger.(red_acc, index)
+        red_acc =
+          case op do
+            :keep  -> red_acc
+            :reset -> reducer_acc.()
+          end
+        maybe_punctuate(pos, punctuation_fun, reducer_acc, pun_acc,
+                        red_acc, red_fun, index, trigger, acc ++ emit)
+      {:cont, pun_acc} ->
+        {acc, {pun_acc, Enum.reduce(events, red_acc, red_fun)}}
+    end
+  end
+
+  defp build_reducer(mappers, fun) do
+    reducer = Enum.reduce(mappers, fun, &mapper/2)
+    fn events, acc, _index ->
+      {[], Enum.reduce(events, acc, reducer)}
+    end
+  end
+
+  defp build_trigger(ops, emit) do
+    map_states = merge_mappers(ops)
+
+    fn acc, index ->
+      acc =
+        Enum.reduce(map_states, acc, & &1.(&2, index))
+
+      case emit do
+        :events ->
+          try do
+            Enum.to_list(acc)
+          rescue
+            e in Protocol.UndefinedError ->
+              msg = @protocol_undefined
+
+              e = update_in e.description, fn
+                "" -> msg
+                ot -> ot <> " (#{msg})"
+              end
+
+              reraise e, System.stacktrace
+          end
+        :state ->
+          [acc]
+      end
+    end
+  end
+
+  defp unpunctuate_trigger(trigger) do
+    fn {_, acc}, index -> trigger.(acc, index) end
   end
 
   defp merge_mappers(ops) do
     case take_mappers(ops, []) do
-      {[], [op | ops]} ->
-        [op | merge_mappers(ops)]
+      {[], [{:map_state, fun} | ops]} ->
+        [fun | merge_mappers(ops)]
       {[], []} ->
         []
       {mappers, ops} ->
-        {acc, fun, ops} = merge_reducer(mappers, ops)
-        [{:reduce, acc, fun} | merge_mappers(ops)]
+        reducer = Enum.reduce(mappers, &[&1 | &2], &mapper/2)
+        [fn old_acc, _ -> Enum.reduce(old_acc, [], reducer) end | merge_mappers(ops)]
     end
-  end
-
-  defp merge_reducer(mappers, [{:reduce, acc, fun} | ops]) do
-    {acc, Enum.reduce(mappers, fun, &mapper/2), ops}
-  end
-  defp merge_reducer(mappers, ops) do
-    {fn -> [] end, Enum.reduce(mappers, &[&1 | &2], &mapper/2), ops}
   end
 
   defp take_mappers([{:mapper, _, _} = mapper | ops], acc),

@@ -1105,9 +1105,6 @@ defmodule GenStage do
             receive_stream(monitor_ref, Map.delete(subscriptions, inner_ref))
         end
 
-      {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, {:enumerable, enumerable}}} ->
-        {enumerable, {:receive, monitor_ref, subscriptions}}
-
       {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:notification, {:producer, _}}} ->
         case subscriptions do
           %{^inner_ref => tuple} ->
@@ -1117,7 +1114,7 @@ defmodule GenStage do
             receive_stream(monitor_ref, subscriptions)
         end
 
-      # Discard remaining notification as to not pollute the inbox
+      # Discard remaining notifications as to not pollute the inbox
       {:"$gen_consumer", {_, {^monitor_ref, _}}, {:notification, _}} ->
         receive_stream(monitor_ref, subscriptions)
 

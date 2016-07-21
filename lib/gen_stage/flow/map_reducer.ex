@@ -8,17 +8,17 @@ defmodule GenStage.Flow.MapReducer do
     partitioned? = match?({GenStage.PartitionDispatcher, _}, opts[:dispatcher])
     consumers = if type == :consumer, do: :none, else: []
     status = %{producers: [], consumers: consumers, done: [], done?: false,
-               trigger: trigger, partitioned?: partitioned?, index: index}
-    {type, {status, acc.(), reducer}, opts}
+               trigger: trigger, partitioned?: partitioned?}
+    {type, {status, index, acc.(), reducer}, opts}
   end
 
-  def handle_subscribe(:producer, _, {_, ref}, {status, acc, reducer}) do
+  def handle_subscribe(:producer, _, {_, ref}, {status, index, acc, reducer}) do
     %{producers: producers, done: done} = status
     status = %{status | producers: [ref | producers], done: [ref | done]}
-    {:automatic, {status, acc, reducer}}
+    {:automatic, {status, index, acc, reducer}}
   end
 
-  def handle_subscribe(:consumer, _, {pid, ref}, {status, acc, reducer}) do
+  def handle_subscribe(:consumer, _, {pid, ref}, {status, index, acc, reducer}) do
     %{consumers: consumers} = status
 
     # If partitioned we do not deliver the notification
@@ -32,53 +32,53 @@ defmodule GenStage.Flow.MapReducer do
     end
 
     status = %{status | consumers: [ref | consumers]}
-    {:automatic, {status, acc, reducer}}
+    {:automatic, {status, index, acc, reducer}}
   end
 
-  def handle_cancel(_, {_, ref}, {status, acc, reducer}) do
+  def handle_cancel(_, {_, ref}, {status, index, acc, reducer}) do
     %{producers: producers, consumers: consumers} = status
 
     cond do
       ref in producers ->
-        {done, done?, events, acc} = maybe_notify(status, acc, ref)
+        {events, done, done?} = maybe_notify(status, index, acc, ref)
         status = %{status | producers: List.delete(producers, ref), done: done, done?: done?}
-        {:noreply, events, {status, acc, reducer}}
+        {:noreply, events, {status, index, acc, reducer}}
       consumers == [ref] ->
-        {:stop, :normal, {status, acc, reducer}}
+        {:stop, :normal, {status, index, acc, reducer}}
       true ->
         status = %{status | consumers: List.delete(consumers, ref)}
-        {:noreply, [], {status, acc, reducer}}
+        {:noreply, [], {status, index, acc, reducer}}
     end
   end
 
-  def handle_info({{_, ref}, {:producer, state}}, {status, acc, reducer}) when state in [:halt, :done] do
-    {done, done?, events, acc} = maybe_notify(status, acc, ref)
+  def handle_info({{_, ref}, {:producer, state}}, {status, index, acc, reducer}) when state in [:halt, :done] do
+    {events, done, done?} = maybe_notify(status, index, acc, ref)
     status = %{status | done: done, done?: done?}
-    {:noreply, events, {status, acc, reducer}}
+    {:noreply, events, {status, index, acc, reducer}}
   end
   def handle_info(_msg, state) do
     {:noreply, [], state}
   end
 
-  def handle_events(events, _from, {status, acc, reducer}) do
-    {events, acc} = reducer.(events, acc)
-    {:noreply, events, {status, acc, reducer}}
+  def handle_events(events, _from, {status, index, acc, reducer}) do
+    {events, acc} = reducer.(events, acc, index)
+    {:noreply, events, {status, index, acc, reducer}}
   end
 
-  defp maybe_notify(%{done: [], done?: true}, acc, _ref) do
-    {[], true, [], acc}
+  defp maybe_notify(%{done: [], done?: true}, _index, _acc, _ref) do
+    {[], [], true}
   end
-  defp maybe_notify(%{done: done, done?: false, trigger: trigger,
-                      index: index, consumers: consumers}, acc, ref) do
+  defp maybe_notify(%{done: done, done?: false, trigger: trigger, consumers: consumers},
+                    index, acc, ref) do
     case List.delete(done, ref) do
       [] when done != [] ->
-        {events, acc} = trigger.(acc, index)
+        events = trigger.(acc, index)
         if is_list(consumers) do
           GenStage.async_notify(self(), {:producer, :done})
         end
-        {[], true, events, acc}
+        {events, [], true}
       done ->
-        {done, false, [], acc}
+        {[], done, false}
     end
   end
 end

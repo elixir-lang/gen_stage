@@ -775,10 +775,10 @@ defmodule GenStage.Flow do
        {"x", 1}]
 
   """
-  @spec reduce(t, (() -> term), (term, term -> term)) :: t
-  def reduce(flow, acc, reducer) when is_function(reducer, 2) do
-    if is_function(acc, 0) do
-      add_operation(flow, {:reduce, acc, reducer})
+  @spec reduce(t, (() -> acc), (term, acc -> acc)) :: t when acc: term()
+  def reduce(flow, acc_fun, reducer_fun) when is_function(reducer_fun, 2) do
+    if is_function(acc_fun, 0) do
+      add_operation(flow, {:reduce, acc_fun, reducer_fun})
     else
       raise ArgumentError, "GenStage.Flow.reduce/3 expects the accumulator to be given as a function"
     end
@@ -855,6 +855,21 @@ defmodule GenStage.Flow do
   end
   def each_state(flow, mapper) when is_function(mapper, 1) do
     add_operation(flow, {:map_state, fn acc, _index -> mapper.(acc); acc end})
+  end
+
+  @doc """
+  Calculates when to emit a trigger.
+
+  Triggers must be set after partitions and before the call to `reduce/3`.
+  """
+  @spec trigger(t, (() -> acc), ([term], acc -> trigger)) :: t
+        when trigger: {:cont, acc} | {:trigger, [term], :keep | :reset, [term], acc}, acc: term()
+  def trigger(flow, acc_fun, trigger_fun) do
+    if is_function(acc_fun, 0) do
+      add_operation(flow, {:punctuation, acc_fun, trigger_fun})
+    else
+      raise ArgumentError, "GenStage.Flow.trigger/3 expects the accumulator to be given as a function"
+    end
   end
 
   @compile {:inline, add_producers: 2, add_operation: 2}
