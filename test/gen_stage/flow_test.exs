@@ -144,7 +144,8 @@ defmodule GenStage.FlowTest do
       assert Flow.new(stages: 4)
              |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
              |> Flow.partition(stages: 4, emit: :state)
-             |> Enum.sort() == [[4, 3], [8, 6, 2], [9, 7, 5, 1], [10]]
+             |> Enum.map(&Enum.sort/1)
+             |> Enum.sort() == [[1, 5, 7, 9], [2, 6, 8], [3, 4], [10]]
     end
 
     test "each/2" do

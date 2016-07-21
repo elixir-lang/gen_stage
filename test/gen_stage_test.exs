@@ -822,7 +822,7 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
       assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(producer)
-      assert data == [{'State', self()}, {'Dispatcher', GenStage.DemandDispatcher},
+      assert data == [{'State', self()}, {'Stage', :producer}, {'Dispatcher', GenStage.DemandDispatcher},
                       {'Consumers', [consumer]}, {'Buffer size', 0}]
     end
   end
@@ -928,7 +928,7 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
       assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(consumer)
-      assert data == [{'State', self()}, {'Producers', [producer]}]
+      assert data == [{'State', self()}, {'Stage', :consumer}, {'Producers', [producer]}]
     end
   end
 
@@ -1052,8 +1052,9 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
 
       assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(producer_consumer)
-      assert data == [{'State', self()}, {'Dispatcher', GenStage.DemandDispatcher},
-                      {'Producers', [producer]}, {'Consumers', [consumer]}, {'Buffer size', 0}]
+      assert data == [{'State', self()}, {'Stage', :producer_consumer},
+                      {'Dispatcher', GenStage.DemandDispatcher}, {'Producers', [producer]},
+                      {'Consumers', [consumer]}, {'Buffer size', 0}]
     end
   end
 
