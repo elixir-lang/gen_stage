@@ -407,7 +407,6 @@ defmodule GenStage.Flow do
   These options configure the stages before partitioning.
 
     * `:stages` - the number of stages
-    * `:emit` - which items to emit by the stage, see the same option in `partition/1`
     * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
     * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
 
@@ -708,9 +707,6 @@ defmodule GenStage.Flow do
       the hash should be calculated on the first element of a tuple.
       See more information on the "Hash shortcuts" section below.
       The default value hashing function `:erlang.phash2/2`.
-    * `:emit` - configures what the stage should emit at the end
-      of this partition. Must be either `:events` (default) or
-      `:state`. See "Emit values" below.
 
   ## Hash shortcuts
 
@@ -721,14 +717,6 @@ defmodule GenStage.Flow do
 
     * `{:key, key}` - apply the hash function to the key of a given map
 
-  ## Emit values
-
-  Most commonly, each partition will emit the events it has
-  processed to the next stages. However, sometimes we want
-  to emit counters or other data structures as a result of
-  our computations. In such cases, the `:emit` option can be
-  set to `:state`, to return the `:state` from `reduce/3`
-  or `map_state/2` or even the processed collection as a whole.
   """
   @spec partition(t, Keyword.t) :: t
   def partition(flow, opts \\ []) when is_list(opts) do
@@ -790,6 +778,31 @@ defmodule GenStage.Flow do
   end
 
   @doc """
+  Controls which values should be emitted from now.
+
+  It can either be `:events` (the default)  or the current
+  stage state as `:state`. This step must be called after
+  the reduce operation and it will guarantee the state is
+  a list that can be sent downstream.
+
+  Most commonly, each partition will emit the events it has
+  processed to the next stages. However, sometimes we want
+  to emit counters or other data structures as a result of
+  our computations. In such cases, the `:emit` option can be
+  set to `:state`, to return the `:state` from `reduce/3`
+  or `map_state/2` or even the processed collection as a whole.
+  """
+  def emit(flow, :events) do
+    flow
+  end
+  def emit(flow, :state) do
+    map_state(flow, fn acc, _, _ -> [acc] end)
+  end
+  def emit(_, emit) do
+    raise ArgumentError, "unknown option for emit: #{inspect emit}"
+  end
+
+  @doc """
   Applies the given function over the stage state.
 
   This function must be called after `reduce/3`, as it
@@ -821,9 +834,9 @@ defmodule GenStage.Flow do
       iex> flow = Flow.from_enumerable(["the quick brown fox"]) |> Flow.flat_map(fn word ->
       ...>    String.graphemes(word)
       ...> end)
-      iex> flow = Flow.partition(flow, emit: :state) # emit the state which will be map_size/1
+      iex> flow = Flow.partition(flow)
       iex> flow = Flow.reduce(flow, fn -> %{} end, &Map.put(&2, &1, true))
-      iex> flow |> Flow.map_state(fn map -> map_size(map) end) |> Enum.sum()
+      iex> flow |> Flow.map_state(fn map -> map_size(map) end) |> Flow.emit(:state) |> Enum.sum()
       16
 
   """

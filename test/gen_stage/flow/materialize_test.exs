@@ -12,9 +12,9 @@ defmodule GenStage.Flow.MaterializeTest do
 
   describe "split_operations/2" do
     test "splits in multiple partitions" do
-      assert [{:mapper, [], [emit: :events, stages: @schedulers]},
-              {:mapper, [], [emit: :events, hash: _, stages: 10]},
-              {:mapper, [], [emit: :events, stages: @schedulers, hash: _]}] =
+      assert [{:mapper, [], [stages: @schedulers]},
+              {:mapper, [], [hash: _, stages: 10]},
+              {:mapper, [], [stages: @schedulers, hash: _]}] =
              Flow.new
              |> Flow.partition([stages: 10])
              |> Flow.partition()
@@ -22,12 +22,12 @@ defmodule GenStage.Flow.MaterializeTest do
     end
 
     test "accumulates mapper stages" do
-      assert [{:mapper, [{:mapper, :map, [_]}], [emit: :events, stages: @schedulers]}] =
+      assert [{:mapper, [{:mapper, :map, [_]}], [stages: @schedulers]}] =
              Flow.new
              |> Flow.map(& &1 + 2)
              |> split()
 
-      assert [{:mapper, [{:mapper, :map, [_]}, {:mapper, :filter, [_]}], [emit: :events, stages: @schedulers]}] =
+      assert [{:mapper, [{:mapper, :map, [_]}, {:mapper, :filter, [_]}], [stages: @schedulers]}] =
              Flow.new
              |> Flow.map(& &1 + 2)
              |> Flow.filter(& &1 < 2)
@@ -35,16 +35,16 @@ defmodule GenStage.Flow.MaterializeTest do
     end
 
     test "accumulates mapper and reducer operations" do
-      assert [{:mapper, [{:mapper, :map, [_]}], [emit: :events, stages: @schedulers]},
-              {:reducer, [{:reduce, _, _}], [emit: :events, hash: _, stages: 10]}] =
+      assert [{:mapper, [{:mapper, :map, [_]}], [stages: @schedulers]},
+              {:reducer, [{:reduce, _, _}], [hash: _, stages: 10]}] =
              Flow.new
              |> Flow.map(& &1)
              |> Flow.partition(stages: 10)
              |> Flow.reduce(fn -> 0 end, & &1 * &2)
              |> split()
 
-      assert [{:reducer, [{:mapper, :map, [_]}, {:reduce, _, _}], [emit: :events, stages: @schedulers]},
-              {:reducer, [{:reduce, _, _}], [emit: :events, hash: _, stages: 10]}] =
+      assert [{:reducer, [{:mapper, :map, [_]}, {:reduce, _, _}], [stages: @schedulers]},
+              {:reducer, [{:reduce, _, _}], [hash: _, stages: 10]}] =
              Flow.new
              |> Flow.map(& &1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
@@ -71,7 +71,7 @@ defmodule GenStage.Flow.MaterializeTest do
   end
 
   test "errors on map_state without reduce" do
-    assert_raise ArgumentError, ~r"reduce/group_by must be called before calling map_state/each_state", fn ->
+    assert_raise ArgumentError, ~r"map_state/each_state/emit must be called after a reduce/group_by operation", fn ->
       Flow.from_enumerable([1, 2, 3])
       |> Flow.map_state(fn x -> x end)
       |> Enum.to_list

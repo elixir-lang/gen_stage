@@ -33,7 +33,7 @@ defmodule GenStage.Flow.Materialize do
   end
 
   @reduce "reduce/group_by"
-  @map_state "map_state/each_state"
+  @map_state "map_state/each_state/emit"
   @trigger "trigger"
 
   defp split_operations([{:partition, opts} | ops], reducer?, trigger?, acc_ops, acc_opts) do
@@ -45,7 +45,7 @@ defmodule GenStage.Flow.Materialize do
     split_operations(ops, false, trigger?, [op | acc_ops], acc_opts)
   end
   defp split_operations([{:map_state, _} | _], false, _, _, _) do
-    raise ArgumentError, "#{@reduce} must be called before calling #{@map_state}"
+    raise ArgumentError, "#{@map_state} must be called after a #{@reduce} operation"
   end
   defp split_operations([{:punctuation, _, _} = op| ops], false, false, acc_ops, acc_opts) do
     split_operations(ops, false, true, [op | acc_ops], acc_opts)
@@ -71,23 +71,16 @@ defmodule GenStage.Flow.Materialize do
   end
 
   defp stage(reducer?, trigger?, ops, opts) do
-    opts =
-      opts
-      |> Keyword.put_new(:stages, System.schedulers_online)
-      |> Keyword.put_new(:emit, :events)
-    {stage_type(reducer?, trigger?, Keyword.fetch!(opts, :emit)), Enum.reverse(ops), opts}
+    opts = Keyword.put_new(opts, :stages, System.schedulers_online)
+    {stage_type(reducer?, trigger?), Enum.reverse(ops), opts}
   end
 
-  defp stage_type(false, true, _) do
-    raise ArgumentError, "cannot invoke #{@trigger} without a #{@reduce} operation"
-  end
-  defp stage_type(true, _, :state),   do: :reducer
-  defp stage_type(true, _, :events),  do: :reducer
-  defp stage_type(false, _, :state),  do: :reducer
-  defp stage_type(false, _, :events), do: :mapper
-  defp stage_type(_reducer?, _trigger?, other) do
-    raise ArgumentError, "unknown value #{inspect other} for :emit"
-  end
+  defp stage_type(false, true),
+    do: raise ArgumentError, "cannot invoke #{@trigger} without a #{@reduce} operation"
+  defp stage_type(false, _),
+    do: :mapper
+  defp stage_type(true, _),
+    do: :reducer
 
   defp dispatcher(opts, []), do: opts
   defp dispatcher(opts, [{_, _stage_ops, stage_opts} | _]) do
@@ -105,13 +98,8 @@ defmodule GenStage.Flow.Materialize do
     start_stages(rest, start_stages(type, ops, dispatcher(opts, rest), producers))
   end
 
-  @protocol_undefined "if you would like to emit a modified state from flow, like " <>
-                      "a counter or a custom data-structure, please set the :emit " <>
-                      "option on Flow.new/1 or Flow.partition/2 accordingly"
-
   defp start_stages(:reducer, ops, opts, producers) do
-    {emit, opts} = Keyword.pop(opts, :emit)
-    {reducer_acc, reducer_fun, trigger} = split_reducers(ops, emit)
+    {reducer_acc, reducer_fun, trigger} = split_reducers(ops)
     start_stages(:producer_consumer, producers, opts, trigger, reducer_acc, reducer_fun)
   end
   defp start_stages(:mapper, ops, opts, producers) do
@@ -140,19 +128,19 @@ defmodule GenStage.Flow.Materialize do
 
   ## Reducers
 
-  defp split_reducers(ops, emit) do
+  defp split_reducers(ops) do
     case take_mappers(ops, []) do
       {mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} ->
-        {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops, emit)}
+        {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops)}
       {punctuation_mappers, [{:punctuation, punctuation_acc, punctuation_fun} | ops]} ->
         {reducer_mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} = take_mappers(ops, [])
-        trigger = build_trigger(ops, emit)
+        trigger = build_trigger(ops)
         acc = fn -> {punctuation_acc.(), reducer_acc.()} end
         fun = build_punctuated_reducer(punctuation_mappers, punctuation_fun,
                                        reducer_mappers, reducer_acc, reducer_fun, trigger)
         {acc, fun, unpunctuate_trigger(trigger)}
       {mappers, ops} ->
-        {fn -> [] end, build_reducer(mappers, &[&1 | &2]), build_trigger(ops, emit)}
+        {fn -> [] end, build_reducer(mappers, &[&1 | &2]), build_trigger(ops)}
     end
   end
 
@@ -194,30 +182,27 @@ defmodule GenStage.Flow.Materialize do
     end
   end
 
-  defp build_trigger(ops, emit) do
+  @protocol_undefined "(if you would like to emit a modified state from flow, like" <>
+                      " a counter or a custom data-structure, please call Flow.emit/2 accordingly)"
+
+  defp build_trigger(ops) do
     map_states = merge_mappers(ops)
 
     fn acc, index, name ->
-      acc =
-        Enum.reduce(map_states, acc, & &1.(&2, index, name))
+      acc = Enum.reduce(map_states, acc, & &1.(&2, index, name))
 
-      case emit do
-        :events ->
-          try do
-            Enum.to_list(acc)
-          rescue
-            e in Protocol.UndefinedError ->
-              msg = @protocol_undefined
+      try do
+        Enum.to_list(acc)
+      rescue
+        e in Protocol.UndefinedError ->
+          msg = @protocol_undefined
 
-              e = update_in e.description, fn
-                "" -> msg
-                ot -> ot <> " (#{msg})"
-              end
-
-              reraise e, System.stacktrace
+          e = update_in e.description, fn
+            "" -> msg
+            dc -> dc <> " #{msg}"
           end
-        :state ->
-          [acc]
+
+          reraise e, System.stacktrace
       end
     end
   end
