@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.1 (2016-07-21)
+
+### Enhancements
+
+  * Add `GenStage.Flow.trigger/3` and `GenStage.Flow.trigger_every/4` supporting custom, count and processing-time triggers. Event-time triggers can be implemented via `trigger/3`. Event-time triggers will be added once windows support is included
+
 ## v0.4.0 (2016-07-19)
 
 ### Enhancements
