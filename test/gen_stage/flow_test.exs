@@ -319,7 +319,7 @@ defmodule GenStage.FlowTest do
              |> Flow.trigger_every(10, :events)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
-             |> Enum.sort() == [955, 1810, 2565, 3220, 3775, 4230, 4585, 4840, 4995, 5050, 5050]
+             |> Enum.to_list() == [55, 210, 465, 820, 1275, 1830, 2485, 3240, 4095, 5050, 5050]
     end
 
     test "trigger keep with small demand" do
@@ -328,7 +328,7 @@ defmodule GenStage.FlowTest do
              |> Flow.trigger_every(10, :events)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
-             |> Enum.sort() == [57, 211, 467, 820, 1277, 1831, 2487, 3240, 4097, 5050, 5050]
+             |> Enum.to_list() == [55, 210, 465, 820, 1275, 1830, 2485, 3240, 4095, 5050, 5050]
     end
 
     test "trigger discard with large demand" do
@@ -337,7 +337,7 @@ defmodule GenStage.FlowTest do
              |> Flow.trigger_every(10, :events, :reset)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
-             |> Enum.sort() == [0, 55, 155, 255, 355, 455, 555, 655, 755, 855, 955]
+             |> Enum.to_list() == [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
     end
 
     test "trigger discard with small demand" do
@@ -346,7 +346,7 @@ defmodule GenStage.FlowTest do
              |> Flow.trigger_every(10, :events, :reset)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
-             |> Enum.sort() == [0, 57, 154, 256, 353, 457, 554, 656, 753, 857, 953]
+             |> Enum.to_list() == [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
     end
 
     test "keep ordering" do

@@ -959,8 +959,8 @@ defmodule GenStage.Flow do
       iex> flow = Flow.from_enumerable(1..100)
       iex> flow = flow |> Flow.partition(stages: 1) |> Flow.trigger_every(10, :events)
       iex> flow = flow |> Flow.reduce(fn -> 0 end, & &1 + &2)
-      iex> flow |> Flow.emit(:state) |> Enum.sort()
-      [955, 1810, 2565, 3220, 3775, 4230, 4585, 4840, 4995, 5050, 5050]
+      iex> flow |> Flow.emit(:state) |> Enum.to_list()
+      [55, 210, 465, 820, 1275, 1830, 2485, 3240, 4095, 5050, 5050]
 
   Now let's see an example similar to above except we reset the counter
   on every trigger. At the end, the sum of all values is still 5050:
@@ -968,8 +968,8 @@ defmodule GenStage.Flow do
       iex> flow = Flow.from_enumerable(1..100)
       iex> flow = flow |> Flow.partition(stages: 1) |> Flow.trigger_every(10, :events, :reset)
       iex> flow = flow |> Flow.reduce(fn -> 0 end, & &1 + &2)
-      iex> flow |> Flow.emit(:state) |> Enum.sort()
-      [0, 55, 155, 255, 355, 455, 555, 655, 755, 855, 955]
+      iex> flow |> Flow.emit(:state) |> Enum.to_list()
+      [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
 
   """
   def trigger_every(flow, count, unit, keep_or_reset \\ :keep)

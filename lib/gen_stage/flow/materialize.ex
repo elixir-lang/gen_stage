@@ -164,6 +164,7 @@ defmodule GenStage.Flow.Materialize do
     fn events, {pun_acc, red_acc}, index ->
       events
       |> Enum.reduce([], pre_reducer)
+      |> Enum.reverse()
       |> maybe_punctuate(punctuation_fun, reducer_acc, pun_acc,
                          red_acc, pos_reducer, index, trigger, [])
     end
