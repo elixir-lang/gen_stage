@@ -227,10 +227,10 @@ defmodule GenStage.Flow do
 
   When working with an unbounded stream of data, there is no
   such thing as data completion. Therefore, when can we consider
-  a reduce function to be effectively complete?
+  a reduce function to be "complete"?
 
-  Our best option is to provide triggers that will cause us
-  to process the reduction we have performed so far.
+  Our best option is to provide triggers that will allow us to
+  check point the processed data so far.
 
   There are different triggers we can use:
 
@@ -243,17 +243,22 @@ defmodule GenStage.Flow do
 
     * Punctuation - hand-written triggers based on the data
 
-  Currently flow supports only hand-written triggers via the `trigger/2`
+  Currently flow supports only explicit triggers via the `trigger/2`
   function (event count triggers can be emulated with such).
 
-  Once a trigger is emitted, a `reduce` computation is marked
-  as completed and can then be further manipulate by regular
-  operations, such as `map/2` and `filter/2` as well as `map_state/2`
-  which will receive the whole reduction state. If the partition
-  is configured to emit events, the result of all operations must
-  be an enumerable, which is eventually sent downstream. If the
-  partition is configured to emit the state itself, that will be
-  the one emitted. See the `:emit` option in `partition/1`.
+  Once a trigger is emitted, the `reduce` step halts and invokes
+  the remaining steps for that stage, such as `map/2` and `filter/2`
+  as well as `map_state/2` which will receive the whole reduction
+  state. Triggers are also named and the trigger names will be sent
+  as third argument to the function given in `map_state/2` and
+  `each_state/2`.
+
+  Once a trigger is emitted and the remaining steps in the stage are
+  processed, developers have the choice of either reseting the
+  accumulation stage or keeping it as is. The resetting option is
+  useful when you are interested only on intermediate results. Keeping
+  the accumulator is useful when you want to checkpoint the values
+  but still work towards an end result.
 
   ## Long running-flows
 
@@ -570,7 +575,7 @@ defmodule GenStage.Flow do
   @spec run(t) :: :ok
   def run(%{operations: operations} = flow) do
     case inject_to_run(operations) do
-      :map_stage ->
+      :map_state ->
         [] = flow |> map_state(fn _, _ -> [] end) |> Enum.to_list()
       :reduce ->
         [] = flow |> reduce(fn -> [] end, fn _, acc -> acc end) |> Enum.to_list()
@@ -578,7 +583,7 @@ defmodule GenStage.Flow do
     :ok
   end
 
-  defp inject_to_run([{:reduce, _, _} | _]), do: :map_stage
+  defp inject_to_run([{:reduce, _, _} | _]), do: :map_state
   defp inject_to_run([{:partition, _} | _]), do: :reduce
   defp inject_to_run([_ | ops]), do: inject_to_run(ops)
   defp inject_to_run([]), do: :reduce
@@ -791,12 +796,16 @@ defmodule GenStage.Flow do
   maps over the state directly (or indirectly) returned
   by `reduce/3`.
 
-  The `mapper` function may have arity 1 or 2:
+  The `mapper` function may have arity 1 or 2 or 3:
 
     * when one, the state is given as argument
     * when two, the state and the stage indexes are given as arguments.
       The index is a tuple with the current stage index as first element
       and the total number of stages for this partition as second
+    * when three, the state and the stage indexes as above are given
+      as well as the trigger name that led for the `reduce/3` to stop.
+      See `trigger/2` for custom triggers. If the producer halts because
+      it does not have more events, the trigger name is `{:producer, :done}`
 
   The value returned by this function becomes the new state
   for the given window/stage pair.
@@ -819,11 +828,14 @@ defmodule GenStage.Flow do
 
   """
   @spec map_state(t, (term -> term) | (term, term -> term)) :: t
-  def map_state(flow, mapper) when is_function(mapper, 2) do
+  def map_state(flow, mapper) when is_function(mapper, 3) do
     add_operation(flow, {:map_state, mapper})
   end
+  def map_state(flow, mapper) when is_function(mapper, 2) do
+    add_operation(flow, {:map_state, fn acc, index, _ -> mapper.(acc, index) end})
+  end
   def map_state(flow, mapper) when is_function(mapper, 1) do
-    add_operation(flow, {:map_state, fn acc, _ -> mapper.(acc) end})
+    add_operation(flow, {:map_state, fn acc, _, _ -> mapper.(acc) end})
   end
 
   @doc """
@@ -850,11 +862,14 @@ defmodule GenStage.Flow do
 
   """
   @spec each_state(t, (term -> term) | (term, term -> term)) :: t
+  def each_state(flow, mapper) when is_function(mapper, 3) do
+    add_operation(flow, {:map_state, fn acc, index, trigger -> mapper.(acc, index, trigger); acc end})
+  end
   def each_state(flow, mapper) when is_function(mapper, 2) do
-    add_operation(flow, {:map_state, fn acc, index -> mapper.(acc, index); acc end})
+    add_operation(flow, {:map_state, fn acc, index, _ -> mapper.(acc, index); acc end})
   end
   def each_state(flow, mapper) when is_function(mapper, 1) do
-    add_operation(flow, {:map_state, fn acc, _index -> mapper.(acc); acc end})
+    add_operation(flow, {:map_state, fn acc, _, _ -> mapper.(acc); acc end})
   end
 
   @doc """
@@ -863,7 +878,8 @@ defmodule GenStage.Flow do
   Triggers must be set after partitions and before the call to `reduce/3`.
   """
   @spec trigger(t, (() -> acc), ([term], acc -> trigger)) :: t
-        when trigger: {:cont, acc} | {:trigger, [term], :keep | :reset, [term], acc}, acc: term()
+        when trigger: {:cont, acc} | {:trigger, name, pre, :keep | :reset, pos, acc},
+             name: term(), pre: [event], pos: [event], acc: term(), event: term()
   def trigger(flow, acc_fun, trigger_fun) do
     if is_function(acc_fun, 0) do
       add_operation(flow, {:punctuation, acc_fun, trigger_fun})

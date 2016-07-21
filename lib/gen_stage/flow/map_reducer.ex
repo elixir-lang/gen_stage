@@ -72,7 +72,7 @@ defmodule GenStage.Flow.MapReducer do
                     index, acc, ref) do
     case List.delete(done, ref) do
       [] when done != [] ->
-        events = trigger.(acc, index)
+        events = trigger.(acc, index, {:producer, :done})
         if is_list(consumers) do
           GenStage.async_notify(self(), {:producer, :done})
         end

@@ -332,7 +332,7 @@ defmodule GenStage.FlowTest do
         length = length(events)
         if length(events) >= acc do
           {pre, pos} = Enum.split(events, acc)
-          {:trigger, pre, op, pos, initial}
+          {:trigger, :trigger_every, pre, op, pos, initial}
         else
           {:cont, acc - length}
         end
@@ -383,6 +383,20 @@ defmodule GenStage.FlowTest do
              |> Flow.map(& &1 + 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Enum.sort() == [75]
+    end
+
+    test "triggers emits the name" do
+      assert Flow.from_enumerable(1..100)
+             |> Flow.partition(emit: :state, stages: 1)
+             |> trigger_every(10, :reset)
+             |> Flow.reduce(fn -> 0 end, & &1 + &2)
+             |> Flow.map_state(fn state, _, trigger -> {trigger, state} end)
+             |> Enum.sort() == [{:trigger_every, 55}, {:trigger_every, 155},
+                                {:trigger_every, 255}, {:trigger_every, 355},
+                                {:trigger_every, 455}, {:trigger_every, 555},
+                                {:trigger_every, 655}, {:trigger_every, 755},
+                                {:trigger_every, 855}, {:trigger_every, 955},
+                                {{:producer, :done}, 0}]
     end
   end
 end

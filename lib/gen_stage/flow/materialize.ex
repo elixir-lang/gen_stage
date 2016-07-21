@@ -116,7 +116,7 @@ defmodule GenStage.Flow.Materialize do
   end
   defp start_stages(:mapper, ops, opts, producers) do
     reducer = Enum.reduce(Enum.reverse(ops), &[&1 | &2], &mapper/2)
-    trigger = fn _acc, _index -> [] end
+    trigger = fn _acc, _index, _trigger -> [] end
     acc = fn -> [] end
     start_stages(:producer_consumer, producers, opts, trigger, acc, fn events, [], _index ->
       {Enum.reverse(Enum.reduce(events, [], reducer)), []}
@@ -172,9 +172,9 @@ defmodule GenStage.Flow.Materialize do
   defp maybe_punctuate(events, punctuation_fun, reducer_acc, pun_acc,
                        red_acc, red_fun, index, trigger, acc) do
     case punctuation_fun.(events, pun_acc) do
-      {:trigger, pre, op, pos, pun_acc} ->
+      {:trigger, name, pre, op, pos, pun_acc} ->
         red_acc = Enum.reduce(pre, red_acc, red_fun)
-        emit    = trigger.(red_acc, index)
+        emit    = trigger.(red_acc, index, name)
         red_acc =
           case op do
             :keep  -> red_acc
@@ -197,9 +197,9 @@ defmodule GenStage.Flow.Materialize do
   defp build_trigger(ops, emit) do
     map_states = merge_mappers(ops)
 
-    fn acc, index ->
+    fn acc, index, name ->
       acc =
-        Enum.reduce(map_states, acc, & &1.(&2, index))
+        Enum.reduce(map_states, acc, & &1.(&2, index, name))
 
       case emit do
         :events ->
@@ -223,7 +223,7 @@ defmodule GenStage.Flow.Materialize do
   end
 
   defp unpunctuate_trigger(trigger) do
-    fn {_, acc}, index -> trigger.(acc, index) end
+    fn {_, acc}, index, name -> trigger.(acc, index, name) end
   end
 
   defp merge_mappers(ops) do
@@ -234,7 +234,7 @@ defmodule GenStage.Flow.Materialize do
         []
       {mappers, ops} ->
         reducer = Enum.reduce(mappers, &[&1 | &2], &mapper/2)
-        [fn old_acc, _ -> Enum.reduce(old_acc, [], reducer) end | merge_mappers(ops)]
+        [fn old_acc, _, _ -> Enum.reduce(old_acc, [], reducer) end | merge_mappers(ops)]
     end
   end
 
