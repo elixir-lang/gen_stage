@@ -915,7 +915,7 @@ defmodule GenStage.Flow do
       should be kept, or `:reset`, implying a new accumulator should be
       generated. Afterwards, the remaining `pos` events are processed.
 
-  We recommend looking at the implementation of `trigger_every/3` for
+  We recommend looking at the implementation of `trigger_every/4` for
   `:events` as an example of a custom trigger.
   """
   @spec trigger(t, (() -> acc), ([term], acc -> trigger)) :: t
@@ -927,6 +927,36 @@ defmodule GenStage.Flow do
     else
       raise ArgumentError, "GenStage.Flow.trigger/3 expects the accumulator to be given as a function"
     end
+  end
+
+  @trigger_operation [:keep, :reset]
+
+  @doc """
+  Emit a trigger every `count` `unit`.
+
+  `count` must be a positive integer and `unit` is one of:
+
+    * `:events` - emit a trigger every `count` events
+
+  The trigger will be named `{:every, count, unit}` and
+  `keep_or_reset` must be one of `:keep` or `:reset` as
+  described in `trigger/2`.
+  """
+  def trigger_every(flow, count, unit, keep_or_reset \\ :keep)
+
+  def trigger_every(flow, count, :events, keep_or_reset)
+      when count > 0 and keep_or_reset in @trigger_operation do
+    name = {:every, count, :events}
+
+    trigger(flow, fn -> count end, fn events, acc ->
+      length = length(events)
+      if length(events) >= acc do
+        {pre, pos} = Enum.split(events, acc)
+        {:trigger, name, pre, keep_or_reset, pos, count}
+      else
+        {:cont, acc - length}
+      end
+    end)
   end
 
   @compile {:inline, add_producers: 2, add_operation: 2}

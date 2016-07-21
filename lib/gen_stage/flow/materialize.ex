@@ -34,7 +34,7 @@ defmodule GenStage.Flow.Materialize do
 
   @reduce "reduce/group_by"
   @map_state "map_state/each_state/emit"
-  @trigger "trigger"
+  @trigger "trigger/trigger_every"
 
   defp split_operations([{:partition, opts} | ops], reducer?, trigger?, acc_ops, acc_opts) do
     [stage(reducer?, trigger?, acc_ops, acc_opts) | split_operations(ops, false, false, [], opts)]

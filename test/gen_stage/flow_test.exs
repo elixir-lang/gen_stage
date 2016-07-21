@@ -313,22 +313,10 @@ defmodule GenStage.FlowTest do
   end
 
   describe "trigger/3" do
-    defp trigger_every(flow, initial, op) do
-      Flow.trigger(flow, fn -> initial end, fn events, acc ->
-        length = length(events)
-        if length(events) >= acc do
-          {pre, pos} = Enum.split(events, acc)
-          {:trigger, :trigger_every, pre, op, pos, initial}
-        else
-          {:cont, acc - length}
-        end
-      end)
-    end
-
     test "triggers keep with large demand" do
       assert Flow.from_enumerable(1..100)
              |> Flow.partition(stages: 1)
-             |> trigger_every(10, :keep)
+             |> Flow.trigger_every(10, :events)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.sort() == [955, 1810, 2565, 3220, 3775, 4230, 4585, 4840, 4995, 5050, 5050]
@@ -337,7 +325,7 @@ defmodule GenStage.FlowTest do
     test "triggers keep with small demand" do
       assert Flow.from_enumerable(1..100)
              |> Flow.partition(stages: 1, max_demand: 5)
-             |> trigger_every(10, :keep)
+             |> Flow.trigger_every(10, :events)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.sort() == [57, 211, 467, 820, 1277, 1831, 2487, 3240, 4097, 5050, 5050]
@@ -346,7 +334,7 @@ defmodule GenStage.FlowTest do
     test "triggers discard with large demand" do
       assert Flow.from_enumerable(1..100)
              |> Flow.partition(stages: 1)
-             |> trigger_every(10, :reset)
+             |> Flow.trigger_every(10, :events, :reset)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.sort() == [0, 55, 155, 255, 355, 455, 555, 655, 755, 855, 955]
@@ -355,7 +343,7 @@ defmodule GenStage.FlowTest do
     test "triggers discard with small demand" do
       assert Flow.from_enumerable(1..100)
              |> Flow.partition(stages: 1, max_demand: 5)
-             |> trigger_every(10, :reset)
+             |> Flow.trigger_every(10, :events, :reset)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.sort() == [0, 57, 154, 256, 353, 457, 554, 656, 753, 857, 953]
@@ -379,16 +367,16 @@ defmodule GenStage.FlowTest do
     test "triggers emits the name" do
       assert Flow.from_enumerable(1..100)
              |> Flow.partition(stages: 1)
-             |> trigger_every(10, :reset)
+             |> Flow.trigger_every(10, :events, :reset)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, trigger -> {trigger, state} end)
              |> Flow.emit(:state)
-             |> Enum.sort() == [{:trigger_every, 55}, {:trigger_every, 155},
-                                {:trigger_every, 255}, {:trigger_every, 355},
-                                {:trigger_every, 455}, {:trigger_every, 555},
-                                {:trigger_every, 655}, {:trigger_every, 755},
-                                {:trigger_every, 855}, {:trigger_every, 955},
-                                {{:producer, :done}, 0}]
+             |> Enum.sort() == [{{:producer, :done}, 0},
+                                {{:every, 10, :events}, 55}, {{:every, 10, :events}, 155},
+                                {{:every, 10, :events}, 255}, {{:every, 10, :events}, 355},
+                                {{:every, 10, :events}, 455}, {{:every, 10, :events}, 555},
+                                {{:every, 10, :events}, 655}, {{:every, 10, :events}, 755},
+                                {{:every, 10, :events}, 855}, {{:every, 10, :events}, 955}]
     end
   end
 end
