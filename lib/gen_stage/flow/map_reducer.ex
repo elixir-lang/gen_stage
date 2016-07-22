@@ -70,7 +70,7 @@ defmodule GenStage.Flow.MapReducer do
       end
     {:noreply, events, {status, index, acc, reducer}}
   end
-  def handle_info({{_, ref}, {:producer, state}}, {status, index, acc, reducer}) when state in [:halt, :done] do
+  def handle_info({{_, ref}, {:producer, state}}, {status, index, acc, reducer}) when state in [:halted, :done] do
     {events, done, done?} = maybe_notify(status, index, acc, ref)
     status = %{status | done: done, done?: done?}
     {:noreply, events, {status, index, acc, reducer}}

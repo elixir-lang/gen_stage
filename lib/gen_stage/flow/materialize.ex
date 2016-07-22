@@ -200,8 +200,8 @@ defmodule GenStage.Flow.Materialize do
     end
   end
 
-  @protocol_undefined "(if you would like to emit a modified state from flow, like" <>
-                      " a counter or a custom data-structure, please call Flow.emit/2 accordingly)"
+  @protocol_undefined "if you would like to emit a modified state from flow, like " <>
+                      "a counter or a custom data-structure, please call Flow.emit/2 accordingly"
 
   defp build_trigger(ops) do
     map_states = merge_mappers(ops)
@@ -217,7 +217,7 @@ defmodule GenStage.Flow.Materialize do
 
           e = update_in e.description, fn
             "" -> msg
-            dc -> dc <> " #{msg}"
+            dc -> dc <> " (#{msg})"
           end
 
           reraise e, System.stacktrace

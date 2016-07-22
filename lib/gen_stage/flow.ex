@@ -257,9 +257,10 @@ defmodule GenStage.Flow do
   towards an end result.
 
   Besides setting triggers, it is also possible to split the data
-  into windows. Opposite to processing time based triggers, which
-  are independent of the data, windows are based on the event-time.
-  Windows will be implemented in future flow versions.
+  into windows. Windows move triggers from processing time (when
+  the data is processed) to event time, which is based on the time
+  information in the events themselves. Windows will be implemented
+  in future flow versions.
 
   TODO: Implement the GenStage.Window module.
 
