@@ -223,43 +223,45 @@ defmodule GenStage.Flow do
   This brings us to the aspects of data completion and data
   emission which we will discuss next.
 
-  ## Data completion and triggers
+  ## Data completion, windows and triggers
 
   When working with an unbounded stream of data, there is no
   such thing as data completion. Therefore, when can we consider
   a reduce function to be "complete"?
 
-  Our best option is to provide triggers that will allow us to
-  check point the processed data so far.
-
-  There are different triggers we can use:
+  One of such mechanisms is the use of triggers. Triggers allow us to
+  check point the processed data so far. There are different triggers
+  we can use:
 
     * Event count triggers - compute state operations every X events
 
-    * Processing time triggers - compute state operations every X seconds
-
-    * Event time triggers - compute state operations based on the times
-      present in the events themselves
+    * Processing time triggers - compute state operations every X time units
 
     * Punctuation - hand-written triggers based on the data
 
-  Flow supports all triggers above although event time triggers must
-  be explicitly written with the `trigger/3` function. Event count
-  and processing time based tirggers are defined through `trigger_every/4`.
+  Flow supports the triggers above via the `trigger/3` and
+  `trigger_every/4` functions.
 
   Once a trigger is emitted, the `reduce` step halts and invokes
-  the remaining steps for that stage, such as `map/2` and `filter/2`
-  as well as `map_state/2` which will receive the whole reduction
-  state. Triggers are also named and the trigger names will be sent
-  as third argument to the function given in `map_state/2` and
-  `each_state/2`.
+  the remaining steps for that stage, such as `map/2`, `filter/2`
+  and `map_state/2`. Triggers are also named and the trigger names
+  will be sent as third argument to the function given in
+  `map_state/2` and `each_state/2`.
 
-  Once a trigger is emitted and the remaining steps in the stage are
-  processed, developers have the choice of either reseting the
+  Once a trigger is emitted and the remaining steps in the stage
+  are processed, developers have the choice of either reseting the
   accumulation stage or keeping it as is. The resetting option is
-  useful when you are interested only on intermediate results. Keeping
-  the accumulator is useful when you want to checkpoint the values
-  but still work towards an end result.
+  useful when you are interested only on intermediate results, usually
+  because another step is aggregator. Keeping the accumulator is the
+  default and used to checkpoint the values while still working
+  towards an end result.
+
+  Besides setting triggers, it is also possible to split the data
+  into windows. Opposite to processing time based triggers, which
+  are independent of the data, windows are based on the event-time.
+  Windows will be implemented in future flow versions.
+
+  TODO: Implement the GenStage.Window module.
 
   ## Long running-flows
 

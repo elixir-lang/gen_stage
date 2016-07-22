@@ -34,7 +34,7 @@ defmodule GenStage.Flow.Materialize do
 
   @reduce "reduce/group_by"
   @map_state "map_state/each_state/emit"
-  @trigger "trigger/trigger_every"
+  @trigger "trigger/trigger_every/window"
 
   defp split_operations([{:partition, opts} | ops], type, trigger, acc_ops, acc_opts) do
     [stage(type, trigger, acc_ops, acc_opts) | split_operations(ops, :mapper, :none, [], opts)]
@@ -51,24 +51,29 @@ defmodule GenStage.Flow.Materialize do
     split_operations(ops, :mapper, op, [op | acc_ops], acc_opts)
   end
   defp split_operations([{:punctuation, _, _}| _], :mapper, _, _, _) do
-    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@trigger} operation"
+    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@trigger} operation " <>
+                         "(it must be called only once per partition)"
   end
   defp split_operations([{:trigger, _, _, _} = op| ops], :mapper, :none, acc_ops, acc_opts) do
     split_operations(ops, :mapper, op, acc_ops, acc_opts)
   end
   defp split_operations([{:trigger, _, _, _}| _], :mapper, _, _, _) do
-    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@trigger} operation"
+    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@trigger} operation " <>
+                         "(it must be called only once per partition)"
   end
 
   # reducing? is true
   defp split_operations([{:reduce, _, _} | _], :reducer, _, _, _) do
-    raise ArgumentError, "cannot call #{@reduce} on a flow after a #{@reduce} operation (consider using #{@map_state})"
+    raise ArgumentError, "cannot call #{@reduce} on a flow after a #{@reduce} operation " <>
+                         "(it must be called only once per partition, consider using map_state/2 instead)"
   end
   defp split_operations([{:punctuation, _, _} | _], :reducer, _, _, _) do
-    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@reduce} operation (consider doing it earlier)"
+    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@reduce} operation " <>
+                         "(it must be called before reduce and only once per partition)"
   end
   defp split_operations([{:trigger, _, _, _} | _], :reducer, _, _, _) do
-    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@reduce} operation (consider doing it earlier)"
+    raise ArgumentError, "cannot call #{@trigger} on a flow after a #{@reduce} operation " <>
+                         "(it must be called before reduce and only once per partition)"
   end
 
   # Remaining
