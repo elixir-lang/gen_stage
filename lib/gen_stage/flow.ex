@@ -27,7 +27,7 @@ defmodule GenStage.Flow do
       end)
       |> Enum.to_list()
 
-  Unfortunately the implemenation above is not quite efficient
+  Unfortunately the implementation above is not quite efficient
   as `Enum.flat_map/2` will build a list with all the words in
   the document before reducing it. If the document is, for example,
   2GB, we will load 2GB of data into memory.
@@ -955,7 +955,7 @@ defmodule GenStage.Flow do
 
     * `:microseconds`, `:seconds`, `:minutes`, `:hours` - emits a trigger
       every `count` second, minute or hour per partition. Notice such
-      times are an estimate and intrinsically innacurate as they are based
+      times are an estimate and intrinsically inaccurate as they are based
       on the processing time. There is also no guarantee partitions triggers
       will be aligned as they may trigger at different times. In other
       words, they are useful for checkpointing but not for partitioning
