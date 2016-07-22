@@ -398,5 +398,18 @@ defmodule GenStage.FlowTest do
              |> Flow.emit(:state)
              |> Enum.take(1) == [110]
     end
+
+    test "trigger based on timers" do
+      assert Flow.new(max_demand: 10)
+             |> Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)))
+             |> Flow.partition(stages: 1, max_demand: 10)
+             |> Flow.reduce(fn ->
+                  Process.send_after(self(), {:trigger, :reset, :sample}, 200)
+                  0
+                end, & &1 + &2)
+             |> Flow.map_state(&{&1 * 2, &2, &3})
+             |> Flow.emit(:state)
+             |> Enum.take(1) == [{110, {0, 1}, :sample}]
+    end
   end
 end

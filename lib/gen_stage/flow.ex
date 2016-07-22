@@ -749,7 +749,8 @@ defmodule GenStage.Flow do
 
   `acc` is a function that receives no arguments and returns
   the actual accumulator. The `acc` function is executed per stage
-  inside each stage.
+  inside each stage when the stage starts or whenever a trigger
+  is emitted with the `:reset` operation.
 
   Once reducing is done, the returned accumulator will be
   the new state of the stage for the given batch.
@@ -918,6 +919,16 @@ defmodule GenStage.Flow do
 
   We recommend looking at the implementation of `trigger_every/4` for
   `:events` as an example of a custom trigger.
+
+  ## Message-based triggers
+
+  It is also possible to dispatch a trigger by sending a message to
+  `self()` with the format of `{:trigger, :keep | :reset, name}`.
+  This is useful for custom triggers and timers. One example is to
+  send the message when building the accumulator for `reduce/3`.
+  If `:reset` is used, every time the accumulator is rebuilt, a new
+  message will be sent. If `:keep` is used and a new timer is necessary,
+  then `each_state/2` can called after `reduce/3` to resend it.
   """
   @spec trigger(t, (() -> acc), ([term], acc -> trigger)) :: t
         when trigger: {:cont, acc} | {:trigger, name, pre, :keep | :reset, pos, acc},
