@@ -75,9 +75,9 @@ defmodule GenStage.DemandDispatcher do
   end
 
   defp split_events(events, 0, acc),
-    do: {Enum.reverse(acc), events, 0}
+    do: {:lists.reverse(acc), events, 0}
   defp split_events([], counter, acc),
-    do: {Enum.reverse(acc), [], counter}
+    do: {:lists.reverse(acc), [], counter}
   defp split_events([event | events], counter, acc),
     do: split_events(events, counter - 1, [event | acc])
 

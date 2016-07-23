@@ -43,7 +43,7 @@ defmodule GenStage do
 
   A consumer may have multiple producers and a producer may have
   multiple consumers. When a consumer asks for data, each producer
-  is handled separately, with its own demand. When a producer 
+  is handled separately, with its own demand. When a producer
   receives demand and sends data to multiple consumers, the demand
   is tracked and the events are sent by a dispatcher. This allows
   producers to send data using different "strategies". See
@@ -981,7 +981,7 @@ defmodule GenStage do
   """
   @spec stream([stage | {stage, Keyword.t}]) :: Enumerable.t
   def stream(subscriptions) when is_list(subscriptions) do
-    subscriptions = Enum.map(subscriptions, &stream_validate_opts/1)
+    subscriptions = :lists.map(&stream_validate_opts/1, subscriptions)
     Stream.resource(fn -> init_stream(subscriptions) end,
                     &consume_stream/1,
                     &close_stream/1)
@@ -1020,7 +1020,7 @@ defmodule GenStage do
   end
 
   defp subscriptions_monitor(parent, monitor_ref, subscriptions) do
-    Enum.reduce(subscriptions, %{}, fn {to, cancel, min, max, opts}, acc ->
+    :lists.foldl(fn {to, cancel, min, max, opts}, acc ->
       producer_pid = GenServer.whereis(to)
 
       cond do
@@ -1035,7 +1035,7 @@ defmodule GenStage do
         cancel == :permanent ->
           exit({:noproc, {GenStage, :init_stream, [subscriptions]}})
       end
-    end)
+    end, %{}, subscriptions)
   end
 
   defp loop_monitor(parent, parent_ref, monitor_ref, keys) do
@@ -1135,9 +1135,9 @@ defmodule GenStage do
 
   defp request_to_cancel_stream(monitor_ref, subscriptions) do
     subscriptions =
-      Enum.reduce(subscriptions, subscriptions, fn {inner_ref, tuple}, acc ->
+      :maps.fold(fn inner_ref, tuple, acc ->
         request_to_cancel_stream(inner_ref, tuple, monitor_ref, acc)
-      end)
+      end, subscriptions, subscriptions)
     receive_stream(monitor_ref, subscriptions)
   end
 
@@ -1164,6 +1164,8 @@ defmodule GenStage do
   end
 
   ## Callbacks
+
+  @compile :inline_list_funcs
 
   @doc false
   def init({mod, args}) do
@@ -1478,7 +1480,7 @@ defmodule GenStage do
   defp format_status_for_stage(%{type: :producer, consumers: consumers,
                                  buffer: buffer, dispatcher_mod: dispatcher_mod}) do
     {_, counter, _} = buffer
-    consumer_pids = Enum.map(consumers, fn {_, {pid, _}} -> pid end)
+    consumer_pids = for {_, {pid, _}} <- consumers, do: pid
     [{~c(Stage), :producer},
      {~c(Dispatcher), dispatcher_mod},
      {~c(Consumers), consumer_pids},
@@ -1488,8 +1490,8 @@ defmodule GenStage do
   defp format_status_for_stage(%{type: :producer_consumer, producers: producers, consumers: consumers,
                                  buffer: buffer, dispatcher_mod: dispatcher_mod}) do
     {_, counter, _} = buffer
-    producer_pids = Enum.map(producers, fn {_, {pid, _, _}} -> pid end)
-    consumer_pids = Enum.map(consumers, fn {_, {pid, _}} -> pid end)
+    producer_pids = for {_, {pid, _, _}} <- producers, do: pid
+    consumer_pids = for {_, {pid, _}} <- consumers, do: pid
     [{~c(Stage), :producer_consumer},
      {~c(Dispatcher), dispatcher_mod},
      {~c(Producers), producer_pids},
@@ -1498,7 +1500,7 @@ defmodule GenStage do
   end
 
   defp format_status_for_stage(%{type: :consumer, producers: producers}) do
-    producer_pids = Enum.map(producers, fn {_, {pid, _, _}} -> pid end)
+    producer_pids = for {_, {pid, _, _}} <- producers, do: pid
     [{~c(Stage), :consumer},
      {~c(Producers), producer_pids}]
   end
@@ -1631,18 +1633,19 @@ defmodule GenStage do
   end
 
   defp take_from_buffer(queue, events, 0, buffer, notifications) do
-    {queue, Enum.reverse(events), 0, buffer, :error, notifications}
+    {queue, :lists.reverse(events), 0, buffer, :error, notifications}
   end
 
   defp take_from_buffer(queue, events, counter, 0, notifications) do
-    {queue, Enum.reverse(events), counter, 0, :error, notifications}
+    {queue, :lists.reverse(events), counter, 0, :error, notifications}
   end
 
   defp take_from_buffer(queue, events, counter, buffer, notifications) when is_reference(notifications) do
     {{:value, value}, queue} = :queue.out(queue)
+
     case value do
       {^notifications, msg} ->
-        {queue, Enum.reverse(events), counter, buffer - 1, {:ok, msg}, notifications}
+        {queue, :lists.reverse(events), counter, buffer - 1, {:ok, msg}, notifications}
       val ->
         take_from_buffer(queue, [val | events], counter - 1, buffer - 1, notifications)
     end
@@ -1653,7 +1656,7 @@ defmodule GenStage do
 
     case pop_and_increment_wheel(wheel) do
       {:ok, msg, wheel} ->
-        {queue, Enum.reverse([value | events]), counter - 1, buffer - 1, {:ok, msg}, wheel}
+        {queue, :lists.reverse([value | events]), counter - 1, buffer - 1, {:ok, msg}, wheel}
       {:error, wheel} ->
         take_from_buffer(queue, [value | events], counter - 1, buffer - 1, wheel)
     end
@@ -1675,7 +1678,7 @@ defmodule GenStage do
     end
 
     stage = %{stage | buffer: {queue, counter, notifications}}
-    Enum.reduce(pending, stage, &dispatch_notification/2)
+    :lists.foldl(&dispatch_notification/2, stage, pending)
   end
 
   defp queue_events(_keep, events, _queue, 0, :infinity, notifications),
@@ -1700,7 +1703,7 @@ defmodule GenStage do
     do: queue_first(events, :queue.in(event, queue), counter + 1, max)
 
   defp queue_last([], queue, excess, counter, _max, pending, wheel),
-    do: {{excess, queue, counter}, Enum.reverse(pending), wheel}
+    do: {{excess, queue, counter}, :lists.reverse(pending), wheel}
   defp queue_last([event | events], queue, excess, max, max, pending, wheel) do
     queue = :queue.in(event, :queue.drop(queue))
     case pop_and_increment_wheel(wheel) do
@@ -1769,7 +1772,7 @@ defmodule GenStage do
   ## Consumer helpers
 
   defp consumer_init_subscribe(producers, stage) do
-    Enum.reduce producers, {:ok, stage}, fn
+    :lists.foldl fn
       to, {:ok, stage} ->
         case consumer_subscribe(to, stage) do
           {:reply, _, stage}    -> {:ok, stage}
@@ -1778,7 +1781,7 @@ defmodule GenStage do
         end
       _, {:stop, reason} ->
         {:stop, reason}
-    end
+    end, {:ok, stage}, producers
   end
 
   defp consumer_receive({_, ref} = from, {producer_id, cancel, {demand, min, max}}, events, stage) do
@@ -1791,7 +1794,7 @@ defmodule GenStage do
   end
 
   defp split_batches([], _from, _min, _max, _old_demand, new_demand, batches) do
-    {new_demand, Enum.reverse(batches)}
+    {new_demand, :lists.reverse(batches)}
   end
   defp split_batches(events, from, min, max, old_demand, new_demand, batches) do
     {events, batch, batch_size} = split_events(events, max - min, 0, [])
@@ -1820,9 +1823,9 @@ defmodule GenStage do
   end
 
   defp split_events(events, limit, limit, acc),
-    do: {events, Enum.reverse(acc), limit}
+    do: {events, :lists.reverse(acc), limit}
   defp split_events([], _limit, counter, acc),
-    do: {[], Enum.reverse(acc), counter}
+    do: {[], :lists.reverse(acc), counter}
   defp split_events([event | events], limit, counter, acc),
     do: split_events(events, limit, counter + 1, [event | acc])
 

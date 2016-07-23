@@ -67,9 +67,9 @@ defmodule GenStage.BroadcastDispatcher do
     do: demands |> Enum.reduce(acc, fn {val, _, _}, acc -> min(val, acc) end) |> max(0)
 
   defp split_events(events, 0, acc),
-    do: {Enum.reverse(acc), events, 0}
+    do: {:lists.reverse(acc), events, 0}
   defp split_events([], counter, acc),
-    do: {Enum.reverse(acc), [], counter}
+    do: {:lists.reverse(acc), [], counter}
   defp split_events([event | events], counter, acc),
     do: split_events(events, counter - 1, [event | acc])
 

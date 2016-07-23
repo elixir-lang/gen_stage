@@ -121,44 +121,54 @@ defmodule GenStage.PartitionDispatcher do
   defp maybe_send([], _pid, _ref),
     do: :ok
   defp maybe_send(events, pid, ref),
-    do: Process.send(pid, {:"$gen_consumer", {self(), ref}, Enum.reverse(events)}, [:noconnect])
+    do: Process.send(pid, {:"$gen_consumer", {self(), ref}, :lists.reverse(events)}, [:noconnect])
 
   @doc false
   def dispatch(events, {tag, hash, waiting, pending, partitions, references}) do
     {deliver_now, deliver_later, waiting} =
       split_events(events, waiting, [])
 
-    partitioned =
-      Enum.reduce(deliver_now, %{}, fn event, acc ->
-        partition = hash.(event, map_size(partitions))
-        Map.update(acc, partition, [event], &[event | &1])
-      end)
+    size = map_size(partitions)
+    countdown size, nil, fn i, nil -> Process.put(i, []) end
 
-    partitions = Enum.reduce partitioned, partitions, &dispatch_per_partition/2
+    for event <- deliver_now do
+      partition = hash.(event, size)
+      Process.put(partition, [event | Process.get(partition)])
+    end
+
+    partitions = countdown size, partitions, &dispatch_per_partition/2
     {:ok, deliver_later, {tag, hash, waiting, pending, partitions, references}}
   end
 
+  defp countdown(0, acc, _), do: acc
+  defp countdown(count, acc, fun), do: countdown(count - 1, fun.(count - 1, acc), fun)
+
   defp split_events(events, 0, acc),
-    do: {Enum.reverse(acc), events, 0}
+    do: {:lists.reverse(acc), events, 0}
   defp split_events([], counter, acc),
-    do: {Enum.reverse(acc), [], counter}
+    do: {:lists.reverse(acc), [], counter}
   defp split_events([event | events], counter, acc),
     do: split_events(events, counter - 1, [event | acc])
 
-  defp dispatch_per_partition({partition, events}, partitions) do
-    events = Enum.reverse(events)
-    {pid, ref, demand_or_queue} = Map.fetch!(partitions, partition)
+  defp dispatch_per_partition(partition, partitions) do
+    case Process.delete(partition) do
+      [] ->
+        partitions
+      events ->
+        events = :lists.reverse(events)
+        {pid, ref, demand_or_queue} = Map.fetch!(partitions, partition)
 
-    {events, demand_or_queue} =
-      case demand_or_queue do
-        demand when is_integer(demand) ->
-          split_into_queue(events, demand, [])
-        queue ->
-          {[], put_into_queue(events, queue)}
-      end
+        {events, demand_or_queue} =
+          case demand_or_queue do
+            demand when is_integer(demand) ->
+              split_into_queue(events, demand, [])
+            queue ->
+              {[], put_into_queue(events, queue)}
+          end
 
-    maybe_send(events, pid, ref)
-    Map.put(partitions, partition, {pid, ref, demand_or_queue})
+        maybe_send(events, pid, ref)
+        Map.put(partitions, partition, {pid, ref, demand_or_queue})
+    end
   end
 
   defp split_into_queue(events, 0, acc),
