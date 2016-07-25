@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.2 (2016-07-25)
+
+### Bug fixes
+
+  * Fix a bug where a flow wouldn't terminate if a source stream halts
+
 ## v0.4.1 (2016-07-21)
 
 ### Enhancements
