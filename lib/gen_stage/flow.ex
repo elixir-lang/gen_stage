@@ -788,7 +788,7 @@ defmodule GenStage.Flow do
     expected :hash to be one of:
 
       * a function expecting two arguments and returning
-        the event and the partition in a tuople
+        the event and the partition in a tuple
       * {:elem, pos} when pos >= 0
       * {:key, key}
 
