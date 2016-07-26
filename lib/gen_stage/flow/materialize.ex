@@ -83,15 +83,19 @@ defmodule GenStage.Flow.Materialize do
     [stage(type, trigger, acc_ops, acc_opts)]
   end
 
+  defp stage(:mapper, trigger, _ops, _opts) when trigger != :none do
+    raise ArgumentError, "cannot invoke #{@trigger} without a #{@reduce} operation"
+  end
   defp stage(type, trigger, ops, opts) do
+    ops = :lists.reverse(ops)
     opts = Keyword.put_new(opts, :stages, System.schedulers_online)
-    {stage_type(type, trigger), Enum.reverse(ops), stage_opts(opts, trigger)}
+    {type, stage_ops(type, ops), ops, stage_opts(opts, trigger)}
   end
 
-  defp stage_type(:mapper, trigger) when trigger != :none,
-    do: raise ArgumentError, "cannot invoke #{@trigger} without a #{@reduce} operation"
-  defp stage_type(type, _),
-    do: type
+  defp stage_ops(:mapper, ops),
+    do: mapper_ops(ops)
+  defp stage_ops(:reducer, ops),
+    do: reducer_ops(ops)
 
   defp stage_opts(opts, {:trigger, _, _, _} = trigger),
     do: Keyword.put(opts, :trigger, trigger)
@@ -101,7 +105,7 @@ defmodule GenStage.Flow.Materialize do
   defp dispatcher(opts, [], {kind, kind_opts}) do
     {kind, Keyword.merge(opts, kind_opts)}
   end
-  defp dispatcher(opts, [{_, _stage_ops, stage_opts} | _], _last) do
+  defp dispatcher(opts, [{_, _compiled_ops, _stage_ops, stage_opts} | _], _last) do
     partitions = Keyword.fetch!(stage_opts, :stages)
     dispatcher_opts = [partitions: partitions] ++ Keyword.take(stage_opts, @dispatcher_opts)
     dispatcher = {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}
@@ -145,7 +149,7 @@ defmodule GenStage.Flow.Materialize do
     stages = Keyword.fetch!(options, :stages)
 
     case ops do
-      [{:mapper, mapper_ops, mapper_opts} | ops] when stages < length(enumerables) ->
+      [{:mapper, _compiled_ops, mapper_ops, mapper_opts} | ops] when stages < length(enumerables) ->
         # Fuse mappers into enumerables if we have more enumerables than stages.
         # In this case, mapper_opts contains the given options.
         {start_enumerables(enumerables, mapper_ops, dispatcher(mapper_opts, ops, last)), ops}
@@ -178,24 +182,11 @@ defmodule GenStage.Flow.Materialize do
   defp start_stages([], producers, _last) do
     producers
   end
-  defp start_stages([{type, ops, opts} | rest], producers, last) do
-    start_stages(rest, start_stages(type, ops, dispatcher(opts, rest, last), producers), last)
+  defp start_stages([{_type, compiled_ops, _ops, opts} | rest], producers, last) do
+    start_stages(rest, start_stage(compiled_ops, dispatcher(opts, rest, last), producers), last)
   end
 
-  defp start_stages(:reducer, ops, {kind, opts}, producers) do
-    {reducer_acc, reducer_fun, trigger} = split_reducers(ops)
-    start_stages(kind, producers, opts, trigger, reducer_acc, reducer_fun)
-  end
-  defp start_stages(:mapper, ops, {kind, opts}, producers) do
-    reducer = :lists.foldl(&mapper/2, &[&1 | &2], :lists.reverse(ops))
-    trigger = fn _acc, _index, _op, _trigger -> {[], []} end
-    acc = fn -> [] end
-    start_stages(kind, producers, opts, trigger, acc, fn events, [], _index ->
-      {:lists.reverse(:lists.foldl(reducer, [], events)), []}
-    end)
-  end
-
-  defp start_stages(type, producers, opts, trigger, acc, reducer) do
+  defp start_stage({acc, reducer, trigger}, {type, opts}, producers) do
     {stages, opts} = Keyword.pop(opts, :stages)
     {init_opts, subscribe_opts} = Keyword.split(opts, @map_reducer_opts)
 
@@ -212,7 +203,7 @@ defmodule GenStage.Flow.Materialize do
 
   ## Reducers
 
-  defp split_reducers(ops) do
+  defp reducer_ops(ops) do
     case take_mappers(ops, []) do
       {mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} ->
         {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops, reducer_acc)}
@@ -225,6 +216,44 @@ defmodule GenStage.Flow.Materialize do
         {acc, fun, build_punctuated_trigger(trigger)}
       {mappers, ops} ->
         {fn -> [] end, build_reducer(mappers, &[&1 | &2]), build_trigger(ops, fn -> [] end)}
+    end
+  end
+
+  defp build_reducer(mappers, fun) do
+    reducer = :lists.foldl(&mapper/2, fun, mappers)
+    fn events, acc, _index ->
+      {[], :lists.foldl(reducer, acc, events)}
+    end
+  end
+
+  @protocol_undefined "if you would like to emit a modified state from flow, like " <>
+                      "a counter or a custom data-structure, please call Flow.emit/2 accordingly"
+
+  defp build_trigger(ops, acc_fun) do
+    map_states = merge_map_state(ops)
+
+    fn acc, index, op, name ->
+      events = :lists.foldl(& &1.(&2, index, name), acc, map_states)
+
+      try do
+        Enum.to_list(events)
+      rescue
+        e in Protocol.UndefinedError ->
+          msg = @protocol_undefined
+
+          e = update_in e.description, fn
+            "" -> msg
+            dc -> dc <> " (#{msg})"
+          end
+
+          reraise e, System.stacktrace
+      else
+        events ->
+          case op do
+            :keep -> {events, acc}
+            :reset -> {events, acc_fun.()}
+          end
+      end
     end
   end
 
@@ -253,44 +282,6 @@ defmodule GenStage.Flow.Materialize do
     end
   end
 
-  defp build_reducer(mappers, fun) do
-    reducer = :lists.foldl(&mapper/2, fun, mappers)
-    fn events, acc, _index ->
-      {[], :lists.foldl(reducer, acc, events)}
-    end
-  end
-
-  @protocol_undefined "if you would like to emit a modified state from flow, like " <>
-                      "a counter or a custom data-structure, please call Flow.emit/2 accordingly"
-
-  defp build_trigger(ops, acc_fun) do
-    map_states = merge_mappers(ops)
-
-    fn acc, index, op, name ->
-      events = :lists.foldl(& &1.(&2, index, name), acc, map_states)
-
-      try do
-        Enum.to_list(events)
-      rescue
-        e in Protocol.UndefinedError ->
-          msg = @protocol_undefined
-
-          e = update_in e.description, fn
-            "" -> msg
-            dc -> dc <> " (#{msg})"
-          end
-
-          reraise e, System.stacktrace
-      else
-        events ->
-          case op do
-            :keep -> {events, acc}
-            :reset -> {events, acc_fun.()}
-          end
-      end
-    end
-  end
-
   defp build_punctuated_trigger(trigger) do
     fn {trigger_acc, red_acc}, index, op, name ->
       {events, red_acc} = trigger.(red_acc, index, op, name)
@@ -298,24 +289,26 @@ defmodule GenStage.Flow.Materialize do
     end
   end
 
-  defp merge_mappers(ops) do
+  defp merge_map_state(ops) do
     case take_mappers(ops, []) do
       {[], [{:map_state, fun} | ops]} ->
-        [fun | merge_mappers(ops)]
+        [fun | merge_map_state(ops)]
       {[], []} ->
         []
       {mappers, ops} ->
         reducer = :lists.foldl(&mapper/2, &[&1 | &2], mappers)
-        [fn old_acc, _, _ -> Enum.reduce(old_acc, [], reducer) end | merge_mappers(ops)]
+        [fn old_acc, _, _ -> Enum.reduce(old_acc, [], reducer) end | merge_map_state(ops)]
     end
   end
 
-  defp take_mappers([{:mapper, _, _} = mapper | ops], acc),
-    do: take_mappers(ops, [mapper | acc])
-  defp take_mappers(ops, acc),
-    do: {acc, ops}
-
   ## Mappers
+
+  defp mapper_ops(ops) do
+    reducer = :lists.foldl(&mapper/2, &[&1 | &2], :lists.reverse(ops))
+    {fn -> [] end,
+     fn events, [], _index -> {:lists.reverse(:lists.foldl(reducer, [], events)), []} end,
+     fn _acc, _index, _op, _trigger -> {[], []} end}
+  end
 
   defp mapper({:mapper, :each, [each]}, fun) do
     fn x, acc -> each.(x); fun.(x, acc) end
@@ -355,4 +348,9 @@ defmodule GenStage.Flow.Materialize do
       end
     end
   end
+
+  defp take_mappers([{:mapper, _, _} = mapper | ops], acc),
+    do: take_mappers(ops, [mapper | acc])
+  defp take_mappers(ops, acc),
+    do: {acc, ops}
 end

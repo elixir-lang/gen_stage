@@ -12,9 +12,9 @@ defmodule GenStage.Flow.MaterializeTest do
 
   describe "split_operations/2" do
     test "splits in multiple partitions" do
-      assert [{:mapper, [], [stages: @schedulers]},
-              {:mapper, [], [stages: 10]},
-              {:mapper, [], [stages: @schedulers]}] =
+      assert [{:mapper, _, [], [stages: @schedulers]},
+              {:mapper, _, [], [stages: 10]},
+              {:mapper, _, [], [stages: @schedulers]}] =
              Flow.new
              |> Flow.partition([stages: 10])
              |> Flow.partition()
@@ -22,12 +22,12 @@ defmodule GenStage.Flow.MaterializeTest do
     end
 
     test "accumulates mapper stages" do
-      assert [{:mapper, [{:mapper, :map, [_]}], [stages: @schedulers]}] =
+      assert [{:mapper, _, [{:mapper, :map, [_]}], [stages: @schedulers]}] =
              Flow.new
              |> Flow.map(& &1 + 2)
              |> split()
 
-      assert [{:mapper, [{:mapper, :map, [_]}, {:mapper, :filter, [_]}], [stages: @schedulers]}] =
+      assert [{:mapper, _, [{:mapper, :map, [_]}, {:mapper, :filter, [_]}], [stages: @schedulers]}] =
              Flow.new
              |> Flow.map(& &1 + 2)
              |> Flow.filter(& &1 < 2)
@@ -35,16 +35,16 @@ defmodule GenStage.Flow.MaterializeTest do
     end
 
     test "accumulates mapper and reducer operations" do
-      assert [{:mapper, [{:mapper, :map, [_]}], [stages: @schedulers]},
-              {:reducer, [{:reduce, _, _}], [stages: 10]}] =
+      assert [{:mapper, _, [{:mapper, :map, [_]}], [stages: @schedulers]},
+              {:reducer, _, [{:reduce, _, _}], [stages: 10]}] =
              Flow.new
              |> Flow.map(& &1)
              |> Flow.partition(stages: 10)
              |> Flow.reduce(fn -> 0 end, & &1 * &2)
              |> split()
 
-      assert [{:reducer, [{:mapper, :map, [_]}, {:reduce, _, _}], [stages: @schedulers]},
-              {:reducer, [{:reduce, _, _}], [stages: 10]}] =
+      assert [{:reducer, _, [{:mapper, :map, [_]}, {:reduce, _, _}], [stages: @schedulers]},
+              {:reducer, _, [{:reduce, _, _}], [stages: 10]}] =
              Flow.new
              |> Flow.map(& &1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
