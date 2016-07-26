@@ -55,7 +55,7 @@ defmodule GenStage.Flow.MaterializeTest do
   end
 
   test "errors on flow without producer" do
-    assert_raise ArgumentError, ~r"cannot enumerate a flow without producers", fn ->
+    assert_raise ArgumentError, ~r"cannot execute a flow without producers", fn ->
       Flow.new
       |> Enum.to_list
     end

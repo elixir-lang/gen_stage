@@ -3,22 +3,19 @@ alias Experimental.GenStage
 defmodule GenStage.Flow.Materialize do
   @moduledoc false
 
+  @compile :inline_list_funcs
   @map_reducer_opts [:buffer_keep, :buffer_size, :dispatcher, :trigger]
   @dispatcher_opts [:hash]
 
-  @doc """
-  Materializes a flow for stream consumption.
-  """
-  def to_stream(%{producers: nil}) do
-    raise ArgumentError, "cannot enumerate a flow without producers, " <>
+  def materialize(%{producers: nil}, _) do
+    raise ArgumentError, "cannot execute a flow without producers, " <>
                          "please call \"from_enumerable\" or \"from_stage\" accordingly"
   end
 
-  def to_stream(%{operations: operations, options: options, producers: producers}) do
+  def materialize(%{operations: operations, options: options, producers: producers}, last) do
     ops = split_operations(operations, options)
-    {producers, ops} = start_producers(producers, ops)
-    consumers = start_stages(ops, producers)
-    GenStage.stream(consumers)
+    {producers, ops} = start_producers(producers, ops, last)
+    {producers, start_stages(ops, producers, last)}
   end
 
   ## Helpers
@@ -30,7 +27,7 @@ defmodule GenStage.Flow.Materialize do
     []
   end
   def split_operations(operations, opts) do
-    split_operations(Enum.reverse(operations), :mapper, :none, [], opts)
+    split_operations(:lists.reverse(operations), :mapper, :none, [], opts)
   end
 
   @reduce "reduce/group_by"
@@ -100,32 +97,82 @@ defmodule GenStage.Flow.Materialize do
   defp stage_opts(opts, _),
     do: Keyword.delete(opts, :trigger)
 
-  defp dispatcher(opts, []), do: opts
-  defp dispatcher(opts, [{_, _stage_ops, stage_opts} | _]) do
+  defp dispatcher(opts, [], {kind, kind_opts}) do
+    {kind, Keyword.merge(opts, kind_opts)}
+  end
+  defp dispatcher(opts, [{_, _stage_ops, stage_opts} | _], _last) do
     partitions = Keyword.fetch!(stage_opts, :stages)
     dispatcher_opts = [partitions: partitions] ++ Keyword.take(stage_opts, @dispatcher_opts)
-    put_in opts[:dispatcher], {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}
+    dispatcher = {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}
+    {:producer_consumer, put_in(opts[:dispatcher], dispatcher)}
+  end
+
+  ## Producers
+
+  defp start_producers({:stages, producers}, ops, {_, opts}) do
+    # If there are no more stages and there is a need for a custom
+    # dispatcher, we need to wrap the sources in a custom stage.
+    if ops == [] and Keyword.has_key?(opts, :dispatcher) do
+      {producers, [{:mapper, [], []}]}
+    else
+      {producers, ops}
+    end
+  end
+  defp start_producers({:enumerables, enumerables}, ops, last) do
+    more_enumerables_than_stages? = more_enumerables_than_stages?(ops, enumerables)
+
+    case ops do
+      [{:mapper, mapper_ops, mapper_opts} | ops] when more_enumerables_than_stages? ->
+        # Fuse mappers into enumerables if we have more enumerables than stages.
+        {start_enumerables(enumerables, mapper_ops, dispatcher(mapper_opts, ops, last)), ops}
+      [] ->
+        # If there are no ops, we need to pass the last dispatcher info.
+        {start_enumerables(enumerables, [], last), ops}
+      _ ->
+        # Otherwise it is a regular producer consumer with demand dispatcher.
+        {start_enumerables(enumerables, [], {:producer_consumer, []}), ops}
+    end
+  end
+
+  defp more_enumerables_than_stages?([{_, _, opts} | _], enumerables) do
+    Keyword.fetch!(opts, :stages) < length(enumerables)
+  end
+  defp more_enumerables_than_stages?([], _enumerables) do
+    false
+  end
+
+  defp start_enumerables(enumerables, ops, {_, opts}) do
+    init_opts = [consumers: :permanent] ++ Keyword.take(opts, @map_reducer_opts)
+
+    for enumerable <- enumerables do
+      enumerable =
+        :lists.foldl(fn {:mapper, fun, args}, acc ->
+          apply(Stream, fun, [acc | args])
+        end, enumerable, ops)
+      {:ok, pid} = GenStage.from_enumerable(enumerable, init_opts)
+      pid
+    end
   end
 
   ## Stages
 
-  defp start_stages([], producers) do
+  defp start_stages([], producers, _last) do
     producers
   end
-  defp start_stages([{type, ops, opts} | rest], producers) do
-    start_stages(rest, start_stages(type, ops, dispatcher(opts, rest), producers))
+  defp start_stages([{type, ops, opts} | rest], producers, last) do
+    start_stages(rest, start_stages(type, ops, dispatcher(opts, rest, last), producers), last)
   end
 
-  defp start_stages(:reducer, ops, opts, producers) do
+  defp start_stages(:reducer, ops, {kind, opts}, producers) do
     {reducer_acc, reducer_fun, trigger} = split_reducers(ops)
-    start_stages(:producer_consumer, producers, opts, trigger, reducer_acc, reducer_fun)
+    start_stages(kind, producers, opts, trigger, reducer_acc, reducer_fun)
   end
-  defp start_stages(:mapper, ops, opts, producers) do
-    reducer = Enum.reduce(Enum.reverse(ops), &[&1 | &2], &mapper/2)
+  defp start_stages(:mapper, ops, {kind, opts}, producers) do
+    reducer = :lists.foldl(&mapper/2, &[&1 | &2], :lists.reverse(ops))
     trigger = fn _acc, _index, _trigger -> [] end
     acc = fn -> [] end
-    start_stages(:producer_consumer, producers, opts, trigger, acc, fn events, [], _index ->
-      {Enum.reverse(Enum.reduce(events, [], reducer)), []}
+    start_stages(kind, producers, opts, trigger, acc, fn events, [], _index ->
+      {:lists.reverse(:lists.foldl(reducer, [], events)), []}
     end)
   end
 
@@ -164,13 +211,12 @@ defmodule GenStage.Flow.Materialize do
 
   defp build_punctuated_reducer(punctuation_mappers, punctuation_fun,
                                 reducer_mappers, reducer_acc, reducer_fun, trigger) do
-    pre_reducer = Enum.reduce(punctuation_mappers, &[&1 | &2], &mapper/2)
-    pos_reducer = Enum.reduce(reducer_mappers, reducer_fun, &mapper/2)
+    pre_reducer = :lists.foldl(&mapper/2, &[&1 | &2], punctuation_mappers)
+    pos_reducer = :lists.foldl(&mapper/2, reducer_fun, reducer_mappers)
 
     fn events, {pun_acc, red_acc}, index ->
-      events
-      |> Enum.reduce([], pre_reducer)
-      |> Enum.reverse()
+      :lists.foldl(pre_reducer, [], events)
+      |> :lists.reverse()
       |> maybe_punctuate(punctuation_fun, reducer_acc, pun_acc,
                          red_acc, pos_reducer, index, trigger, [])
     end
@@ -180,7 +226,7 @@ defmodule GenStage.Flow.Materialize do
                        red_acc, red_fun, index, trigger, acc) do
     case punctuation_fun.(events, pun_acc) do
       {:trigger, name, pre, op, pos, pun_acc} ->
-        red_acc = Enum.reduce(pre, red_acc, red_fun)
+        red_acc = :lists.foldl(red_fun, red_acc, pre)
         emit    = trigger.(red_acc, index, name)
         red_acc =
           case op do
@@ -190,14 +236,14 @@ defmodule GenStage.Flow.Materialize do
         maybe_punctuate(pos, punctuation_fun, reducer_acc, pun_acc,
                         red_acc, red_fun, index, trigger, acc ++ emit)
       {:cont, pun_acc} ->
-        {acc, {pun_acc, Enum.reduce(events, red_acc, red_fun)}}
+        {acc, {pun_acc, :lists.foldl(red_fun, red_acc, events)}}
     end
   end
 
   defp build_reducer(mappers, fun) do
-    reducer = Enum.reduce(mappers, fun, &mapper/2)
+    reducer = :lists.foldl(&mapper/2, fun, mappers)
     fn events, acc, _index ->
-      {[], Enum.reduce(events, acc, reducer)}
+      {[], :lists.foldl(reducer, acc, events)}
     end
   end
 
@@ -208,7 +254,7 @@ defmodule GenStage.Flow.Materialize do
     map_states = merge_mappers(ops)
 
     fn acc, index, name ->
-      acc = Enum.reduce(map_states, acc, & &1.(&2, index, name))
+      acc = :lists.foldl(& &1.(&2, index, name), acc, map_states)
 
       try do
         Enum.to_list(acc)
@@ -237,7 +283,7 @@ defmodule GenStage.Flow.Materialize do
       {[], []} ->
         []
       {mappers, ops} ->
-        reducer = Enum.reduce(mappers, &[&1 | &2], &mapper/2)
+        reducer = :lists.foldl(&mapper/2, &[&1 | &2], mappers)
         [fn old_acc, _, _ -> Enum.reduce(old_acc, [], reducer) end | merge_mappers(ops)]
     end
   end
@@ -249,42 +295,6 @@ defmodule GenStage.Flow.Materialize do
 
   ## Mappers
 
-  defp start_producers({:stages, producers}, ops) do
-    {producers, ops}
-  end
-  defp start_producers({:enumerables, enumerables}, ops) do
-    more_enumerables_than_stages? = more_enumerables_than_stages?(ops, enumerables)
-
-    # Fuse mappers into enumerables if we have more enumerables than stages.
-    case ops do
-      [{:mapper, mapper_ops, mapper_opts} | ops] when more_enumerables_than_stages? ->
-        {start_enumerables(enumerables, mapper_ops, dispatcher(mapper_opts, ops)), ops}
-      _ ->
-        {start_enumerables(enumerables, [], []), ops}
-    end
-  end
-
-  defp more_enumerables_than_stages?([{_, _, opts} | _], enumerables) do
-    Keyword.fetch!(opts, :stages) < length(enumerables)
-  end
-  defp more_enumerables_than_stages?([], _enumerables) do
-    false
-  end
-
-  defp start_enumerables(enumerables, ops, opts) do
-    init_opts = [consumers: :permanent] ++ Keyword.take(opts, @map_reducer_opts)
-
-    for enumerable <- enumerables do
-      enumerable =
-        Enum.reduce(ops, enumerable, fn {:mapper, fun, args}, acc ->
-          apply(Stream, fun, [acc | args])
-        end)
-      {:ok, pid} = GenStage.from_enumerable(enumerable, init_opts)
-      pid
-    end
-  end
-
-  # Merge mapper computations for mapper stage.
   defp mapper({:mapper, :each, [each]}, fun) do
     fn x, acc -> each.(x); fun.(x, acc) end
   end

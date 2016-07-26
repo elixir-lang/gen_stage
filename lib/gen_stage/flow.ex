@@ -399,7 +399,9 @@ defmodule GenStage.Flow do
   @typep operation :: {:mapper, atom(), [term()]} |
                       {:partition, Keyword.t} |
                       {:map_state, fun()} |
-                      {:reduce, fun(), fun()}
+                      {:reduce, fun(), fun()} |
+                      {:punctuation, fun(), fun()} |
+                      {:trigger, timeout(), :keep | :reset, term()}
 
   ## Building
 
@@ -1043,7 +1045,8 @@ defmodule GenStage.Flow do
 
   defimpl Enumerable do
     def reduce(flow, acc, fun) do
-      GenStage.Flow.Materialize.to_stream(flow).(acc, fun)
+      {_producers, consumers} = GenStage.Flow.Materialize.materialize(flow, {:producer_consumer, []})
+      GenStage.stream(consumers).(acc, fun)
     end
 
     def count(_flow) do
