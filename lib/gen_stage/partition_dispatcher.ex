@@ -17,7 +17,8 @@ defmodule GenStage.PartitionDispatcher do
 
     * `:hash` - the hashing algorithm, defaults to `:erlang.phash2/2`
       which receives the message and the number of partitions and
-      it must return a number between 0 and `number_of_partitions - 1`
+      it must the event to be dispatched and a number between 0 and
+      `number_of_partitions - 1`
   """
 
   @behaviour GenStage.Dispatcher
@@ -25,12 +26,16 @@ defmodule GenStage.PartitionDispatcher do
 
   @doc false
   def init(opts) do
-    hash = Keyword.get(opts, :hash, &:erlang.phash2/2)
+    hash = Keyword.get(opts, :hash, &hash/2)
     max  = Keyword.get(opts, :partitions) ||
              raise ArgumentError, "the number of :partitions is required when using the partition dispatcher"
 
     partitions = for i <- 0..max-1, do: {i, @init}, into: %{}
     {:ok, {make_ref(), hash, 0, 0, partitions, %{}}}
+  end
+
+  defp hash(event, count) do
+    {event, :erlang.phash2(event, count)}
   end
 
   @doc false
@@ -132,7 +137,7 @@ defmodule GenStage.PartitionDispatcher do
     countdown size, nil, fn i, nil -> Process.put(i, []) end
 
     for event <- deliver_now do
-      partition = hash.(event, size)
+      {event, partition} = hash.(event, size)
       Process.put(partition, [event | Process.get(partition)])
     end
 

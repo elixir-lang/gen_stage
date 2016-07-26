@@ -4,6 +4,7 @@ defmodule GenStage.Flow.Materialize do
   @moduledoc false
 
   @map_reducer_opts [:buffer_keep, :buffer_size, :dispatcher, :trigger]
+  @dispatcher_opts [:hash]
 
   @doc """
   Materializes a flow for stream consumption.
@@ -102,8 +103,8 @@ defmodule GenStage.Flow.Materialize do
   defp dispatcher(opts, []), do: opts
   defp dispatcher(opts, [{_, _stage_ops, stage_opts} | _]) do
     partitions = Keyword.fetch!(stage_opts, :stages)
-    hash = Keyword.get(stage_opts, :hash, &:erlang.phash2/2)
-    put_in opts[:dispatcher], {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}
+    dispatcher_opts = [partitions: partitions] ++ Keyword.take(stage_opts, @dispatcher_opts)
+    put_in opts[:dispatcher], {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}
   end
 
   ## Stages

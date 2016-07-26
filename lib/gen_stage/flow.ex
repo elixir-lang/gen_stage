@@ -724,27 +724,35 @@ defmodule GenStage.Flow do
   """
   @spec partition(t, Keyword.t) :: t
   def partition(flow, opts \\ []) when is_list(opts) do
-    hash =
-      case Keyword.get(opts, :hash, &:erlang.phash2/2) do
-        fun when is_function(fun, 2) ->
-          fun
-        {:elem, pos} when pos >= 0 ->
-          pos = pos + 1
-          &:erlang.phash2(:erlang.element(pos, &1), &2)
-        {:key, key} ->
-          &:erlang.phash2(Map.fetch!(&1, key), &2)
-        other ->
-          raise ArgumentError, """
-          expected :hash to be one of:
-
-            * a function expecting two arguments
-            * {:elem, pos} when pos >= 0
-
-          instead got: #{inspect other}
-          """
+    opts =
+      case Keyword.fetch(opts, :hash) do
+        {:ok, hash} -> Keyword.put(opts, :hash, hash(hash))
+        :error -> opts
       end
-    opts = Keyword.put(opts, :hash, hash)
     add_operation(flow, {:partition, opts})
+  end
+
+  defp hash(fun) when is_function(fun, 2) do
+    fun
+  end
+  defp hash({:elem, pos}) when pos >= 0 do
+    pos = pos + 1
+    &{&1, :erlang.phash2(:erlang.element(pos, &1), &2)}
+  end
+  defp hash({:key, key}) do
+    &{&1, :erlang.phash2(Map.fetch!(&1, key), &2)}
+  end
+  defp hash(other) do
+    raise ArgumentError, """
+    expected :hash to be one of:
+
+      * a function expecting two arguments and returning
+        the event and the partition in a tuople
+      * {:elem, pos} when pos >= 0
+      * {:key, key}
+
+    instead got: #{inspect other}
+    """
   end
 
   @doc """
