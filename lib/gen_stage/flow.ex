@@ -223,19 +223,26 @@ defmodule GenStage.Flow do
   This brings us to the aspects of data completion and data
   emission which we will discuss next.
 
-  ## Data completion, windows and triggers
+  ## Data completion, triggers and windows
 
   When working with an unbounded stream of data, there is no
   such thing as data completion. Therefore, when can we consider
   a reduce function to be "complete"?
 
-  One of such mechanisms is the use of triggers. Triggers allow us to
-  check point the processed data so far. There are different triggers
-  we can use:
+  In Flow, we use triggers and windows. Triggers allows us to
+  temporarily halt reduction to checkpoint our progress. Windows
+  gives us better understanding of the data by grouping it according
+  to some event time.
+
+  ### Triggers
+
+  Triggers allow us to check point the processed data so far. There
+  are different triggers we can use:
 
     * Event count triggers - compute state operations every X events
 
-    * Processing time triggers - compute state operations every X time units
+    * Processing time triggers - compute state operations every X time
+      units for every stage
 
     * Punctuation - hand-written triggers based on the data
 
@@ -243,26 +250,38 @@ defmodule GenStage.Flow do
   `trigger_every/4` functions.
 
   Once a trigger is emitted, the `reduce` step halts and invokes
-  the remaining steps for that stage, such as `map/2`, `filter/2`
-  and `map_state/2`. Triggers are also named and the trigger names
-  will be sent as third argument to the function given in
-  `map_state/2` and `each_state/2`.
+  the remaining steps for that stage, such as `map_state/2` or
+  any other call after `reduce/3`. Triggers are also named and
+  the trigger names will be sent as third argument to the function
+  given in `map_state/2` and `each_state/2`.
 
-  Once a trigger is emitted and the remaining steps in the stage
-  are processed, developers have the choice of either reseting the
-  accumulation stage or keeping it as is. The resetting option is
-  useful when you are interested only on intermediate results, usually
-  because another step is aggregator. Keeping the accumulator is the
-  default and used to checkpoint the values while still working
-  towards an end result.
+  For every emitted trigger, developers have the choice of either
+  reseting the accumulation stage or keeping it as is. The resetting
+  option is useful when you are interested only on intermediate
+  results, usually because another step is aggregator. Keeping the
+  accumulator is the default and used to checkpoint the values while
+  still working towards an end result.
+
+  ### Windows
 
   Besides setting triggers, it is also possible to split the data
-  into windows. Windows move triggers from processing time (when
-  the data is processed) to event time, which is based on the time
-  information in the events themselves. Windows will be implemented
-  in future flow versions.
+  into windows. Windows allows us to move the understanding of time
+  from processing time, which is when a stage processes a particular
+  event, to event time, which is the time an event occurred on its
+  producing device.
 
-  TODO: Implement the GenStage.Window module.
+  Although processing time is conceptually simple, it does not provide
+  any insight about the data being processed. After all, each stage
+  moves according to its own processing time and queues. Similar to
+  event counting and punctuation, processing time is most useful for
+  checkpointing data.
+
+  On the other hand, the event time is based on the data itself. When
+  working with event time, we break the data into windows, allowing us
+  to group events into windows even when late or out of order. The
+  windows themselves may also have triggers for checkpointing.
+
+  TODO: Implement the GenStage.Flow.Window module.
 
   ## Long running-flows
 
@@ -395,7 +414,11 @@ defmodule GenStage.Flow do
   defstruct producers: nil, options: [], operations: []
   @type t :: %GenStage.Flow{producers: producers, operations: [operation], options: Keyword.t}
 
-  @typep producers :: nil | {:stages, GenStage.stage} | {:enumerables, Enumerable.t}
+  @typep producers :: nil |
+                      {:stages, GenStage.stage} |
+                      {:enumerables, Enumerable.t} |
+                      {:join, t, t, fun(), fun(), fun()}
+
   @typep operation :: {:mapper, atom(), [term()]} |
                       {:partition, Keyword.t} |
                       {:map_state, fun()} |
@@ -558,6 +581,22 @@ defmodule GenStage.Flow do
   end
   def from_stages(_flow, stages) do
     raise ArgumentError, "from_stages/2 expects a non-empty list as argument, got: #{inspect stages}"
+  end
+
+  @doc """
+  Inner joins two flows.
+
+  The `inner` means the partition
+
+  A join creates a new partitioned flow that subscribes to the
+  two flows given as arguments. The joined partition can be configured
+  via `options` with the same values as shown on `new/1`.
+  """
+  def inner_join(%GenStage.Flow{} = left, %GenStage.Flow{} = right,
+                 left_key, right_key, join, options \\ [])
+      when is_function(left_key, 1) and is_function(right_key, 1) and is_function(join, 2) do
+    %GenStage.Flow{producers: {:join, left, right, left_key, right_key, join},
+                   options: options}
   end
 
   @doc """

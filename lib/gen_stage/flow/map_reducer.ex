@@ -4,14 +4,14 @@ defmodule GenStage.Flow.MapReducer do
   @moduledoc false
   use GenStage
 
-  def init({type, opts, index, trigger, acc_fun, reducer}) do
+  def init({type, opts, index, trigger, acc, reducer}) do
     {trigger_opts, opts} = Keyword.pop(opts, :trigger, :none)
     start_trigger(trigger_opts)
     partitioned? = match?({GenStage.PartitionDispatcher, _}, opts[:dispatcher])
     consumers = if type == :consumer, do: :none, else: []
     status = %{producers: [], consumers: consumers, done: [], done?: false,
-               trigger: trigger, partitioned?: partitioned?, acc_fun: acc_fun}
-    {type, {status, index, acc_fun.(), reducer}, opts}
+               trigger: trigger, partitioned?: partitioned?}
+    {type, {status, index, acc.(), reducer}, opts}
   end
 
   defp start_trigger({:trigger, time, op, name}) do
@@ -49,7 +49,7 @@ defmodule GenStage.Flow.MapReducer do
 
     cond do
       ref in producers ->
-        {events, done, done?} = maybe_notify(status, index, acc, ref)
+        {events, acc, done, done?} = maybe_notify(status, index, acc, ref)
         status = %{status | producers: List.delete(producers, ref), done: done, done?: done?}
         {:noreply, events, {status, index, acc, reducer}}
       consumers == [ref] ->
@@ -61,17 +61,12 @@ defmodule GenStage.Flow.MapReducer do
   end
 
   def handle_info({:trigger, keep_or_reset, name}, {status, index, acc, reducer}) do
-    %{trigger: trigger, acc_fun: acc_fun} = status
-    events = trigger.(acc, index, name)
-    acc =
-      case keep_or_reset do
-        :keep  -> acc
-        :reset -> acc_fun.()
-      end
+    %{trigger: trigger} = status
+    {events, acc} = trigger.(acc, index, keep_or_reset, name)
     {:noreply, events, {status, index, acc, reducer}}
   end
   def handle_info({{_, ref}, {:producer, state}}, {status, index, acc, reducer}) when state in [:halted, :done] do
-    {events, done, done?} = maybe_notify(status, index, acc, ref)
+    {events, acc, done, done?} = maybe_notify(status, index, acc, ref)
     status = %{status | done: done, done?: done?}
     {:noreply, events, {status, index, acc, reducer}}
   end
@@ -84,20 +79,20 @@ defmodule GenStage.Flow.MapReducer do
     {:noreply, events, {status, index, acc, reducer}}
   end
 
-  defp maybe_notify(%{done: [], done?: true}, _index, _acc, _ref) do
-    {[], [], true}
+  defp maybe_notify(%{done: [], done?: true}, _index, acc, _ref) do
+    {[], acc, [], true}
   end
   defp maybe_notify(%{done: done, done?: false, trigger: trigger, consumers: consumers},
                     index, acc, ref) do
     case List.delete(done, ref) do
       [] when done != [] ->
-        events = trigger.(acc, index, {:producer, :done})
+        {events, acc} = trigger.(acc, index, :keep, {:producer, :done})
         if is_list(consumers) do
           GenStage.async_notify(self(), {:producer, :done})
         end
-        {events, [], true}
+        {events, acc, [], true}
       done ->
-        {[], done, false}
+        {[], acc, done, false}
     end
   end
 end

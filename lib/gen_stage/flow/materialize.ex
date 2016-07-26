@@ -13,8 +13,9 @@ defmodule GenStage.Flow.Materialize do
   end
 
   def materialize(%{operations: operations, options: options, producers: producers}, last) do
+    options = Keyword.put_new(options, :stages, System.schedulers_online)
     ops = split_operations(operations, options)
-    {producers, ops} = start_producers(producers, ops, last)
+    {producers, ops} = start_producers(producers, ops, options, last)
     {producers, start_stages(ops, producers, last)}
   end
 
@@ -107,38 +108,56 @@ defmodule GenStage.Flow.Materialize do
     {:producer_consumer, put_in(opts[:dispatcher], dispatcher)}
   end
 
+  defp join_dispatcher(partitions, key_fun) do
+    hash = fn event, count ->
+      key = key_fun.(event)
+      {{key, event}, :erlang.phash2(key, count)}
+    end
+    {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}
+  end
+
   ## Producers
 
-  defp start_producers({:stages, producers}, ops, {_, opts}) do
+  defp start_producers({:join, left, right, left_key, right_key, join}, ops, options, _) do
+    partitions = Keyword.fetch!(options, :stages)
+
+    left_opts = [dispatcher: join_dispatcher(partitions, left_key)]
+    {_producers, left_consumers} = materialize(left, {:producer_consumer, left_opts})
+
+    right_opts = [dispatcher: join_dispatcher(partitions, right_key)]
+    {_producers, right_consumers} = materialize(right, {:producer_consumer, right_opts})
+
+    # TODO: Use join
+    {left_consumers ++ right_consumers, ops}
+  end
+  defp start_producers({:stages, producers}, ops, options, {_, last_opts}) do
     # If there are no more stages and there is a need for a custom
     # dispatcher, we need to wrap the sources in a custom stage.
-    if ops == [] and Keyword.has_key?(opts, :dispatcher) do
-      {producers, [{:mapper, [], []}]}
+    if ops == [] and Keyword.has_key?(last_opts, :dispatcher) do
+      {producers, [stage(:mapper, :none, [], options)]}
     else
       {producers, ops}
     end
   end
-  defp start_producers({:enumerables, enumerables}, ops, last) do
-    more_enumerables_than_stages? = more_enumerables_than_stages?(ops, enumerables)
+  defp start_producers({:enumerables, enumerables}, ops, options, last) do
+    # options configures all stages before partition, so it effectively
+    # controls the number of stages consuming the enumerables.
+    stages = Keyword.fetch!(options, :stages)
 
     case ops do
-      [{:mapper, mapper_ops, mapper_opts} | ops] when more_enumerables_than_stages? ->
+      [{:mapper, mapper_ops, mapper_opts} | ops] when stages < length(enumerables) ->
         # Fuse mappers into enumerables if we have more enumerables than stages.
+        # In this case, mapper_opts contains the given options.
         {start_enumerables(enumerables, mapper_ops, dispatcher(mapper_opts, ops, last)), ops}
       [] ->
         # If there are no ops, we need to pass the last dispatcher info.
+        # In this case, options are discarded because there is no producer_consumer.
         {start_enumerables(enumerables, [], last), ops}
       _ ->
         # Otherwise it is a regular producer consumer with demand dispatcher.
+        # In this case, options is used by subsequent mapper/reducer stages.
         {start_enumerables(enumerables, [], {:producer_consumer, []}), ops}
     end
-  end
-
-  defp more_enumerables_than_stages?([{_, _, opts} | _], enumerables) do
-    Keyword.fetch!(opts, :stages) < length(enumerables)
-  end
-  defp more_enumerables_than_stages?([], _enumerables) do
-    false
   end
 
   defp start_enumerables(enumerables, ops, {_, opts}) do
@@ -169,7 +188,7 @@ defmodule GenStage.Flow.Materialize do
   end
   defp start_stages(:mapper, ops, {kind, opts}, producers) do
     reducer = :lists.foldl(&mapper/2, &[&1 | &2], :lists.reverse(ops))
-    trigger = fn _acc, _index, _trigger -> [] end
+    trigger = fn _acc, _index, _op, _trigger -> {[], []} end
     acc = fn -> [] end
     start_stages(kind, producers, opts, trigger, acc, fn events, [], _index ->
       {:lists.reverse(:lists.foldl(reducer, [], events)), []}
@@ -196,47 +215,41 @@ defmodule GenStage.Flow.Materialize do
   defp split_reducers(ops) do
     case take_mappers(ops, []) do
       {mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} ->
-        {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops)}
+        {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops, reducer_acc)}
       {punctuation_mappers, [{:punctuation, punctuation_acc, punctuation_fun} | ops]} ->
         {reducer_mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} = take_mappers(ops, [])
-        trigger = build_trigger(ops)
+        trigger = build_trigger(ops, reducer_acc)
         acc = fn -> {punctuation_acc.(), reducer_acc.()} end
         fun = build_punctuated_reducer(punctuation_mappers, punctuation_fun,
-                                       reducer_mappers, reducer_acc, reducer_fun, trigger)
-        {acc, fun, unpunctuate_trigger(trigger)}
+                                       reducer_mappers, reducer_fun, trigger)
+        {acc, fun, build_punctuated_trigger(trigger)}
       {mappers, ops} ->
-        {fn -> [] end, build_reducer(mappers, &[&1 | &2]), build_trigger(ops)}
+        {fn -> [] end, build_reducer(mappers, &[&1 | &2]), build_trigger(ops, fn -> [] end)}
     end
   end
 
   defp build_punctuated_reducer(punctuation_mappers, punctuation_fun,
-                                reducer_mappers, reducer_acc, reducer_fun, trigger) do
+                                reducer_mappers, reducer_fun, trigger) do
     pre_reducer = :lists.foldl(&mapper/2, &[&1 | &2], punctuation_mappers)
     pos_reducer = :lists.foldl(&mapper/2, reducer_fun, reducer_mappers)
 
     fn events, {pun_acc, red_acc}, index ->
       :lists.foldl(pre_reducer, [], events)
       |> :lists.reverse()
-      |> maybe_punctuate(punctuation_fun, reducer_acc, pun_acc,
-                         red_acc, pos_reducer, index, trigger, [])
+      |> maybe_punctuate(punctuation_fun, pun_acc, red_acc, pos_reducer, index, trigger, [])
     end
   end
 
-  defp maybe_punctuate(events, punctuation_fun, reducer_acc, pun_acc,
-                       red_acc, red_fun, index, trigger, acc) do
+  defp maybe_punctuate(events, punctuation_fun, pun_acc, red_acc,
+                       red_fun, index, trigger, collected) do
     case punctuation_fun.(events, pun_acc) do
       {:trigger, name, pre, op, pos, pun_acc} ->
         red_acc = :lists.foldl(red_fun, red_acc, pre)
-        emit    = trigger.(red_acc, index, name)
-        red_acc =
-          case op do
-            :keep  -> red_acc
-            :reset -> reducer_acc.()
-          end
-        maybe_punctuate(pos, punctuation_fun, reducer_acc, pun_acc,
-                        red_acc, red_fun, index, trigger, acc ++ emit)
+        {emit, red_acc} = trigger.(red_acc, index, op, name)
+        maybe_punctuate(pos, punctuation_fun, pun_acc, red_acc,
+                        red_fun, index, trigger, collected ++ emit)
       {:cont, pun_acc} ->
-        {acc, {pun_acc, :lists.foldl(red_fun, red_acc, events)}}
+        {collected, {pun_acc, :lists.foldl(red_fun, red_acc, events)}}
     end
   end
 
@@ -250,14 +263,14 @@ defmodule GenStage.Flow.Materialize do
   @protocol_undefined "if you would like to emit a modified state from flow, like " <>
                       "a counter or a custom data-structure, please call Flow.emit/2 accordingly"
 
-  defp build_trigger(ops) do
+  defp build_trigger(ops, acc_fun) do
     map_states = merge_mappers(ops)
 
-    fn acc, index, name ->
-      acc = :lists.foldl(& &1.(&2, index, name), acc, map_states)
+    fn acc, index, op, name ->
+      events = :lists.foldl(& &1.(&2, index, name), acc, map_states)
 
       try do
-        Enum.to_list(acc)
+        Enum.to_list(events)
       rescue
         e in Protocol.UndefinedError ->
           msg = @protocol_undefined
@@ -268,12 +281,21 @@ defmodule GenStage.Flow.Materialize do
           end
 
           reraise e, System.stacktrace
+      else
+        events ->
+          case op do
+            :keep -> {events, acc}
+            :reset -> {events, acc_fun.()}
+          end
       end
     end
   end
 
-  defp unpunctuate_trigger(trigger) do
-    fn {_, acc}, index, name -> trigger.(acc, index, name) end
+  defp build_punctuated_trigger(trigger) do
+    fn {trigger_acc, red_acc}, index, op, name ->
+      {events, red_acc} = trigger.(red_acc, index, op, name)
+      {events, {trigger_acc, red_acc}}
+    end
   end
 
   defp merge_mappers(ops) do

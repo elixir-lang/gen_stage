@@ -412,4 +412,12 @@ defmodule GenStage.FlowTest do
              |> Enum.take(1) == [{110, {0, 1}, :sample}]
     end
   end
+
+  describe "inner_join" do
+    test "joins two flows" do
+      assert Flow.inner_join(Flow.from_enumerable([1, 2, 3]),
+                             Flow.from_enumerable([4, 5, 6]),
+                             & &1, & &1, &{&1, &2}) |> Flow.map(&elem(&1, 1)) |> Enum.sum() == 21
+    end
+  end
 end
