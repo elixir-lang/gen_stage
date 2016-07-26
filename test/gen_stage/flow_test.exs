@@ -439,10 +439,10 @@ defmodule GenStage.FlowTest do
     test "joins two flows followed by reduce" do
       assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
                              Flow.from_enumerable([4, 5, 6]),
-                             & &1, & &1 - 3, &{&1, &2})
+                             & &1, & &1 - 3, &{&1, &2}, stages: 2)
              |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
              |> Flow.emit(:state)
-             |> Enum.sort() == [0, 5, 7, 9]
+             |> Enum.sort() == [9, 12]
     end
   end
 end
