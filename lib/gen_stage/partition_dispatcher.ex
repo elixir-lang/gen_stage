@@ -80,7 +80,7 @@ defmodule GenStage.PartitionDispatcher do
       demand when is_integer(demand) ->
         {:ok, 0, {tag, hash, waiting, pending + demand, partitions, references}}
       queue ->
-        length = :queue.len(queue)
+        length = :queue.len(queue) # TODO: Do not count notifications
         {:ok, length, {tag, hash, waiting + length, pending, partitions, references}}
     end
   end

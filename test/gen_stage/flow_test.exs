@@ -414,10 +414,35 @@ defmodule GenStage.FlowTest do
   end
 
   describe "inner_join" do
-    test "joins two flows" do
-      assert Flow.inner_join(Flow.from_enumerable([1, 2, 3]),
+    test "joins two matching flows" do
+      assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
                              Flow.from_enumerable([4, 5, 6]),
-                             & &1, & &1, &{&1, &2}) |> Flow.map(&elem(&1, 1)) |> Enum.sum() == 21
+                             & &1, & &1 - 3, &{&1, &2})
+             |> Enum.sort() == [{1, 4}, {2, 5}, {3, 6}]
+    end
+
+    test "joins two unmatching flows" do
+      assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
+                             Flow.from_enumerable([4, 5, 6]),
+                             & &1, & &1, &{&1, &2})
+             |> Enum.sort() == []
+    end
+
+    test "joins two flows followed by mapper operation" do
+      assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
+                             Flow.from_enumerable([4, 5, 6]),
+                             & &1, & &1 - 3, &{&1, &2})
+             |> Flow.map(fn {k, v} -> k + v end)
+             |> Enum.sort() == [5, 7, 9]
+    end
+
+    test "joins two flows followed by reduce" do
+      assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
+                             Flow.from_enumerable([4, 5, 6]),
+                             & &1, & &1 - 3, &{&1, &2})
+             |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
+             |> Flow.emit(:state)
+             |> Enum.sort() == [0, 5, 7, 9]
     end
   end
 end

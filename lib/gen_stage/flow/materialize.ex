@@ -112,33 +112,23 @@ defmodule GenStage.Flow.Materialize do
     {:producer_consumer, put_in(opts[:dispatcher], dispatcher)}
   end
 
-  defp join_dispatcher(partitions, key_fun) do
-    hash = fn event, count ->
-      key = key_fun.(event)
-      {{key, event}, :erlang.phash2(key, count)}
-    end
-    {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}
-  end
-
   ## Producers
 
   defp start_producers({:join, left, right, left_key, right_key, join}, ops, options, _) do
     partitions = Keyword.fetch!(options, :stages)
-
-    left_opts = [dispatcher: join_dispatcher(partitions, left_key)]
-    {_producers, left_consumers} = materialize(left, {:producer_consumer, left_opts})
-
-    right_opts = [dispatcher: join_dispatcher(partitions, right_key)]
-    {_producers, right_consumers} = materialize(right, {:producer_consumer, right_opts})
-
-    # TODO: Use join
-    {left_consumers ++ right_consumers, ops}
+    left_consumers = start_join(:left, left, left_key, partitions)
+    right_consumers = start_join(:right, right, right_key, partitions)
+    producers = left_consumers ++ right_consumers
+    [{type, {acc, fun, trigger}, ops, options} | rest] = at_least_one_ops(ops, options)
+    {producers, [{type, join_ops(join, acc, fun, trigger), ops, options} | rest]}
   end
   defp start_producers({:stages, producers}, ops, options, {_, last_opts}) do
+    producers = for producer <- producers, do: {producer, []}
+
     # If there are no more stages and there is a need for a custom
     # dispatcher, we need to wrap the sources in a custom stage.
-    if ops == [] and Keyword.has_key?(last_opts, :dispatcher) do
-      {producers, [stage(:mapper, :none, [], options)]}
+    if Keyword.has_key?(last_opts, :dispatcher) do
+      {producers, at_least_one_ops(ops, options)}
     else
       {producers, ops}
     end
@@ -173,9 +163,14 @@ defmodule GenStage.Flow.Materialize do
           apply(Stream, fun, [acc | args])
         end, enumerable, ops)
       {:ok, pid} = GenStage.from_enumerable(enumerable, init_opts)
-      pid
+      {pid, []}
     end
   end
+
+  defp at_least_one_ops([], options),
+    do: [stage(:mapper, :none, [], options)]
+  defp at_least_one_ops(ops, _opts),
+    do: ops
 
   ## Stages
 
@@ -192,13 +187,67 @@ defmodule GenStage.Flow.Materialize do
 
     for i <- 0..stages-1 do
       subscriptions =
-        for producer <- producers do
-          {producer, [partition: i] ++ subscribe_opts}
+        for {producer, producer_opts} <- producers do
+          {producer, [partition: i] ++ Keyword.merge(subscribe_opts, producer_opts)}
         end
       arg = {type, [subscribe_to: subscriptions] ++ init_opts, {i, stages}, trigger, acc, reducer}
       {:ok, pid} = GenStage.start_link(GenStage.Flow.MapReducer, arg)
-      pid
+      {pid, []}
     end
+  end
+
+  ## Joins
+
+  defp start_join(side, flow, key_fun, partitions) do
+    hash = fn event, count ->
+      key = key_fun.(event)
+      {{key, event}, :erlang.phash2(key, count)}
+    end
+
+    opts = [dispatcher: {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}]
+    {_producers, consumers} = materialize(flow, {:producer_consumer, opts})
+
+    for {consumer, consumer_opts} <- consumers do
+      {consumer, [tag: side] ++ consumer_opts}
+    end
+  end
+
+  defp join_ops(join, acc, fun, trigger) do
+    acc = fn -> {%{}, %{}, acc.()} end
+    fun = fn tag, events, {left, right, acc}, index ->
+      {events, left, right} = dispatch_join(events, tag, left, right, join, [])
+      {events, acc} = fun.(events, acc, index)
+      {events, {left, right, acc}}
+    end
+    trigger = fn {left, right, acc}, index, op, name ->
+      {events, acc} = trigger.(acc, index, op, name)
+      {events, {left, right, acc}}
+    end
+    {acc, fun, trigger}
+  end
+
+  defp dispatch_join([{key, left} | rest], :left, left_acc, right_acc, join, acc) do
+    acc =
+      case right_acc do
+        %{^key => rights} ->
+          :lists.foldl(fn right, acc -> [join.(left, right) | acc] end, acc, rights)
+        %{} -> acc
+      end
+    left_acc = Map.update(left_acc, key, [left], &[&1 | left])
+    dispatch_join(rest, :left, left_acc, right_acc, join, acc)
+  end
+  defp dispatch_join([{key, right} | rest], :right, left_acc, right_acc, join, acc) do
+    acc =
+      case left_acc do
+        %{^key => lefties} ->
+          :lists.foldl(fn left, acc -> [join.(left, right) | acc] end, acc, lefties)
+        %{} -> acc
+      end
+    right_acc = Map.update(right_acc, key, [right], &[&1 | right])
+    dispatch_join(rest, :right, left_acc, right_acc, join, acc)
+  end
+  defp dispatch_join([], _, left_acc, right_acc, _join, acc) do
+    {acc, left_acc, right_acc}
   end
 
   ## Reducers
