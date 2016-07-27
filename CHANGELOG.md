@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.3 (2016-07-28)
+
+### Enhancements
+
+  * Add `GenStage.Flow.inner_join/6`
+  * Add `GenStage.demand/2` that allows a producer to accumulate demand as a synchronization mechanism
+  * Improve performance for the partition dispatcher and allow it to change the partitioned event
+
 ## v0.4.2 (2016-07-25)
 
 ### Bug fixes
