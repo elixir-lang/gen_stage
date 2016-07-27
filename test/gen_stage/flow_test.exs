@@ -461,7 +461,7 @@ defmodule GenStage.FlowTest do
                              & &1, & &1 - 10, &{&1, &2}, stages: 2)
              |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
              |> Flow.emit(:state)
-             |> Enum.to_list() == [44, 146]
+             |> Enum.sort() == [44, 146]
     end
   end
 end

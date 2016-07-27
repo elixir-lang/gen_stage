@@ -588,6 +588,10 @@ defmodule GenStage.Flow do
   @doc """
   Inner joins two flows.
 
+  It expects the `left` and `right` flow, the `left_key` and
+  `right_key` to calculate the key for both flows and the `join`
+  function which is invoked whenever there is a match.
+
   A join creates a new partitioned flow that subscribes to the
   two flows given as arguments. The joined partitions can be
   configured via `options` with the same values as shown on
@@ -597,6 +601,22 @@ defmodule GenStage.Flow do
   received from both flows indefinitely (if you have a use
   case the joins need to be reset according to a window or
   a trigger, please open up an issue).
+
+  ## Examples
+
+      iex> posts = [%{id: 1, title: "hello"}, %{id: 2, title: "world"}]
+      iex> comments = [{1, "excellent"}, {1, "outstanding"},
+      ...>             {2, "great follow up"}, {3, "unknown"}]
+      iex> flow = Flow.inner_join(Flow.from_enumerable(posts),
+      ...>                        Flow.from_enumerable(comments),
+      ...>                        & &1.id, # left key
+      ...>                        & elem(&1, 0), # right key
+      ...>                        fn post, {_post_id, comment} -> Map.put(post, :comment, comment) end)
+      iex> Enum.sort(flow)
+      [%{id: 1, title: "hello", comment: "excellent"},
+       %{id: 2, title: "world", comment: "great follow up"},
+       %{id: 1, title: "hello", comment: "outstanding"}]
+
   """
   def inner_join(%GenStage.Flow{} = left, %GenStage.Flow{} = right,
                  left_key, right_key, join, options \\ [])
