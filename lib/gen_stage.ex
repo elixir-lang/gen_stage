@@ -260,8 +260,8 @@ defmodule GenStage do
       The `subscription_ref` is unique to identify the subscription.
 
       Once received, the producer MUST monitor the consumer and call
-      call `dispatcher.subscribe(from, state)`. However, if the subscription
-      reference is known, it must send a `:cancel` message to the consumer.
+      However, if the subscription reference is known, it MUST send a
+      `:cancel` message to the consumer.
 
     * `{:"$gen_producer", from :: {pid, subscription_tag}, {:cancel, reason}}` -
       sent by the consumer to cancel a given subscription.
@@ -348,6 +348,15 @@ defmodule GenStage do
   This callback may return options. Some options are specific to
   the stage type while others are shared across all types.
 
+  ### :producer options
+
+    * `:demand` - when `:forward`, the demand is always forwarded to
+      the `handle_demand` callback. When `:accumulate`, demand is
+      accumulated until its mode is set to `:forward` via `demand/2`.
+      This is useful as a synchronization mechanism, where the demand
+      is accumulated until all consumers are subscribed. Defaults to
+      `:forward`.
+
   ### :producer and :producer_consumer options
 
     * `:buffer_size` - the size of the buffer to store events
@@ -364,7 +373,7 @@ defmodule GenStage do
 
     * `:subscribe_to` - a list of producers to subscribe to. Each element
       represents the producer or a tuple with the producer and the
-      subscription options
+      subscription options (as defined in `sync_subscribe/2`)
 
   """
   @callback init(args :: term) ::
@@ -690,6 +699,22 @@ defmodule GenStage do
   end
 
   @doc """
+  Sets the demand mode for a producer.
+
+  When `:forward`, the demand is always forwarded to the `handle_demand`
+  callback. When `:accumulate`, demand is accumulated until its mode is
+  set to `:forward`. This is useful as a synchronization mechanism, where
+  the demand is accumulated until all consumers are subscribed. Defaults
+  to `:forward`.
+
+  This command is asynchronous.
+  """
+  @spec demand(stage, :forward | :accumulate) :: :ok
+  def demand(stage, mode) when mode in [:forward, :accumulate] do
+    cast(stage, {:"$demand", mode})
+  end
+
+  @doc """
   Asks the consumer to subscribe to the given producer synchronously.
 
   This call is synchronous and will return after the called consumer
@@ -741,14 +766,6 @@ defmodule GenStage do
     * `:max_demand` - the maximum demand for this subscription
 
   All other options are sent as is to the producer stage.
-
-  ## Examples
-
-      def init(producer) do
-        GenStage.async_subscribe(self(), to: producer, min_demand: 800, max_demand: 1000)
-        {:consumer, []}
-      end
-
   """
   @spec async_subscribe(stage, opts :: keyword()) :: :ok
   def async_subscribe(stage, opts) do
@@ -927,6 +944,9 @@ defmodule GenStage do
       Defaults to `GenStage.DemandDispatch`. May be either an atom or
       a tuple with the dispatcher and the dispatcher options
 
+    * `:demand` - configures the demand to `:forward` or `:accumulate`
+      mode. See `demand/2` for more information.
+
   All other options that would be given for `start_link/3` are
   also accepted.
   """
@@ -944,7 +964,9 @@ defmodule GenStage do
 
   It expects a list of producers to subscribe to. Each element
   represents the producer or a tuple with the producer and the
-  subscription options as defined in `async_subscribe/2`.
+  subscription options as defined in `sync_subscribe/2`. Once
+  all producers are subscribed to, their demand is automatically
+  set to `:forward` mode. See `demand/2` for more information.
 
   `GenStage.stream/1` will "hijack" the inbox of the process
   enumerating the stream to subscribe and receive messages
@@ -979,15 +1001,17 @@ defmodule GenStage do
   consume such streams from a separate process which will be
   discarded after the stream is consumed.
   """
-  @spec stream([stage | {stage, Keyword.t}]) :: Enumerable.t
-  def stream(subscriptions) when is_list(subscriptions) do
+  @spec stream([stage | {stage, Keyword.t}], keyword()) :: Enumerable.t
+  def stream(subscriptions, options \\ [])
+
+  def stream(subscriptions, options) when is_list(subscriptions) do
     subscriptions = :lists.map(&stream_validate_opts/1, subscriptions)
-    Stream.resource(fn -> init_stream(subscriptions) end,
+    Stream.resource(fn -> init_stream(subscriptions, options) end,
                     &consume_stream/1,
                     &close_stream/1)
   end
 
-  def stream(subscriptions) do
+  def stream(subscriptions, _options) do
     raise ArgumentError, "GenStage.stream/1 expects a list of subscriptions, got: #{inspect subscriptions}"
   end
 
@@ -1050,7 +1074,7 @@ defmodule GenStage do
     end
   end
 
-  defp init_stream(subscriptions) do
+  defp init_stream(subscriptions, options) do
     parent = self()
 
     {monitor_pid, monitor_ref} =
@@ -1061,6 +1085,10 @@ defmodule GenStage do
       {:DOWN, ^monitor_ref, _, _, reason} ->
         exit(reason)
       {^monitor_ref, {:subscriptions, subscriptions}} ->
+        producers = options[:producers] || Enum.map(subscriptions, fn
+          {_, {:subscribed, pid, _, _, _, _}} -> pid
+        end)
+        for pid <- producers, do: demand(pid, :forward)
         {:receive, monitor_ref, subscriptions}
     end
   end
@@ -1195,10 +1223,12 @@ defmodule GenStage do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- validate_dispatcher(opts),
          {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, 10000, 0, :infinity, true),
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
+         {:ok, demand, opts} <- validate_in(opts, :demand, :forward, [:accumulate, :forward]),
          :ok <- validate_no_opts(opts) do
       {:ok, %GenStage{mod: mod, state: state, type: :producer,
                       buffer: {:queue.new, 0, init_wheel(buffer_size)},
                       buffer_config: {buffer_size, buffer_keep},
+                      events: if(demand == :accumulate, do: 0, else: :forward),
                       dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
@@ -1282,6 +1312,7 @@ defmodule GenStage do
   end
 
   @doc false
+
   def handle_call({:"$notify", msg}, _from, stage) do
     producer_notify(msg, stage)
   end
@@ -1309,6 +1340,10 @@ defmodule GenStage do
   def handle_cast({:"$notify", msg}, stage) do
     {:reply, _, stage} = producer_notify(msg, stage)
     {:noreply, stage}
+  end
+
+  def handle_cast({:"$demand", mode}, stage) do
+    producer_demand(mode, stage)
   end
 
   def handle_cast({:"$subscribe", to, opts}, stage) do
@@ -1535,6 +1570,26 @@ defmodule GenStage do
 
   ## Producer helpers
 
+  defp producer_demand(_mode, %{type: type} = stage) when type != :producer do
+    :error_logger.error_msg('Demand mode can only be set for producers, GenStage ~p is not a producer', [name()])
+    {:noreply, stage}
+  end
+  defp producer_demand(:forward, %{events: events, state: state} = stage) do
+    stage = %{stage | events: :forward}
+    if is_integer(events) and events > 0 do
+      noreply_callback(:handle_demand, [events, state], stage)
+    else
+      {:noreply, stage}
+    end
+  end
+  defp producer_demand(:accumulate, %{events: events} = stage) do
+    if is_integer(events) do
+      {:noreply, stage}
+    else
+      {:noreply, %{stage | events: 0}}
+    end
+  end
+
   defp producer_subscribe(opts, from, stage) do
     %{mod: mod, state: state, dispatcher_state: dispatcher_state} = stage
 
@@ -1581,19 +1636,14 @@ defmodule GenStage do
         {:noreply, stage}
       {:ok, counter, stage} when is_integer(counter) and counter > 0 ->
         case stage do
-          %{type: :producer_consumer} ->
-            handle_demand(counter, stage)
-          %{state: state} ->
+          %{events: :forward, state: state} ->
             noreply_callback(:handle_demand, [counter, state], stage)
+          %{events: events} when is_integer(events) ->
+            {:noreply, %{stage | events: events + counter}}
+          %{events: queue} -> # producer_consumer
+            take_pc_events(queue, counter, stage)
         end
     end
-  end
-
-  defp handle_demand(counter, %{events: events} = stage) when is_integer(events) do
-    {:noreply, %{stage | events: events + counter}}
-  end
-  defp handle_demand(counter, %{events: events} = stage) do
-    take_pc_events(events, counter, stage)
   end
 
   defp dispatch_events([], stage) do
@@ -1726,7 +1776,6 @@ defmodule GenStage do
     :error_logger.error_msg('GenStage consumer ~p cannot send notifications', [name()])
     {:reply, {:error, :not_a_producer}, stage}
   end
-
   defp producer_notify(msg, stage) do
     %{buffer: {queue, count, notifications},
       buffer_config: {max, _keep}} = stage

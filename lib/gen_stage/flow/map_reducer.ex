@@ -7,10 +7,8 @@ defmodule GenStage.Flow.MapReducer do
   def init({type, opts, index, trigger, acc, reducer}) do
     {trigger_opts, opts} = Keyword.pop(opts, :trigger, :none)
     start_trigger(trigger_opts)
-    partitioned? = match?({GenStage.PartitionDispatcher, _}, opts[:dispatcher])
     consumers = if type == :consumer, do: :none, else: []
-    status = %{consumers: consumers, done: [], done?: false,
-               trigger: trigger, partitioned?: partitioned?}
+    status = %{consumers: consumers, done: [], done?: false, trigger: trigger}
     {type, {%{}, status, index, acc.(), reducer}, opts}
   end
 
@@ -27,19 +25,8 @@ defmodule GenStage.Flow.MapReducer do
     {:automatic, {tags, status, index, acc, reducer}}
   end
 
-  def handle_subscribe(:consumer, _, {pid, ref}, {tags, status, index, acc, reducer}) do
+  def handle_subscribe(:consumer, _, {_, ref}, {tags, status, index, acc, reducer}) do
     %{consumers: consumers} = status
-
-    # If partitioned we do not deliver the notification
-    # because the partition dispatcher can buffer those.
-    case status do
-      %{partitioned?: false, done?: true} ->
-        Process.send(pid, {:"$gen_consumer", {self(), ref},
-                           {:notification, {:producer, :done}}}, [:noconnect])
-      %{} ->
-        :ok
-    end
-
     status = %{status | consumers: [ref | consumers]}
     {:automatic, {tags, status, index, acc, reducer}}
   end

@@ -155,7 +155,7 @@ defmodule GenStage.Flow.Materialize do
   end
 
   defp start_enumerables(enumerables, ops, {_, opts}) do
-    init_opts = [consumers: :permanent] ++ Keyword.take(opts, @map_reducer_opts)
+    init_opts = [consumers: :permanent, demand: :accumulate] ++ Keyword.take(opts, @map_reducer_opts)
 
     for enumerable <- enumerables do
       enumerable =

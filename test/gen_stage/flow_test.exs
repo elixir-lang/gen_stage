@@ -291,7 +291,7 @@ defmodule GenStage.FlowTest do
              |> Flow.partition(hash: fn x, _ -> {x, 0} end, stages: 4)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(&[Enum.sort(&1)])
-             |> Enum.filter(& &1 != []) == [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
+             |> Enum.sort() == [[], [], [], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
     end
 
     test "allows element based partitioning" do
@@ -389,7 +389,7 @@ defmodule GenStage.FlowTest do
     end
 
     test "trigger based on intervals" do
-      assert Flow.new(max_demand: 10)
+      assert Flow.new(max_demand: 5, stages: 2)
              |> Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)))
              |> Flow.partition(stages: 1, max_demand: 10)
              |> Flow.trigger_every(200, :microseconds)
@@ -400,7 +400,7 @@ defmodule GenStage.FlowTest do
     end
 
     test "trigger based on timers" do
-      assert Flow.new(max_demand: 10)
+      assert Flow.new(max_demand: 5, stages: 2)
              |> Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)))
              |> Flow.partition(stages: 1, max_demand: 10)
              |> Flow.reduce(fn ->

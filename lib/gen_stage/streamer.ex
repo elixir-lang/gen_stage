@@ -15,42 +15,36 @@ defmodule GenStage.Streamer do
       x, {acc, counter} -> {:cont, {[x | acc], counter - 1}}
     end)
 
-    partitioned? = match?({GenStage.PartitionDispatcher, _}, opts[:dispatcher])
-    {:producer, {partitioned?, consumers, continuation}, Keyword.take(opts, [:dispatcher])}
+    {:producer, {consumers, continuation}, Keyword.take(opts, [:dispatcher, :demand])}
   end
 
-  def handle_subscribe(_, _, {pid, ref}, {partitioned?, consumers, continuation}) do
-    if not partitioned? and is_atom(continuation) do
-      msg = {:producer, continuation}
-      Process.send(pid, {:"$gen_consumer", {self(), ref}, {:notification, msg}}, [:noconnect])
-    end
-    consumers = case consumers do
-      :temporary -> :temporary
-      _ -> [ref | consumers]
-    end
-    {:automatic, {partitioned?, consumers, continuation}}
+  def handle_subscribe(_, _, _from, {:temporary, _} = state) do
+    {:automatic, state}
+  end
+  def handle_subscribe(_, _, {_, ref}, {consumers, continuation}) do
+    {:automatic, {[ref | consumers], continuation}}
   end
 
-  def handle_cancel(_, _, {_partitioned?, :temporary, _} = state) do
+  def handle_cancel(_, _, {:temporary, _} = state) do
     {:noreply, [], state}
   end
-  def handle_cancel(_, {_, ref}, {partitioned?, consumers, continuation}) do
+  def handle_cancel(_, {_, ref}, {consumers, continuation}) do
     case List.delete(consumers, ref) do
-      [] -> {:stop, :normal, {partitioned?, [], continuation}}
-      consumers -> {:noreply, [], {partitioned?, consumers, continuation}}
+      [] -> {:stop, :normal, {[], continuation}}
+      consumers -> {:noreply, [], {consumers, continuation}}
     end
   end
 
-  def handle_demand(_demand, {_, _, status} = state) when is_atom(status) do
+  def handle_demand(_demand, {_, status} = state) when is_atom(status) do
     {:noreply, [], state}
   end
-  def handle_demand(demand, {partitioned?, consumers, continuation}) when demand > 0 do
+  def handle_demand(demand, {consumers, continuation}) when demand > 0 do
     case continuation.({:cont, {[], demand}}) do
       {:suspended, {list, 0}, continuation} ->
-        {:noreply, Enum.reverse(list), {partitioned?, consumers, continuation}}
+        {:noreply, Enum.reverse(list), {consumers, continuation}}
       {status, {list, _}} ->
         GenStage.async_notify(self(), {:producer, status})
-        {:noreply, Enum.reverse(list), {partitioned?, consumers, status}}
+        {:noreply, Enum.reverse(list), {consumers, status}}
     end
   end
 end

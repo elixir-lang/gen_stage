@@ -1084,8 +1084,9 @@ defmodule GenStage.Flow do
 
   defimpl Enumerable do
     def reduce(flow, acc, fun) do
-      {_producers, consumers} = GenStage.Flow.Materialize.materialize(flow, {:producer_consumer, []})
-      GenStage.stream(consumers).(acc, fun)
+      {producers, consumers} = GenStage.Flow.Materialize.materialize(flow, {:producer_consumer, []})
+      pids = for {pid, _} <- producers, do: pid
+      GenStage.stream(consumers, producers: pids).(acc, fun)
     end
 
     def count(_flow) do
