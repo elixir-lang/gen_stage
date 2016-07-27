@@ -32,7 +32,7 @@ defmodule DynamicSupervisor do
         end
 
         def push(pid, h) do
-          Agent.cast(fn t -> [h|t] end)
+          Agent.cast(pid, fn t -> [h|t] end)
         end
       end
 
