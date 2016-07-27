@@ -444,5 +444,24 @@ defmodule GenStage.FlowTest do
              |> Flow.emit(:state)
              |> Enum.sort() == [9, 12]
     end
+
+    test "joins two flows followed by trigger and reduce" do
+      assert Flow.inner_join(Flow.from_enumerable(0..9),
+                             Flow.from_enumerable(10..19),
+                             & &1, & &1 - 10, &{&1, &2}, stages: 1)
+             |> Flow.trigger_every(5, :events, :reset)
+             |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
+             |> Flow.emit(:state)
+             |> Enum.to_list() == [70, 120, 0]
+    end
+
+    test "joins mapper and reducer flows" do
+      assert Flow.inner_join(Flow.from_enumerable(0..9) |> Flow.partition(),
+                             Flow.from_enumerable(0..9) |> Flow.map(& &1 + 10),
+                             & &1, & &1 - 10, &{&1, &2}, stages: 2)
+             |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
+             |> Flow.emit(:state)
+             |> Enum.to_list() == [44, 146]
+    end
   end
 end

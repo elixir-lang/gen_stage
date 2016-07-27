@@ -201,38 +201,39 @@ defmodule GenStage.Flow do
   break line by line into words without any need for coordination.
 
   However, the reducing stage is a bit more complicated. Reducer
-  stages typically compute some result based on its inputs. This
-  implies reducer computations need to look at the whole data set
-  and, in order to so efficiently, we want to partition the data
-  to guarantee each reducer stage has a distinct subset of the data.
+  stages typically aggregate some result based on its inputs, such
+  as how many times a word have appeared. This implies reducer
+  computations need to traverse the whole data set and, in order
+  to do so in parallel, we partition the data into distinct
+  datasets.
 
-  Generally speaking, the performance of our flow will be limited
-  by the amount of work we can perform without having to look at
-  the whole collection. At the moment we call `reduce/3`, it will
-  group the whole data for that particular partition. Operations
-  on the whole data are still parallel but must await until all
-  data is collected. Finally, calling any function from `Enum`
-  in a flow will start its execution and send the computed datasets
-  to the caller process.
+  The goal of the `reduce/3` operation is to accumulate a value
+  which then becomes the partition state. Any operation that
+  happens after `reduce/3` work on the whole state and are only
+  executed after all the data for a partition is collected.
 
   While this approach works great for bound (finite) data, it
   is quite limited for unbounded (infinite) data. After all, if
-  the reduce operation needs the whole data to complete, how can
-  it do so if the data never finishes?
+  the reduce operation needs to traverse the whole partition to
+  complete, how can we do so if the data never finishes?
 
-  This brings us to the aspects of data completion and data
-  emission which we will discuss next.
+  To answer this question, we need to talk about data completion,
+  triggers and windows.
 
   ## Data completion, triggers and windows
 
   When working with an unbounded stream of data, there is no
-  such thing as data completion. Therefore, when can we consider
-  a reduce function to be "complete"?
+  such thing as data completion. Therefore when can we consider
+  a reduce function to be "completed"?
+
+  Instead of thinking about data completion, we think in terms
+  of checkpoints where we write the results we have computed so
+  far.
 
   In Flow, we use triggers and windows. Triggers allows us to
   temporarily halt reduction to checkpoint our progress. Windows
-  gives us better understanding of the data by grouping it according
-  to some event time.
+  gives us better understanding of the data by splitting the data
+  into windows which are reduced individually.
 
   ### Triggers
 
@@ -253,10 +254,10 @@ defmodule GenStage.Flow do
   the remaining steps for that stage, such as `map_state/2` or
   any other call after `reduce/3`. Triggers are also named and
   the trigger names will be sent as third argument to the function
-  given in `map_state/2` and `each_state/2`.
+  given to `map_state/2` and `each_state/2`.
 
   For every emitted trigger, developers have the choice of either
-  reseting the accumulation stage or keeping it as is. The resetting
+  reseting the accumulation state or keeping it as is. The resetting
   option is useful when you are interested only on intermediate
   results, usually because another step is aggregator. Keeping the
   accumulator is the default and used to checkpoint the values while
@@ -272,14 +273,15 @@ defmodule GenStage.Flow do
 
   Although processing time is conceptually simple, it does not provide
   any insight about the data being processed. After all, each stage
-  moves according to its own processing time and queues. Similar to
-  event counting and punctuation, processing time is most useful for
+  moves according to its own processing time and queues. This lack of
+  precision in processing time makes it most useful for efficiently
   checkpointing data.
 
   On the other hand, the event time is based on the data itself. When
-  working with event time, we break the data into windows, allowing us
-  to group events into windows even when late or out of order. The
-  windows themselves may also have triggers for checkpointing.
+  working with event time, we split the data into windows, even when
+  late or out of order. The windows can be used to gather time-based
+  insight from the data (the most popular words in the last 10 minutes)
+  as well as for checkpointing.
 
   TODO: Implement the GenStage.Flow.Window module.
 
@@ -586,16 +588,20 @@ defmodule GenStage.Flow do
   @doc """
   Inner joins two flows.
 
-  The `inner` means the partition
-
   A join creates a new partitioned flow that subscribes to the
-  two flows given as arguments. The joined partition can be configured
-  via `options` with the same values as shown on `new/1`.
+  two flows given as arguments. The joined partitions can be
+  configured via `options` with the same values as shown on
+  `new/1`.
+
+  The newly created partitions will accumulate the data
+  received from both flows indefinitely (if you have a use
+  case the joins need to be reset according to a window or
+  a trigger, please open up an issue).
   """
   def inner_join(%GenStage.Flow{} = left, %GenStage.Flow{} = right,
                  left_key, right_key, join, options \\ [])
       when is_function(left_key, 1) and is_function(right_key, 1) and is_function(join, 2) do
-    %GenStage.Flow{producers: {:join, left, right, left_key, right_key, join},
+    %GenStage.Flow{producers: {:join, :inner, left, right, left_key, right_key, join},
                    options: options}
   end
 
@@ -800,12 +806,16 @@ defmodule GenStage.Flow do
   Reduces the given values with the given accumulator.
 
   `acc` is a function that receives no arguments and returns
-  the actual accumulator. The `acc` function is executed per stage
-  inside each stage when the stage starts or whenever a trigger
-  is emitted with the `:reset` operation.
+  the actual accumulator. The `acc` function is defined per stage
+  when the stage starts. If a trigger is emitted and it is
+  configured to reset the accumulator, the `acc` function will
+  be invoked once again.
 
-  Once reducing is done, the returned accumulator will be
-  the new state of the stage for the given batch.
+  Reducing will accumulate data until the data is completed
+  or until a trigger is emitted or until a window completes.
+  When that happens, the returned accumulator will be the new
+  state of the stage and all functions after reduce will be
+  invoked.
 
   ## Examples
 
@@ -860,8 +870,10 @@ defmodule GenStage.Flow do
   Applies the given function over the stage state.
 
   This function must be called after `reduce/3`, as it
-  maps over the state directly (or indirectly) returned
-  by `reduce/3`.
+  maps over the state accumulated by `reduce/3`. This function
+  will be invoked every time `reduce/3` halts, either because
+  there is no data or because a trigger was emitted or a window
+  has been completed.
 
   The `mapper` function may have arity 1 or 2 or 3:
 

@@ -15,8 +15,8 @@ defmodule GenStage.Flow.Materialize do
   def materialize(%{operations: operations, options: options, producers: producers}, last) do
     options = Keyword.put_new(options, :stages, System.schedulers_online)
     ops = split_operations(operations, options)
-    {producers, ops} = start_producers(producers, ops, options, last)
-    {producers, start_stages(ops, producers, last)}
+    {producers, next, ops} = start_producers(producers, ops, options, last)
+    {producers, start_stages(ops, next, last)}
   end
 
   ## Helpers
@@ -33,7 +33,7 @@ defmodule GenStage.Flow.Materialize do
 
   @reduce "reduce/group_by"
   @map_state "map_state/each_state/emit"
-  @trigger "trigger/trigger_every/window"
+  @trigger "trigger/trigger_every"
 
   defp split_operations([{:partition, opts} | ops], type, trigger, acc_ops, acc_opts) do
     [stage(type, trigger, acc_ops, acc_opts) | split_operations(ops, :mapper, :none, [], opts)]
@@ -114,13 +114,14 @@ defmodule GenStage.Flow.Materialize do
 
   ## Producers
 
-  defp start_producers({:join, left, right, left_key, right_key, join}, ops, options, _) do
+  defp start_producers({:join, kind, left, right, left_key, right_key, join}, ops, options, _) do
     partitions = Keyword.fetch!(options, :stages)
-    left_consumers = start_join(:left, left, left_key, partitions)
-    right_consumers = start_join(:right, right, right_key, partitions)
-    producers = left_consumers ++ right_consumers
+    {left_producers, left_consumers} = start_join(:left, left, left_key, partitions)
+    {right_producers, right_consumers} = start_join(:right, right, right_key, partitions)
     [{type, {acc, fun, trigger}, ops, options} | rest] = at_least_one_ops(ops, options)
-    {producers, [{type, join_ops(join, acc, fun, trigger), ops, options} | rest]}
+    {left_producers ++ right_producers,
+     left_consumers ++ right_consumers,
+     [{type, join_ops(kind, join, acc, fun, trigger), ops, options} | rest]}
   end
   defp start_producers({:stages, producers}, ops, options, {_, last_opts}) do
     producers = for producer <- producers, do: {producer, []}
@@ -128,9 +129,9 @@ defmodule GenStage.Flow.Materialize do
     # If there are no more stages and there is a need for a custom
     # dispatcher, we need to wrap the sources in a custom stage.
     if Keyword.has_key?(last_opts, :dispatcher) do
-      {producers, at_least_one_ops(ops, options)}
+      {producers, producers, at_least_one_ops(ops, options)}
     else
-      {producers, ops}
+      {producers, producers, ops}
     end
   end
   defp start_producers({:enumerables, enumerables}, ops, options, last) do
@@ -142,15 +143,18 @@ defmodule GenStage.Flow.Materialize do
       [{:mapper, _compiled_ops, mapper_ops, mapper_opts} | ops] when stages < length(enumerables) ->
         # Fuse mappers into enumerables if we have more enumerables than stages.
         # In this case, mapper_opts contains the given options.
-        {start_enumerables(enumerables, mapper_ops, dispatcher(mapper_opts, ops, last)), ops}
+        producers = start_enumerables(enumerables, mapper_ops, dispatcher(mapper_opts, ops, last))
+        {producers, producers, ops}
       [] ->
         # If there are no ops, we need to pass the last dispatcher info.
         # In this case, options are discarded because there is no producer_consumer.
-        {start_enumerables(enumerables, [], last), ops}
+        producers = start_enumerables(enumerables, [], last)
+        {producers, producers, ops}
       _ ->
         # Otherwise it is a regular producer consumer with demand dispatcher.
         # In this case, options is used by subsequent mapper/reducer stages.
-        {start_enumerables(enumerables, [], {:producer_consumer, []}), ops}
+        producers = start_enumerables(enumerables, [], {:producer_consumer, []})
+        {producers, producers, ops}
     end
   end
 
@@ -205,14 +209,15 @@ defmodule GenStage.Flow.Materialize do
     end
 
     opts = [dispatcher: {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}]
-    {_producers, consumers} = materialize(flow, {:producer_consumer, opts})
+    {producers, consumers} = materialize(flow, {:producer_consumer, opts})
 
-    for {consumer, consumer_opts} <- consumers do
-      {consumer, [tag: side] ++ consumer_opts}
-    end
+    {producers,
+      for {consumer, consumer_opts} <- consumers do
+        {consumer, [tag: side] ++ consumer_opts}
+      end}
   end
 
-  defp join_ops(join, acc, fun, trigger) do
+  defp join_ops(:inner, join, acc, fun, trigger) do
     acc = fn -> {%{}, %{}, acc.()} end
     fun = fn tag, events, {left, right, acc}, index ->
       {events, left, right} = dispatch_join(events, tag, left, right, join, [])
@@ -247,7 +252,7 @@ defmodule GenStage.Flow.Materialize do
     dispatch_join(rest, :right, left_acc, right_acc, join, acc)
   end
   defp dispatch_join([], _, left_acc, right_acc, _join, acc) do
-    {acc, left_acc, right_acc}
+    {:lists.reverse(acc), left_acc, right_acc}
   end
 
   ## Reducers
