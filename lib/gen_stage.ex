@@ -259,9 +259,9 @@ defmodule GenStage do
       Once sent, the consumer MAY immediately send demand to the producer.
       The `subscription_ref` is unique to identify the subscription.
 
-      Once received, the producer MUST monitor the consumer and call
-      However, if the subscription reference is known, it MUST send a
-      `:cancel` message to the consumer.
+      Once received, the producer MUST monitor the consumer. However, if
+      the subscription reference is known, it MUST send a `:cancel` message
+      to the consumer instead of monitoring and accepting the subscription.
 
     * `{:"$gen_producer", from :: {pid, subscription_tag}, {:cancel, reason}}` -
       sent by the consumer to cancel a given subscription.
