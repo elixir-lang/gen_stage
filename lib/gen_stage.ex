@@ -148,7 +148,7 @@ defmodule GenStage do
 
   In the example above, B is a `:producer_consumer` and therefore
   acts as a buffer. Getting the proper demand values in B is
-  important: making the buffer to small may make the whole pipeline
+  important: making the buffer too small may make the whole pipeline
   slower, making the buffer too big may unnecessarily consume
   memory.
 
