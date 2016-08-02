@@ -1,6 +1,6 @@
-alias Experimental.GenStage
+alias Experimental.{GenStage, Flow}
 
-defmodule GenStage.Flow.Materialize do
+defmodule Flow.Materialize do
   @moduledoc false
 
   @compile :inline_list_funcs
@@ -195,7 +195,7 @@ defmodule GenStage.Flow.Materialize do
           {producer, [partition: i] ++ Keyword.merge(subscribe_opts, producer_opts)}
         end
       arg = {type, [subscribe_to: subscriptions] ++ init_opts, {i, stages}, trigger, acc, reducer}
-      {:ok, pid} = GenStage.start_link(GenStage.Flow.MapReducer, arg)
+      {:ok, pid} = GenStage.start_link(Flow.MapReducer, arg)
       {pid, []}
     end
   end

@@ -1,6 +1,6 @@
-alias Experimental.GenStage
+alias Experimental.{GenStage, Flow}
 
-defmodule GenStage.Flow.MapReducer do
+defmodule Flow.MapReducer do
   @moduledoc false
   use GenStage
 

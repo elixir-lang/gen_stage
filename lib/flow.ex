@@ -1,10 +1,10 @@
-alias Experimental.GenStage
+alias Experimental.{GenStage, Flow}
 
-defmodule GenStage.Flow do
+defmodule Flow do
   @moduledoc ~S"""
   Computational flows with stages.
 
-  `GenStage.Flow` allows developers to express computations
+  `Flow` allows developers to express computations
   on collections, similar to the `Enum` and `Stream` modules,
   although computations will be executed in parallel using
   multiple `GenStage`s.
@@ -13,6 +13,10 @@ defmodule GenStage.Flow do
   and unbounded (infinite) data. Allowing the data to be
   partitioned into arbitrary windows which are materialized
   at different triggers.
+
+  **Note:** this module is currently namespaced under
+  `Experimental.Flow`. You will need to `alias Experimental.Flow`
+  before writing the examples below.
 
   As an example, let's implement the classical word counting
   algorithm using flow. The word counting program will receive
@@ -46,7 +50,7 @@ defmodule GenStage.Flow do
   allows us to process the whole data set efficiently, it does
   not leverage concurency. Flow solves that:
 
-      alias Experimental.GenStage.Flow
+      alias Experimental.Flow
       File.stream!("path/to/some/file")
       |> Flow.from_enumerable()
       |> Flow.flat_map(&String.split(&1, " "))
@@ -75,7 +79,7 @@ defmodule GenStage.Flow do
   To understand the need to partion the data, let's change the
   example above and remove the partition call:
 
-      alias Experimental.GenStage.Flow
+      alias Experimental.Flow
       File.stream!("path/to/some/file")
       |> Flow.from_enumerable()
       |> Flow.flat_map(&String.split(&1, " "))
@@ -127,7 +131,7 @@ defmodule GenStage.Flow do
   with the help of a hash function. Let's introduce the call to
   `partition/1` back:
 
-      alias Experimental.GenStage.Flow
+      alias Experimental.Flow
       File.stream!("path/to/some/file")
       |> Flow.from_enumerable()
       |> Flow.flat_map(&String.split(&1, " "))
@@ -283,7 +287,7 @@ defmodule GenStage.Flow do
   insight from the data (the most popular words in the last 10 minutes)
   as well as for checkpointing.
 
-  TODO: Implement the GenStage.Flow.Window module.
+  TODO: Implement the Flow.Window module.
 
   ## Long running-flows
 
@@ -316,7 +320,7 @@ defmodule GenStage.Flow do
   that are not necessarily related to flows themselves. Let's rewrite
   the flow above using some of them:
 
-      alias Experimental.GenStage.Flow
+      alias Experimental.Flow
 
       # The parent process which will own the table
       parent = self()
@@ -414,7 +418,7 @@ defmodule GenStage.Flow do
   """
 
   defstruct producers: nil, options: [], operations: []
-  @type t :: %GenStage.Flow{producers: producers, operations: [operation], options: Keyword.t}
+  @type t :: %Flow{producers: producers, operations: [operation], options: Keyword.t}
 
   @typep producers :: nil |
                       {:stages, GenStage.stage} |
@@ -446,7 +450,7 @@ defmodule GenStage.Flow do
   """
   @spec new(Keyword.t) :: t
   def new(options \\ []) do
-    %GenStage.Flow{options: options}
+    %Flow{options: options}
   end
 
   @doc """
@@ -633,11 +637,11 @@ defmodule GenStage.Flow do
        %{id: 1, title: "hello", comment: "outstanding"}]
 
   """
-  def bounded_join(mode, %GenStage.Flow{} = left, %GenStage.Flow{} = right,
+  def bounded_join(mode, %Flow{} = left, %Flow{} = right,
                    left_key, right_key, join, options \\ [])
       when is_function(left_key, 1) and is_function(right_key, 1) and
            is_function(join, 2) and mode in @joins do
-    %GenStage.Flow{producers: {:join, :bounded, mode, left, right, left_key, right_key, join},
+    %Flow{producers: {:join, :bounded, mode, left, right, left_key, right_key, join},
                    options: options}
   end
 
@@ -873,7 +877,7 @@ defmodule GenStage.Flow do
     if is_function(acc_fun, 0) do
       add_operation(flow, {:reduce, acc_fun, reducer_fun})
     else
-      raise ArgumentError, "GenStage.Flow.reduce/3 expects the accumulator to be given as a function"
+      raise ArgumentError, "Flow.reduce/3 expects the accumulator to be given as a function"
     end
   end
 
@@ -1037,7 +1041,7 @@ defmodule GenStage.Flow do
     if is_function(acc_fun, 0) do
       add_operation(flow, {:punctuation, acc_fun, trigger_fun})
     else
-      raise ArgumentError, "GenStage.Flow.trigger/3 expects the accumulator to be given as a function"
+      raise ArgumentError, "Flow.trigger/3 expects the accumulator to be given as a function"
     end
   end
 
@@ -1113,17 +1117,17 @@ defmodule GenStage.Flow do
 
   @compile {:inline, add_producers: 2, add_operation: 2}
 
-  defp add_producers(%GenStage.Flow{producers: nil} = flow, producers) do
+  defp add_producers(%Flow{producers: nil} = flow, producers) do
     %{flow | producers: producers}
   end
-  defp add_producers(%GenStage.Flow{producers: producers}, _producers) do
+  defp add_producers(%Flow{producers: producers}, _producers) do
     raise ArgumentError, "cannot set from_stages/from_enumerable because the flow already has set #{inspect producers} as producers"
   end
   defp add_producers(flow, _producers) do
     raise ArgumentError, "expected a flow as argument, got: #{inspect flow}"
   end
 
-  defp add_operation(%GenStage.Flow{operations: operations} = flow, operation) do
+  defp add_operation(%Flow{operations: operations} = flow, operation) do
     %{flow | operations: [operation | operations]}
   end
   defp add_operation(flow, _producers) do
@@ -1132,7 +1136,7 @@ defmodule GenStage.Flow do
 
   defimpl Enumerable do
     def reduce(flow, acc, fun) do
-      {producers, consumers} = GenStage.Flow.Materialize.materialize(flow, {:producer_consumer, []})
+      {producers, consumers} = Flow.Materialize.materialize(flow, {:producer_consumer, []})
       pids = for {pid, _} <- producers, do: pid
       GenStage.stream(consumers, producers: pids).(acc, fun)
     end

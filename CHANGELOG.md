@@ -4,7 +4,7 @@
 
 ### Enhancements
 
-  * Add `GenStage.Flow.inner_join/6`
+  * Add `Flow.inner_join/6`
   * Add `GenStage.demand/2` that allows a producer to accumulate demand as a synchronization mechanism
   * Improve performance for the partition dispatcher and allow it to change the partitioned event
 
@@ -18,13 +18,13 @@
 
 ### Enhancements
 
-  * Add `GenStage.Flow.trigger/3` and `GenStage.Flow.trigger_every/4` supporting custom, count and processing-time triggers. Event-time triggers can be implemented via `trigger/3`. Event-time triggers will be added once windows support is included
+  * Add `Flow.trigger/3` and `Flow.trigger_every/4` supporting custom, count and processing-time triggers. Event-time triggers can be implemented via `trigger/3`. Event-time triggers will be added once windows support is included
 
 ## v0.4.0 (2016-07-19)
 
 ### Enhancements
 
-  * Introduce `GenStage.Flow` with enumerable/stream based operations
+  * Introduce `Flow` with enumerable/stream based operations
   * Include more information on `:sys.get_status/1` calls for GenStage
 
 ### Bug fixes

@@ -1,13 +1,12 @@
-alias Experimental.GenStage
+alias Experimental.Flow
 
-defmodule GenStage.Flow.MaterializeTest do
+defmodule Flow.MaterializeTest do
   use ExUnit.Case, async: true
 
   @schedulers System.schedulers_online
-  alias GenStage.Flow
 
   def split(%{operations: operations}) do
-    GenStage.Flow.Materialize.split_operations(operations, [])
+    Flow.Materialize.split_operations(operations, [])
   end
 
   describe "split_operations/2" do

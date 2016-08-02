@@ -1,9 +1,7 @@
-alias Experimental.GenStage
+alias Experimental.{GenStage, Flow}
 
-defmodule GenStage.FlowTest do
+defmodule FlowTest do
   use ExUnit.Case, async: true
-
-  alias GenStage.Flow
   doctest Flow
 
   defmodule Counter do
