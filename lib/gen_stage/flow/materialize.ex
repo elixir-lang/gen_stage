@@ -114,14 +114,14 @@ defmodule GenStage.Flow.Materialize do
 
   ## Producers
 
-  defp start_producers({:join, kind, left, right, left_key, right_key, join}, ops, options, _) do
+  defp start_producers({:join, bounded, kind, left, right, left_key, right_key, join}, ops, options, _) do
     partitions = Keyword.fetch!(options, :stages)
     {left_producers, left_consumers} = start_join(:left, left, left_key, partitions)
     {right_producers, right_consumers} = start_join(:right, right, right_key, partitions)
     [{type, {acc, fun, trigger}, ops, options} | rest] = at_least_one_ops(ops, options)
     {left_producers ++ right_producers,
      left_consumers ++ right_consumers,
-     [{type, join_ops(kind, join, acc, fun, trigger), ops, options} | rest]}
+     [{type, join_ops(bounded, kind, join, acc, fun, trigger), ops, options} | rest]}
   end
   defp start_producers({:stages, producers}, ops, options, {_, last_opts}) do
     producers = for producer <- producers, do: {producer, []}
@@ -217,18 +217,41 @@ defmodule GenStage.Flow.Materialize do
       end}
   end
 
-  defp join_ops(:inner, join, acc, fun, trigger) do
+  defp join_ops(:bounded, kind, join, acc, fun, trigger) do
     acc = fn -> {%{}, %{}, acc.()} end
-    fun = fn tag, events, {left, right, acc}, index ->
+    events = fn tag, events, {left, right, acc}, index ->
       {events, left, right} = dispatch_join(events, tag, left, right, join, [])
       {events, acc} = fun.(events, acc, index)
       {events, {left, right, acc}}
     end
     trigger = fn {left, right, acc}, index, op, name ->
-      {events, acc} = trigger.(acc, index, op, name)
-      {events, {left, right, acc}}
+      {kind_events, acc} =
+        case kind do
+          :inner ->
+            {[], acc}
+          :left_outer ->
+            fun.(left_events(Map.keys(left), Map.keys(right), left, join), acc, index)
+          :right_outer ->
+            fun.(right_events(Map.keys(right), Map.keys(left), right, join), acc, index)
+          :full_outer ->
+            left_keys = Map.keys(left)
+            right_keys = Map.keys(right)
+            {left_events, acc} = fun.(left_events(left_keys, right_keys, left, join), acc, index)
+            {right_events, acc} = fun.(right_events(right_keys, left_keys, right, join), acc, index)
+            {left_events ++ right_events, acc}
+        end
+      {trigger_events, acc} = trigger.(acc, index, op, name)
+      {kind_events ++ trigger_events, {left, right, acc}}
     end
-    {acc, fun, trigger}
+    {acc, events, trigger}
+  end
+
+  defp left_events(left, right, source, join) do
+    for key <- left -- right, entry <- Map.fetch!(source, key), do: join.(entry, nil)
+  end
+
+  defp right_events(right, left, source, join) do
+    for key <- right -- left, entry <- Map.fetch!(source, key), do: join.(nil, entry)
   end
 
   defp dispatch_join([{key, left} | rest], :left, left_acc, right_acc, join, acc) do

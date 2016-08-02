@@ -212,7 +212,7 @@ defmodule GenStage.Flow do
   happens after `reduce/3` work on the whole state and are only
   executed after all the data for a partition is collected.
 
-  While this approach works great for bound (finite) data, it
+  While this approach works great for bounded (finite) data, it
   is quite limited for unbounded (infinite) data. After all, if
   the reduce operation needs to traverse the whole partition to
   complete, how can we do so if the data never finishes?
@@ -435,7 +435,7 @@ defmodule GenStage.Flow do
 
   ## Options
 
-  These options configure the stages before partitioning.
+  These options configure the stages connected to producers before partitioning.
 
     * `:stages` - the number of stages
     * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
@@ -585,43 +585,59 @@ defmodule GenStage.Flow do
     raise ArgumentError, "from_stages/2 expects a non-empty list as argument, got: #{inspect stages}"
   end
 
+  @joins [:inner, :left_outer, :right_outer, :full_outer]
+
   @doc """
-  Inner joins two flows.
+  Joins two bounded (finite) flows.
 
   It expects the `left` and `right` flow, the `left_key` and
   `right_key` to calculate the key for both flows and the `join`
   function which is invoked whenever there is a match.
 
   A join creates a new partitioned flow that subscribes to the
-  two flows given as arguments. The joined partitions can be
-  configured via `options` with the same values as shown on
-  `new/1`.
+  two flows given as arguments.  The newly created partitions
+  will accumulate the data received from both flows until there
+  is no more data.
 
-  The newly created partitions will accumulate the data
-  received from both flows indefinitely (if you have a use
-  case the joins need to be reset according to a window or
-  a trigger, please open up an issue).
+  The join has 4 modes:
+
+    * `:inner` - data will only be emitted when there is a match
+      between the keys in left and right side
+    * `:left_outer` - similar to `:inner` plus all items given
+      in the left that did not have a match will be emitted at the
+      end with `nil` for the right value
+    * `:right_outer` - similar to `:inner` plus all items given
+      in the right that did not have a match will be emitted at the
+      end with `nil` for the left value
+    * `:full_outer` - similar to `:inner` plus all items given
+      in the left and right that did not have a match will be emitted
+      at the end with `nil` for the right and left value respectively
+
+  The joined partitions can be configured via `options` with the
+  same values as shown on `new/1`.
 
   ## Examples
 
       iex> posts = [%{id: 1, title: "hello"}, %{id: 2, title: "world"}]
       iex> comments = [{1, "excellent"}, {1, "outstanding"},
       ...>             {2, "great follow up"}, {3, "unknown"}]
-      iex> flow = Flow.inner_join(Flow.from_enumerable(posts),
-      ...>                        Flow.from_enumerable(comments),
-      ...>                        & &1.id, # left key
-      ...>                        & elem(&1, 0), # right key
-      ...>                        fn post, {_post_id, comment} -> Map.put(post, :comment, comment) end)
+      iex> flow = Flow.bounded_join(:inner,
+      ...>                          Flow.from_enumerable(posts),
+      ...>                          Flow.from_enumerable(comments),
+      ...>                          & &1.id, # left key
+      ...>                          & elem(&1, 0), # right key
+      ...>                          fn post, {_post_id, comment} -> Map.put(post, :comment, comment) end)
       iex> Enum.sort(flow)
       [%{id: 1, title: "hello", comment: "excellent"},
        %{id: 2, title: "world", comment: "great follow up"},
        %{id: 1, title: "hello", comment: "outstanding"}]
 
   """
-  def inner_join(%GenStage.Flow{} = left, %GenStage.Flow{} = right,
-                 left_key, right_key, join, options \\ [])
-      when is_function(left_key, 1) and is_function(right_key, 1) and is_function(join, 2) do
-    %GenStage.Flow{producers: {:join, :inner, left, right, left_key, right_key, join},
+  def bounded_join(mode, %GenStage.Flow{} = left, %GenStage.Flow{} = right,
+                   left_key, right_key, join, options \\ [])
+      when is_function(left_key, 1) and is_function(right_key, 1) and
+           is_function(join, 2) and mode in @joins do
+    %GenStage.Flow{producers: {:join, :bounded, mode, left, right, left_key, right_key, join},
                    options: options}
   end
 

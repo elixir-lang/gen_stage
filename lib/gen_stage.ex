@@ -976,6 +976,15 @@ defmodule GenStage do
   For more information, read the "Known limitations" section
   below.
 
+  ## Options
+
+    * `:producers` - the processes to set the demand to `:forward`
+      on subscription. It defaults to the processes being subscribed
+      to. Sometimes the stream is subscribing to a `:producer_consumer`
+      instead of a `:producer`, in such cases, you can set this option
+      to either an empty list or the list of actual producers so they
+      receive the proper notification message.
+
   ## Known limitations
 
   ### from_enumerable

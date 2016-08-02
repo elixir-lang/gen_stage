@@ -413,42 +413,96 @@ defmodule GenStage.FlowTest do
     end
   end
 
-  describe "inner_join" do
-    test "joins two matching flows" do
-      assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
-                             Flow.from_enumerable([4, 5, 6]),
-                             & &1, & &1 - 3, &{&1, &2})
+  describe "bounded join" do
+    test "inner joins two matching flows" do
+      assert Flow.bounded_join(:inner,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6, 7, 8]),
+                               & &1, & &1 - 3, &{&1, &2})
              |> Enum.sort() == [{1, 4}, {2, 5}, {3, 6}]
     end
 
-    test "joins two unmatching flows" do
-      assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
-                             Flow.from_enumerable([4, 5, 6]),
-                             & &1, & &1, &{&1, &2})
+    test "inner joins two unmatching flows" do
+      assert Flow.bounded_join(:inner,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6, 7, 8]),
+                               & &1, & &1, &{&1, &2})
              |> Enum.sort() == []
     end
 
+    test "left joins two matching flows" do
+      assert Flow.bounded_join(:left_outer,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6, 7, 8]),
+                               & &1, & &1 - 3, &{&1, &2})
+             |> Enum.sort() == [{0, nil}, {1, 4}, {2, 5}, {3, 6}]
+    end
+
+    test "left joins two unmatching flows" do
+      assert Flow.bounded_join(:left_outer,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6, 7, 8]),
+                               & &1, & &1, &{&1, &2})
+             |> Enum.sort() == [{0, nil}, {1, nil}, {2, nil}, {3, nil}]
+    end
+
+    test "right joins two matching flows" do
+      assert Flow.bounded_join(:right_outer,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6, 7, 8]),
+                               & &1, & &1 - 3, &{&1, &2})
+             |> Enum.sort() == [{1, 4}, {2, 5}, {3, 6}, {nil, 7}, {nil, 8}]
+    end
+
+    test "right joins two unmatching flows" do
+      assert Flow.bounded_join(:right_outer,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6, 7, 8]),
+                               & &1, & &1, &{&1, &2})
+             |> Enum.sort() == [{nil, 4}, {nil, 5}, {nil, 6}, {nil, 7}, {nil, 8}]
+    end
+
+    test "outer joins two matching flows" do
+      assert Flow.bounded_join(:full_outer,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6, 7, 8]),
+                               & &1, & &1 - 3, &{&1, &2})
+             |> Enum.sort() == [{0, nil}, {1, 4}, {2, 5}, {3, 6}, {nil, 7}, {nil, 8}]
+    end
+
+    test "outer joins two unmatching flows" do
+      assert Flow.bounded_join(:full_outer,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6, 7, 8]),
+                               & &1, & &1, &{&1, &2})
+             |> Enum.sort() == [{0, nil}, {1, nil}, {2, nil}, {3, nil},
+                                {nil, 4}, {nil, 5}, {nil, 6}, {nil, 7}, {nil, 8}]
+    end
+
     test "joins two flows followed by mapper operation" do
-      assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
-                             Flow.from_enumerable([4, 5, 6]),
-                             & &1, & &1 - 3, &{&1, &2})
+      assert Flow.bounded_join(:inner,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6]),
+                               & &1, & &1 - 3, &{&1, &2})
              |> Flow.map(fn {k, v} -> k + v end)
              |> Enum.sort() == [5, 7, 9]
     end
 
     test "joins two flows followed by reduce" do
-      assert Flow.inner_join(Flow.from_enumerable([0, 1, 2, 3]),
-                             Flow.from_enumerable([4, 5, 6]),
-                             & &1, & &1 - 3, &{&1, &2}, stages: 2)
+      assert Flow.bounded_join(:inner,
+                               Flow.from_enumerable([0, 1, 2, 3]),
+                               Flow.from_enumerable([4, 5, 6]),
+                               & &1, & &1 - 3, &{&1, &2}, stages: 2)
              |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
              |> Flow.emit(:state)
              |> Enum.sort() == [9, 12]
     end
 
     test "joins two flows followed by trigger and reduce" do
-      assert Flow.inner_join(Flow.from_enumerable(0..9),
-                             Flow.from_enumerable(10..19),
-                             & &1, & &1 - 10, &{&1, &2}, stages: 1)
+      assert Flow.bounded_join(:inner,
+                               Flow.from_enumerable(0..9),
+                               Flow.from_enumerable(10..19),
+                               & &1, & &1 - 10, &{&1, &2}, stages: 1)
              |> Flow.trigger_every(5, :events, :reset)
              |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
              |> Flow.emit(:state)
@@ -456,9 +510,10 @@ defmodule GenStage.FlowTest do
     end
 
     test "joins mapper and reducer flows" do
-      assert Flow.inner_join(Flow.from_enumerable(0..9) |> Flow.partition(),
-                             Flow.from_enumerable(0..9) |> Flow.map(& &1 + 10),
-                             & &1, & &1 - 10, &{&1, &2}, stages: 2)
+      assert Flow.bounded_join(:inner,
+                               Flow.from_enumerable(0..9) |> Flow.partition(),
+                               Flow.from_enumerable(0..9) |> Flow.map(& &1 + 10),
+                               & &1, & &1 - 10, &{&1, &2}, stages: 2)
              |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
              |> Flow.emit(:state)
              |> Enum.sort() == [44, 146]
