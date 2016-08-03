@@ -429,8 +429,7 @@ defmodule Flow do
                       {:partition, Keyword.t} |
                       {:map_state, fun()} |
                       {:reduce, fun(), fun()} |
-                      {:punctuation, fun(), fun()} |
-                      {:trigger, timeout(), :keep | :reset, term()}
+                      {:window, Flow.Window.t}
 
   ## Building
 
@@ -846,16 +845,15 @@ defmodule Flow do
   Reduces the given values with the given accumulator.
 
   `acc` is a function that receives no arguments and returns
-  the actual accumulator. The `acc` function is defined per stage
-  when the stage starts. If a trigger is emitted and it is
+  the actual accumulator. The `acc` function is invoked per window
+  whenever a new window starts. If a trigger is emitted and it is
   configured to reset the accumulator, the `acc` function will
   be invoked once again.
 
-  Reducing will accumulate data until the data is completed
-  or until a trigger is emitted or until a window completes.
-  When that happens, the returned accumulator will be the new
-  state of the stage and all functions after reduce will be
-  invoked.
+  Reducing will accumulate data until the a trigger is emitted
+  or until a window completes. When that happens, the returned
+  accumulator will be the new state of the stage and all functions
+  after reduce will be invoked.
 
   ## Examples
 
@@ -907,27 +905,29 @@ defmodule Flow do
   end
 
   @doc """
-  Applies the given function over the stage state.
+  Applies the given function over the window state.
 
-  This function must be called after `reduce/3`, as it
-  maps over the state accumulated by `reduce/3`. This function
-  will be invoked every time `reduce/3` halts, either because
-  there is no data or because a trigger was emitted or a window
-  has been completed.
+  This function must be called after `reduce/3` as it maps over
+  the state accumulated by `reduce/3`. `map_state/2` is invoked
+  per window on every stage whenever there is a trigger: this
+  gives us an understanding of the window data while leveraging
+  the parallelism between states.
 
-  The `mapper` function may have arity 1 or 2 or 3:
+  The `mapper` function may have arity 1, 2 or 3:
 
-    * when one, the state is given as argument
-    * when two, the state and the stage indexes are given as arguments.
+    * when one - the state is given as argument
+    * when two - the state and the stage indexes are given as arguments.
       The index is a tuple with the current stage index as first element
       and the total number of stages for this partition as second
-    * when three, the state and the stage indexes as above are given
-      as well as the trigger name that led for the `reduce/3` to stop.
-      See `trigger/2` for custom triggers. If the producer halts because
-      it does not have more events, the trigger name is `{:producer, :done}`
+    * when three - the state, the stage indexes and a tuple with window-
+      trigger parameters are given as argument. The tuple contains the
+      window type, the window identifier and the trigger name. By default,
+      the window is `:global`, which implies the `:global` identifier with
+      a default trigger of `:done`, emitted when there is no more data to
+      process.
 
-  The value returned by this function becomes the new state
-  for the given window/stage pair.
+  The value returned by this function is passed forward to the upcoming
+  flow functions.
 
   ## Examples
 
@@ -946,7 +946,9 @@ defmodule Flow do
       16
 
   """
-  @spec map_state(t, (term -> term) | (term, term -> term)) :: t
+  @spec map_state(t, (term -> term) |
+                     (term, term -> term) |
+                     (term, term, {Flow.Window.type, Flow.Window.id, Flow.Window.trigger} -> term)) :: t
   def map_state(flow, mapper) when is_function(mapper, 3) do
     add_operation(flow, {:map_state, mapper})
   end
@@ -980,7 +982,9 @@ defmodule Flow do
       :ok
 
   """
-  @spec each_state(t, (term -> term) | (term, term -> term)) :: t
+  @spec each_state(t, (term -> term) |
+                      (term, term -> term) |
+                      (term, term, {Flow.Window.type, Flow.Window.id, Flow.Window.trigger} -> term)) :: t
   def each_state(flow, mapper) when is_function(mapper, 3) do
     add_operation(flow, {:map_state, fn acc, index, trigger -> mapper.(acc, index, trigger); acc end})
   end
@@ -992,130 +996,12 @@ defmodule Flow do
   end
 
   @doc """
-  Calculates when to emit a trigger.
-
-  Triggers are set per partition and used to temporarily halt the
-  upcoming `reduce/3` step allowing the next operations in a stage
-  to execute before reducing is resumed.
-
-  Triggers must be set after a call to `partition/2` and before
-  the call to `reduce/3`. `trigger/3` expects the flow as first
-  argument, an accumulator function that returns the accumulator
-  when the partition starts and the trigger function.
-
-  The trigger function receives the current batch of events sent
-  by the producer and its own accumulator and it must return one
-  of the two values:
-
-    * `{:cont, acc}` - the reduce operation should continue as usual.
-       `acc` is the trigger state.
-
-    * `{:trigger, name, pre, operation, pos, acc}` - the reduce operation
-      should consume the events contained in `pre` and then a trigger with
-      name `name` is emitted. The trigger implies `reduce/3` will halt and
-      the following `map/2`, `map_state/2` and so on will be invoked for
-      this partition.
-
-      Once the trigger is processed, `reduce/3` will resume
-      and `operation` is either `:keep`, meaning the reducing accumulator
-      should be kept, or `:reset`, implying a new accumulator should be
-      generated. Afterwards, the remaining `pos` events are processed.
-
-  We recommend looking at the implementation of `trigger_every/4` for
-  `:events` as an example of a custom trigger.
-
-  ## Message-based triggers
-
-  It is also possible to dispatch a trigger by sending a message to
-  `self()` with the format of `{:trigger, :keep | :reset, name}`.
-  This is useful for custom triggers and timers. One example is to
-  send the message when building the accumulator for `reduce/3`.
-  If `:reset` is used, every time the accumulator is rebuilt, a new
-  message will be sent. If `:keep` is used and a new timer is necessary,
-  then `each_state/2` can called after `reduce/3` to resend it.
+  Assigns a window to the current stage.
   """
-  @spec trigger(t, (() -> acc), ([term], acc -> trigger)) :: t
-        when trigger: {:cont, acc} | {:trigger, name, pre, :keep | :reset, pos, acc},
-             name: term(), pre: [event], pos: [event], acc: term(), event: term()
-  def trigger(flow, acc_fun, trigger_fun) do
-    if is_function(acc_fun, 0) do
-      add_operation(flow, {:punctuation, acc_fun, trigger_fun})
-    else
-      raise ArgumentError, "Flow.trigger/3 expects the accumulator to be given as a function"
-    end
+  @spec window(t, Flow.Window.t) :: t
+  def window(%Flow{} = flow, %Flow.Window{} = window) do
+    add_operation(flow, {:window, window})
   end
-
-  @trigger_operation [:keep, :reset]
-
-  @doc """
-  Emits a trigger every `count` `unit`.
-
-  `count` must be a positive integer and `unit` is one of:
-
-    * `:events` - emits a trigger every `count` events per partition
-
-    * `:microseconds`, `:seconds`, `:minutes`, `:hours` - emits a trigger
-      every `count` second, minute or hour per partition. Notice such
-      times are an estimate and intrinsically inaccurate as they are based
-      on the processing time. There is also no guarantee partitions triggers
-      will be aligned as they may trigger at different times. In other
-      words, they are useful for checkpointing but not for partitioning
-      the data into time windows
-
-  The trigger will be named `{:every, count, unit}` and `keep_or_reset`
-  must be one of `:keep` or `:reset` as described in `trigger/2`.
-
-  ## Examples
-
-  Below is an example that checkpoints sums the items from 1 to 100
-  emitting a trigger with the state every 10 items. The extra 5050
-  value at the end is the trigger emitted because processing is done.
-
-      iex> flow = Flow.from_enumerable(1..100)
-      iex> flow = flow |> Flow.partition(stages: 1) |> Flow.trigger_every(10, :events)
-      iex> flow = flow |> Flow.reduce(fn -> 0 end, & &1 + &2)
-      iex> flow |> Flow.emit(:state) |> Enum.to_list()
-      [55, 210, 465, 820, 1275, 1830, 2485, 3240, 4095, 5050, 5050]
-
-  Now let's see an example similar to above except we reset the counter
-  on every trigger. At the end, the sum of all values is still 5050:
-
-      iex> flow = Flow.from_enumerable(1..100)
-      iex> flow = flow |> Flow.partition(stages: 1) |> Flow.trigger_every(10, :events, :reset)
-      iex> flow = flow |> Flow.reduce(fn -> 0 end, & &1 + &2)
-      iex> flow |> Flow.emit(:state) |> Enum.to_list()
-      [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
-
-  """
-  def trigger_every(flow, count, unit, keep_or_reset \\ :keep)
-
-  def trigger_every(flow, count, :events, keep_or_reset)
-      when count > 0 and keep_or_reset in @trigger_operation do
-    name = {:every, count, :events}
-
-    trigger(flow, fn -> count end, fn events, acc ->
-      length = length(events)
-      if length(events) >= acc do
-        {pre, pos} = Enum.split(events, acc)
-        {:trigger, name, pre, keep_or_reset, pos, count}
-      else
-        {:cont, acc - length}
-      end
-    end)
-  end
-
-  def trigger_every(flow, count, unit, keep_or_reset)
-      when count > 0 and keep_or_reset in @trigger_operation do
-    add_operation(flow, {:trigger, to_seconds(count, unit), keep_or_reset, {:every, count, unit}})
-  end
-
-  defp to_seconds(count, :microseconds), do: count
-  defp to_seconds(count, :seconds), do: count * 1000
-  defp to_seconds(count, :minutes), do: count * 1000 * 60
-  defp to_seconds(count, :hours), do: count * 1000 * 60 * 60
-  defp to_seconds(_count, unit), do: raise ArgumentError, "unknown unit #{inspect unit}"
-
-  @compile {:inline, add_producers: 2, add_operation: 2}
 
   defp add_producers(%Flow{producers: nil} = flow, producers) do
     %{flow | producers: producers}

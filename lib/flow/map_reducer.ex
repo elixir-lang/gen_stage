@@ -5,18 +5,9 @@ defmodule Flow.MapReducer do
   use GenStage
 
   def init({type, opts, index, trigger, acc, reducer}) do
-    {trigger_opts, opts} = Keyword.pop(opts, :trigger, :none)
-    start_trigger(trigger_opts)
     consumers = if type == :consumer, do: :none, else: []
     status = %{consumers: consumers, done: [], done?: false, trigger: trigger}
     {type, {%{}, status, index, acc.(), reducer}, opts}
-  end
-
-  defp start_trigger({:trigger, time, op, name}) do
-    {:ok, _} = :timer.send_interval(time, self(), {:trigger, op, name})
-  end
-  defp start_trigger(tags) do
-    tags
   end
 
   def handle_subscribe(:producer, opts, {_, ref}, {tags, status, index, acc, reducer}) do
@@ -36,7 +27,7 @@ defmodule Flow.MapReducer do
 
     cond do
       Map.has_key?(tags, ref) ->
-        {events, acc, done, done?} = maybe_notify(status, index, acc, ref)
+        {events, acc, done, done?} = maybe_done(status, index, acc, ref)
         status = %{status | done: done, done?: done?}
         {:noreply, events, {Map.delete(tags, ref), status, index, acc, reducer}}
       consumers == [ref] ->
@@ -53,7 +44,7 @@ defmodule Flow.MapReducer do
     {:noreply, events, {tags, status, index, acc, reducer}}
   end
   def handle_info({{_, ref}, {:producer, state}}, {tags, status, index, acc, reducer}) when state in [:halted, :done] do
-    {events, acc, done, done?} = maybe_notify(status, index, acc, ref)
+    {events, acc, done, done?} = maybe_done(status, index, acc, ref)
     status = %{status | done: done, done?: done?}
     {:noreply, events, {tags, status, index, acc, reducer}}
   end
@@ -70,14 +61,14 @@ defmodule Flow.MapReducer do
     {:noreply, events, {tags, status, index, acc, reducer}}
   end
 
-  defp maybe_notify(%{done: [], done?: true}, _index, acc, _ref) do
+  defp maybe_done(%{done: [], done?: true}, _index, acc, _ref) do
     {[], acc, [], true}
   end
-  defp maybe_notify(%{done: done, done?: false, trigger: trigger, consumers: consumers},
+  defp maybe_done(%{done: done, done?: false, trigger: trigger, consumers: consumers},
                     index, acc, ref) do
     case List.delete(done, ref) do
       [] when done != [] ->
-        {events, acc} = trigger.(acc, index, :keep, {:producer, :done})
+        {events, acc} = trigger.(acc, index, :keep, :done)
         if is_list(consumers) do
           GenStage.async_notify(self(), {:producer, :done})
         end
