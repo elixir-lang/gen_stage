@@ -224,70 +224,34 @@ defmodule Flow do
   To answer this question, we need to talk about data completion,
   triggers and windows.
 
-  ## Data completion, triggers and windows
+  ## Data completion, windows and triggers
 
-  When working with an unbounded stream of data, there is no
-  such thing as data completion. Therefore when can we consider
-  a reduce function to be "completed"?
+  When working with an unbounded stream of data, there is no such thing
+  as data completion. Therefore when can we consider a reduce function
+  to be "completed"?
 
-  Instead of thinking about data completion, we think in terms
-  of checkpoints where we write the results we have computed so
-  far.
+  To handle such cases, Flow provides windows and triggers. Windows
+  allow us to split the data based on the event time while triggers
+  tells us when to write the results we have computed so far. By
+  introducing windows, we no longer think the events are partitioned
+  across stages. Instead each event belongs to a window and the window
+  is partitioned across the stages.
 
-  In Flow, we use triggers and windows. Triggers allows us to
-  temporarily halt reduction to checkpoint our progress. Windows
-  gives us better understanding of the data by splitting the data
-  into windows which are reduced individually.
+  By default all events belong to the same window, called global
+  window, which is partitioned accross stages. However different
+  windowing strategies may be used by building a `Flow.Window` struct
+  and passing it to the `Flow.window/2` function.
 
-  ### Triggers
+  Once a window is specified, we can build triggers that tells us
+  when to checkpoint the data, allowing us to report our progress
+  while the data streams through the system, regardless if the data
+  is bounded (finite) or unbounded (infinite).
 
-  Triggers allow us to check point the processed data so far. There
-  are different triggers we can use:
-
-    * Event count triggers - compute state operations every X events
-
-    * Processing time triggers - compute state operations every X time
-      units for every stage
-
-    * Punctuation - hand-written triggers based on the data
-
-  Flow supports the triggers above via the `trigger/3` and
-  `trigger_every/4` functions.
-
-  Once a trigger is emitted, the `reduce` step halts and invokes
-  the remaining steps for that stage, such as `map_state/2` or
-  any other call after `reduce/3`. Triggers are also named and
-  the trigger names will be sent as third argument to the function
-  given to `map_state/2` and `each_state/2`.
-
-  For every emitted trigger, developers have the choice of either
-  reseting the accumulation state or keeping it as is. The resetting
-  option is useful when you are interested only on intermediate
-  results, usually because another step is aggregator. Keeping the
-  accumulator is the default and used to checkpoint the values while
-  still working towards an end result.
-
-  ### Windows
-
-  Besides setting triggers, it is also possible to split the data
-  into windows. Windows allows us to move the understanding of time
-  from processing time, which is when a stage processes a particular
-  event, to event time, which is the time an event occurred on its
-  producing device.
-
-  Although processing time is conceptually simple, it does not provide
-  any insight about the data being processed. After all, each stage
-  moves according to its own processing time and queues. This lack of
-  precision in processing time makes it most useful for efficiently
-  checkpointing data.
-
-  On the other hand, the event time is based on the data itself. When
-  working with event time, we split the data into windows, even when
-  late or out of order. The windows can be used to gather time-based
-  insight from the data (the most popular words in the last 10 minutes)
-  as well as for checkpointing.
-
-  TODO: Implement the Flow.Window module.
+  Windows and triggers effectively control how the `reduce/3` function
+  work. `reduce/3/` is invoked per window while a trigger configures
+  when `reduce/3` halts so we can checkpoint the data before resuming
+  the computation with an old or new accumulator. See `Flow.Window`
+  for a complete introduction into windows and triggers.
 
   ## Long running-flows
 
@@ -996,7 +960,11 @@ defmodule Flow do
   end
 
   @doc """
-  Assigns a window to the current stage.
+  Assigns a window to the current flow.
+
+  It must be called with a `Flow.Window` struct once per
+  partition and before `reduce/3`. See `Flow.Window` for
+  more information.
   """
   @spec window(t, Flow.Window.t) :: t
   def window(%Flow{} = flow, %Flow.Window{} = window) do
