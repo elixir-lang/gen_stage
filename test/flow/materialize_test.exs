@@ -35,7 +35,7 @@ defmodule Flow.MaterializeTest do
 
     test "accumulates mapper and reducer operations" do
       assert [{:mapper, _, [{:mapper, :map, [_]}], [stages: @schedulers]},
-              {:reducer, _, [{:window, %Flow.Window{}}, {:reduce, _, _}], [stages: 10]}] =
+              {:reducer, _, [{:window, %Flow.Window.Global{}}, {:reduce, _, _}], [stages: 10]}] =
              Flow.new
              |> Flow.map(& &1)
              |> Flow.partition(stages: 10)

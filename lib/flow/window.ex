@@ -10,12 +10,17 @@ defmodule Flow.Window do
   window is materialized.
 
   Windows must be created by calling one of the window type functions.
-  There is currently one window type:
+  There is currently two window types:
 
     * Global windows - that's the default window which means all data
       belongs to one single window. In other words, the data is not
       split in any way. The window finishes when all producers notify
       there is no more data
+
+    * Fixed windows - splits the incoming events into periodic, non-
+      overlaping windows. In other words, a given event belongs to a
+      single window. If data arrives late, a configured lateness can
+      be specified.
 
   We discuss all types and include examples below. In the first section,
   "Global windows", we build the basic intuition about windows and triggers
@@ -96,18 +101,25 @@ defmodule Flow.Window do
   time-based insight from the data (for example, the most popular hashtags
   in the last 10 minutes) as well as for checkpointing data.
 
-  ## More window types
+  ## Fixed windows
 
-  TODO.
+  TODO: Talk about fixed windows. Discuss window types.
   """
 
-  defstruct [:type, :trigger, periodically: []]
-  @type t :: %Flow.Window{type: type,
-                          trigger: {fun(), fun()} | nil,
-                          periodically: []}
+  @type t :: %{required(:trigger) => {fun(), fun()} | nil,
+               required(:periodically) => []}
 
   @typedoc "The supported window types."
-  @type type :: :global
+  @type type :: :global | :fixed | any()
+
+  @typedoc """
+  A function that retrieves the field to window by.
+
+  It must be an integer representing the time in microseconds.
+  Flow does not care if the integer is using the UNIX epoch,
+  Gregorian epoch or any other as long as it is consistent.
+  """
+  @type by :: (term -> non_neg_integer)
 
   # TODO: Make sure message-based triggers will trigger all windows
   # that have changed since the last message-based trigger
@@ -117,7 +129,7 @@ defmodule Flow.Window do
   The window indentifier.
 
   It is `:global` for `:global` windows. An integer for fixed
-  and sliding windows and a custom value for session windows.
+  windows and a custom value for session windows.
   """
   @type id :: :global | non_neg_integer() | term()
 
@@ -130,11 +142,19 @@ defmodule Flow.Window do
   @trigger_operation [:keep, :reset]
 
   @doc """
-  Returns a new global window.
+  Returns a global window.
   """
   @spec global :: t
   def global do
-    %Flow.Window{type: :global}
+    %Flow.Window.Global{}
+  end
+
+  @doc """
+  Returns a fixed window of duration `count` `unit` where the
+  event time is calculated by the given function `by`.
+  """
+  def fixed(count, unit, by) when is_function(by, 1) do
+    %Flow.Window.Fixed{duration: to_ms(count, unit), by: by}
   end
 
   @doc """
@@ -247,7 +267,7 @@ defmodule Flow.Window do
   Similar to periodic triggers, message-based triggers will also be
   invoked to all windows that have changed since the last trigger.
   """
-  def trigger_periodically(%Flow.Window{periodically: periodically} = window,
+  def trigger_periodically(%{periodically: periodically} = window,
                            count, unit, keep_or_reset \\ :keep) do
     periodically = [{to_ms(count, unit), keep_or_reset, {:periodically, count, unit}} | periodically]
     %{window | periodically: periodically}
@@ -259,10 +279,10 @@ defmodule Flow.Window do
   defp to_ms(count, :hours), do: count * 1000 * 60 * 60
   defp to_ms(_count, unit), do: raise ArgumentError, "unknown unit #{inspect unit}"
 
-  defp add_trigger(%Flow.Window{trigger: nil} = window, trigger) do
+  defp add_trigger(%{trigger: nil} = window, trigger) do
     %{window | trigger: trigger}
   end
-  defp add_trigger(%Flow.Window{}, _trigger) do
+  defp add_trigger(%{}, _trigger) do
     raise ArgumentError, "Flow.Window.trigger/3 or Flow.Window.trigger_every/3 " <>
                          "can only be called once per window"
   end

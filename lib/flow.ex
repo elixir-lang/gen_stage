@@ -239,7 +239,7 @@ defmodule Flow do
 
   By default all events belong to the same window, called global
   window, which is partitioned accross stages. However different
-  windowing strategies may be used by building a `Flow.Window` struct
+  windowing strategies may be used by building a `Flow.Window`
   and passing it to the `Flow.window/2` function.
 
   Once a window is specified, we can build triggers that tells us
@@ -982,7 +982,7 @@ defmodule Flow do
   more information.
   """
   @spec window(t, Flow.Window.t) :: t
-  def window(%Flow{} = flow, %Flow.Window{} = window) do
+  def window(%Flow{} = flow, %{} = window) do
     add_operation(flow, {:window, window})
   end
 

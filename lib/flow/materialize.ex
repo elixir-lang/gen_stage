@@ -329,12 +329,69 @@ defmodule Flow.Materialize do
 
   ## Windows
 
-  defp window_ops(%Flow.Window{trigger: trigger, periodically: periodically},
+  defp window_ops(%{trigger: trigger, periodically: periodically} = window,
                   mappers, reducer_acc, reducer_fun, reducer_trigger) do
     {window_acc, window_fun, window_trigger} =
       window_trigger(trigger, mappers, reducer_acc, reducer_fun, reducer_trigger)
+    {type_acc, type_fun, type_trigger} =
+      window.__struct__.materialize(window, window_acc, window_fun, window_trigger)
+    {window_periodically(type_acc, periodically), type_fun, type_trigger}
+  end
 
-    {window_periodically(window_acc, periodically), window_fun, window_trigger}
+  defp window_trigger(nil, [], reducer_acc, reducer_fun, reducer_trigger) do
+    {reducer_acc, reducer_fun, reducer_trigger}
+  end
+  defp window_trigger(nil, mappers, reducer_acc, reducer_fun, reducer_trigger) do
+    {reducer_acc, build_unpunctuated_reducer(mappers, reducer_fun), reducer_trigger}
+  end
+  defp window_trigger({punctuation_acc, punctuation_fun}, mappers,
+                      reducer_acc, reducer_fun, reducer_trigger) do
+    {fn -> {punctuation_acc.(), reducer_acc.()} end,
+     build_punctuated_reducer(mappers, punctuation_fun, reducer_fun, reducer_trigger),
+     build_punctuated_trigger(reducer_trigger)}
+  end
+
+  defp build_unpunctuated_reducer([], reducer_fun) do
+    reducer_fun
+  end
+  defp build_unpunctuated_reducer(mappers, reducer_fun) do
+    reducer = :lists.foldl(&mapper/2, &[&1 | &2], mappers)
+    fn events, acc, index ->
+      :lists.foldl(reducer, [], events)
+      |> :lists.reverse()
+      |> reducer_fun.(acc, index)
+    end
+  end
+
+  defp build_punctuated_reducer(punctuation_mappers, punctuation_fun, red_fun, trigger) do
+    pre_reducer = :lists.foldl(&mapper/2, &[&1 | &2], punctuation_mappers)
+
+    fn events, {pun_acc, red_acc}, index, name ->
+      :lists.foldl(pre_reducer, [], events)
+      |> :lists.reverse()
+      |> maybe_punctuate(punctuation_fun, pun_acc, red_acc, red_fun, index, name, trigger, [])
+    end
+  end
+
+  defp build_punctuated_trigger(trigger) do
+    fn {trigger_acc, red_acc}, index, op, name ->
+      {events, red_acc} = trigger.(red_acc, index, op, name)
+      {events, {trigger_acc, red_acc}}
+    end
+  end
+
+  defp maybe_punctuate(events, punctuation_fun, pun_acc, red_acc,
+                       red_fun, index, name, trigger, collected) do
+    case punctuation_fun.(events, pun_acc) do
+      {:trigger, trigger_name, pre, op, pos, pun_acc} ->
+        {red_events, red_acc} = red_fun.(pre, red_acc, index)
+        {trigger_events, red_acc} = trigger.(red_acc, index, op, put_elem(name, 2, trigger_name))
+        maybe_punctuate(pos, punctuation_fun, pun_acc, red_acc,
+                        red_fun, index, name, trigger, collected ++ trigger_events ++ red_events)
+      {:cont, pun_acc} ->
+        {red_events, red_acc} = red_fun.(events, red_acc, index)
+        {collected ++ red_events, {pun_acc, red_acc}}
+    end
   end
 
   defp window_periodically(window_acc, []) do
@@ -346,69 +403,6 @@ defmodule Flow.Materialize do
         {:ok, _} = :timer.send_interval(time, self(), {:trigger, keep_or_reset, name})
       end
       window_acc.()
-    end
-  end
-
-  defp window_trigger(nil, [], reducer_acc, reducer_fun, reducer_trigger) do
-    {reducer_acc,
-     reducer_fun,
-     build_unpunctuated_trigger(reducer_trigger)}
-  end
-  defp window_trigger(nil, mappers, reducer_acc, reducer_fun, reducer_trigger) do
-    {reducer_acc,
-     build_unpunctuated_reducer(mappers, reducer_fun),
-     build_unpunctuated_trigger(reducer_trigger)}
-  end
-  defp window_trigger({punctuation_acc, punctuation_fun}, mappers,
-                      reducer_acc, reducer_fun, reducer_trigger) do
-    {fn -> {punctuation_acc.(), reducer_acc.()} end,
-     build_punctuated_reducer(mappers, punctuation_fun, reducer_fun, reducer_trigger),
-     build_punctuated_trigger(reducer_trigger)}
-  end
-
-  defp build_unpunctuated_reducer(mappers, reducer_fun) do
-    reducer = :lists.foldl(&mapper/2, &[&1 | &2], mappers)
-    fn events, acc, index ->
-      :lists.foldl(reducer, [], events)
-      |> :lists.reverse()
-      |> reducer_fun.(acc, index)
-    end
-  end
-
-  defp build_unpunctuated_trigger(trigger) do
-    fn acc, index, op, name ->
-      trigger.(acc, index, op, {:global, :global, name})
-    end
-  end
-
-  defp build_punctuated_reducer(punctuation_mappers, punctuation_fun, red_fun, trigger) do
-    pre_reducer = :lists.foldl(&mapper/2, &[&1 | &2], punctuation_mappers)
-
-    fn events, {pun_acc, red_acc}, index ->
-      :lists.foldl(pre_reducer, [], events)
-      |> :lists.reverse()
-      |> maybe_punctuate(punctuation_fun, pun_acc, red_acc, red_fun, index, trigger, [])
-    end
-  end
-
-  defp build_punctuated_trigger(trigger) do
-    fn {trigger_acc, red_acc}, index, op, name ->
-      {events, red_acc} = trigger.(red_acc, index, op, {:global, :global, name})
-      {events, {trigger_acc, red_acc}}
-    end
-  end
-
-  defp maybe_punctuate(events, punctuation_fun, pun_acc, red_acc,
-                       red_fun, index, trigger, collected) do
-    case punctuation_fun.(events, pun_acc) do
-      {:trigger, name, pre, op, pos, pun_acc} ->
-        {red_events, red_acc} = red_fun.(pre, red_acc, index)
-        {trigger_events, red_acc} = trigger.(red_acc, index, op, {:global, :global, name})
-        maybe_punctuate(pos, punctuation_fun, pun_acc, red_acc,
-                        red_fun, index, trigger, collected ++ trigger_events ++ red_events)
-      {:cont, pun_acc} ->
-        {red_events, red_acc} = red_fun.(events, red_acc, index)
-        {collected ++ red_events, {pun_acc, red_acc}}
     end
   end
 
