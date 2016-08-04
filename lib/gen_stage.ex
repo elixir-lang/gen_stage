@@ -257,7 +257,7 @@ defmodule GenStage do
       reference although it may be any term.
 
       Once sent, the consumer MAY immediately send demand to the producer.
-      The `subscription_ref` is unique to identify the subscription.
+      The `subscription_tag` is unique to identify the subscription.
 
       Once received, the producer MUST monitor the consumer. However, if
       the subscription reference is known, it MUST send a `:cancel` message
@@ -670,7 +670,7 @@ defmodule GenStage do
   that the consumers have received it.
 
   The given message will be delivered in the format
-  `{{producer_pid, subscription_ref}, msg}`, where `msg` is the message
+  `{{producer_pid, subscription_tag}, msg}`, where `msg` is the message
   given below.
 
   This function will return `:ok` as long as the notification request is
@@ -686,7 +686,7 @@ defmodule GenStage do
   Asks the producer to send a notification to all consumers asynchronously.
 
   The given message will be delivered in the format
-  `{{producer_pid, subscription_ref}, msg}`, where `msg` is the message
+  `{{producer_pid, subscription_tag}, msg}`, where `msg` is the message
   given below.
 
   This call returns `:ok` regardless if the notification has been
