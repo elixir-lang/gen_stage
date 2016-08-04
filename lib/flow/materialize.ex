@@ -31,7 +31,7 @@ defmodule Flow.Materialize do
     split_operations(:lists.reverse(operations), :mapper, false, [], opts)
   end
 
-  @reduce "reduce/group_by"
+  @reduce "reduce/group_by/into"
   @map_state "map_state/each_state/emit"
   @window "window"
 
@@ -76,7 +76,7 @@ defmodule Flow.Materialize do
   end
 
   defp stage(:mapper, true, _ops, _opts) do
-    raise ArgumentError, "cannot invoke #{@window} without a #{@reduce} operation"
+    raise ArgumentError, "#{@reduce} must be called after #{@window} operation"
   end
   defp stage(type, _window?, ops, opts) do
     ops = :lists.reverse(ops)
@@ -96,7 +96,7 @@ defmodule Flow.Materialize do
     partitions = Keyword.fetch!(stage_opts, :stages)
     dispatcher_opts = [partitions: partitions] ++ Keyword.take(stage_opts, @dispatcher_opts)
     dispatcher = {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}
-    {:producer_consumer, put_in(opts[:dispatcher], dispatcher)}
+    {:producer_consumer, Keyword.put_new(opts, :dispatcher, dispatcher)}
   end
 
   defp start_stages([], producers, _last) do

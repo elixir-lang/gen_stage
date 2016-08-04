@@ -61,7 +61,7 @@ defmodule Flow.MaterializeTest do
   end
 
   test "errors on multiple reduce calls" do
-    assert_raise ArgumentError, ~r"cannot call reduce/group_by on a flow after a reduce/group_by operation", fn ->
+    assert_raise ArgumentError, ~r"cannot call reduce/group_by/into on a flow after a reduce/group_by/into operation", fn ->
       Flow.from_enumerable([1, 2, 3])
       |> Flow.reduce(fn -> 0 end, & &1 + &2)
       |> Flow.reduce(fn -> 0 end, & &1 + &2)
@@ -70,7 +70,7 @@ defmodule Flow.MaterializeTest do
   end
 
   test "errors on map_state without reduce" do
-    assert_raise ArgumentError, ~r"map_state/each_state/emit must be called after a reduce/group_by operation", fn ->
+    assert_raise ArgumentError, ~r"map_state/each_state/emit must be called after a reduce/group_by/into operation", fn ->
       Flow.from_enumerable([1, 2, 3])
       |> Flow.map_state(fn x -> x end)
       |> Enum.to_list

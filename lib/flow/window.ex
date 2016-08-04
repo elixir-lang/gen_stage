@@ -141,11 +141,12 @@ defmodule Flow.Window do
   Calculates when to emit a trigger.
 
   Triggers are calculated per window and are used to temporarily
-  halt the window `reduce/3` step allowing the next operations
-  to execute before reducing is resumed.
+  halt the window accumulation, typically done with `Flow.reduce/3`,
+  `Flow.group_by/3` and `Flow.into/3`, allowing the next operations
+  to execute before accumulation is resumed.
 
-  This function expects the accumulator function, which will be
-  invoked at the beginning of every window, and a trigger function
+  This function expects the trigger accumulator function, which will
+  be invoked at the beginning of every window, and a trigger function
   that receives the current batch of events and its own accumulator.
   The trigger function must return one of the two values:
 

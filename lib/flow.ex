@@ -423,6 +423,9 @@ defmodule Flow do
 
       Flow.new |> Flow.from_enumerables([enumerable])
 
+  See `GenStage.from_enumerable/2` for information and
+  limitations on enumerable-based stages.
+
   ## Examples
 
       "some/file"
@@ -437,6 +440,9 @@ defmodule Flow do
 
   @doc """
   Sets the given enumerable as a producer in the given flow.
+
+  See `GenStage.from_enumerable/2` for information and
+  limitations on enumerable-based stages.
 
   ## Examples
 
@@ -456,6 +462,9 @@ defmodule Flow do
 
       Flow.new |> Flow.from_enumerables(enumerables)
 
+  See `GenStage.from_enumerable/2` for information and
+  limitations on enumerable-based stages.
+
   ## Examples
 
       files = [File.stream!("some/file1", read_ahead: 100_000),
@@ -471,6 +480,9 @@ defmodule Flow do
 
   @doc """
   Sets the given enumerables as producers in the given flow.
+
+  See `GenStage.from_enumerable/2` for information and
+  limitations on enumerable-based stages.
 
   ## Examples
 
@@ -629,7 +641,7 @@ defmodule Flow do
   def run(%{operations: operations} = flow) do
     case inject_to_run(operations) do
       :map_state ->
-        [] = flow |> map_state(fn _, _ -> [] end) |> Enum.to_list()
+        [] = flow |> map_state(fn _, _, _ -> [] end) |> Enum.to_list()
       :reduce ->
         [] = flow |> reduce(fn -> [] end, fn _, acc -> acc end) |> Enum.to_list()
     end
@@ -761,6 +773,8 @@ defmodule Flow do
       the hash should be calculated on the first element of a tuple.
       See more information on the "Hash shortcuts" section below.
       The default value hashing function `:erlang.phash2/2`.
+    * `:dispatcher` - by default, `partition/2` uses `GenStage.PartitionDispatcher`
+      with the given hash function but any other dispatcher can be given
 
   ## Hash shortcuts
 
@@ -963,7 +977,8 @@ defmodule Flow do
   Assigns a window to the current flow.
 
   It must be called with a `Flow.Window` struct once per
-  partition and before `reduce/3`. See `Flow.Window` for
+  partition and before `reduce/3` or any reducing function
+  (like `group_by/3` and `into/3`). See `Flow.Window` for
   more information.
   """
   @spec window(t, Flow.Window.t) :: t
