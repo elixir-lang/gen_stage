@@ -22,7 +22,7 @@ defmodule GenStage.Mixfile do
 
   defp deps do
     [{:ex_doc, "~> 0.12", only: :docs},
-     {:inch_ex, only: :docs}]
+     {:inch_ex, ">= 0.4.0", only: :docs}]
   end
 
   defp package do
