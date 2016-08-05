@@ -33,7 +33,7 @@ defmodule Flow.Materialize do
 
   @reduce "reduce/group_by/into"
   @map_state "map_state/each_state/emit"
-  @window "window" # TODO: Add window_join below
+  @window "window"
 
   defp split_operations([{:partition, opts} | ops], type, window?, acc_ops, acc_opts) do
     [stage(type, window?, acc_ops, acc_opts) | split_operations(ops, :mapper, false, [], opts)]
@@ -204,11 +204,14 @@ defmodule Flow.Materialize do
 
   defp join_ops(kind, join, acc, fun, trigger) do
     acc = fn -> {%{}, %{}, acc.()} end
-    events = fn tag, events, {left, right, acc}, index ->
-      {events, left, right} = dispatch_join(events, tag, left, right, join, [])
+    # TODO: This won't work with a follow-up window call due
+    # fun being arity of 5 and the shared producers handling.
+    events = fn producers, ref, events, {left, right, acc}, index ->
+      {events, left, right} = dispatch_join(events, Map.fetch!(producers, ref), left, right, join, [])
       {events, acc} = fun.(events, acc, index)
-      {events, {left, right, acc}}
+      {producers, events, {left, right, acc}}
     end
+    # TODO: This will be emitted on every trigger
     trigger = fn {left, right, acc}, index, op, name ->
       {kind_events, acc} =
         case kind do

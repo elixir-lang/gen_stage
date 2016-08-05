@@ -11,18 +11,38 @@ defmodule Flow.Window.Fixed do
     acc = fn -> {nil, %{}} end
     lateness_fun = lateness_fun(lateness, ref, reducer_acc, reducer_trigger)
 
+    # The reducing function works in three stages.
+    #
+    # 1. We start processing all events, grouping all events that belong
+    #    to the same window and then reducing them. One of the outcomes
+    #    of this function is the most recent window for this given producer.
+    #
+    # 2. Next we store the most recent timestamp for the producer and get
+    #    both mininum and maximum seen windows.
+    #
+    # 3. Finally we see which windows have been seen by all producers (min)
+    #    and if we are still missing any producer data (max is nil). We catch
+    #    up the all window to min, emitting triggers for the old windows.
+    #
     fun =
-      fn events, old_acc, index ->
-        {reducer_emit, new_acc} =
-          split_events(events, [], nil, by, duration, old_acc, index, reducer_acc, reducer_fun, [])
-        {trigger_emit, new_acc} =
-          emit_trigger_messages(ref, old_acc, new_acc, index, lateness_fun)
-        {reducer_emit ++ trigger_emit, new_acc}
+      fn producers, ref, events, {all, windows}, index ->
+        {reducer_emit, recent, windows} =
+          split_events(events, [], nil, by, duration, Map.fetch!(producers, ref),
+                       windows, index, reducer_acc, reducer_fun, [])
+
+        # Update the latest window for this producer
+        producers = Map.put(producers, ref, recent)
+        min_max = producers |> Map.values |> Enum.min_max()
+
+        {trigger_emit, acc} =
+          emit_trigger_messages(ref, all, min_max, windows, index, lateness_fun)
+
+        {producers, reducer_emit ++ trigger_emit, acc}
       end
 
     trigger =
       fn acc, index, op, name ->
-        handle_trigger(ref, acc, index, op, name, reducer_trigger)
+        handle_trigger(ref, acc, index, op, name, reducer_acc, reducer_trigger)
       end
 
     {acc, fun, trigger}
@@ -31,46 +51,47 @@ defmodule Flow.Window.Fixed do
   ## Reducer
 
   defp split_events([event | events], buffer, current, by, duration,
-                    acc, index, reducer_acc, reducer_fun, emit) do
+                    recent, windows, index, reducer_acc, reducer_fun, emit) do
     window = div(by!(by, event), duration)
     if is_nil(current) or window === current do
-      split_events(events, [event | buffer], window, by, duration,
-                   acc, index, reducer_acc, reducer_fun, emit)
+      split_events(events, [event | buffer], window, by, duration, recent,
+                   windows, index, reducer_acc, reducer_fun, emit)
     else
-      {emit, acc} = reduce_events(buffer, current, acc, index, reducer_acc, reducer_fun, emit)
-      split_events(events, [event], window, by, duration,
-                   acc, index, reducer_acc, reducer_fun, emit)
+      {emit, recent, windows} =
+        reduce_events(buffer, current, recent, windows, index, reducer_acc, reducer_fun, emit)
+      split_events(events, [event], window, by, duration, recent,
+                   windows, index, reducer_acc, reducer_fun, emit)
     end
   end
-  defp split_events([], buffer, window, _by, _duration, acc, index, reducer_acc, reducer_fun, emit) do
-    reduce_events(buffer, window, acc, index, reducer_acc, reducer_fun, emit)
+  defp split_events([], buffer, window, _by, _duration, recent,
+                    windows, index, reducer_acc, reducer_fun, emit) do
+    reduce_events(buffer, window, recent, windows, index, reducer_acc, reducer_fun, emit)
   end
 
-  defp reduce_events([], _window, acc, _index, _reducer_acc, _reducer_fun, emit) do
-    {emit, acc}
+  defp reduce_events([], _window, recent, windows, _index, _reducer_acc, _reducer_fun, emit) do
+    {emit, recent, windows}
   end
-  defp reduce_events(buffer, window, {current, windows}, index, reducer_acc, reducer_fun, emit) do
+  defp reduce_events(buffer, window, recent, windows, index, reducer_acc, reducer_fun, emit) do
     events = :lists.reverse(buffer)
 
-    case recent_window(window, current, windows, reducer_acc) do
-      {:ok, window_acc, current} ->
+    case recent_window(window, recent, windows, reducer_acc) do
+      {:ok, window_acc, recent} ->
         {new_emit, window_acc} =
           if is_function(reducer_fun, 3) do
             reducer_fun.(events, window_acc, index)
           else
             reducer_fun.(events, window_acc, index, {:fixed, window, :placeholder})
           end
-
-        {emit ++ new_emit, {current, Map.put(windows, window, window_acc)}}
+        {emit ++ new_emit, recent, Map.put(windows, window, window_acc)}
       :error ->
-        {emit, {current, windows}}
+        {emit, recent, windows}
     end
   end
 
-  defp recent_window(window, current, windows, reducer_acc) do
+  defp recent_window(window, recent, windows, reducer_acc) do
     case windows do
-      %{^window => acc} -> {:ok, acc, max(window, current)}
-      %{} when is_nil(current) or window >= current -> {:ok, reducer_acc.(), window}
+      %{^window => acc} -> {:ok, acc, max(window, recent)}
+      %{} when is_nil(recent) or window >= recent -> {:ok, reducer_acc.(), window}
       %{} -> :error
     end
   end
@@ -85,11 +106,17 @@ defmodule Flow.Window.Fixed do
 
   ## Trigger emission
 
-  defp emit_trigger_messages(ref, {nil, _}, {new, windows}, index, lateness) do
-    emit_trigger_messages(ref, Enum.min(Map.keys(windows)), new, windows, index, lateness, [])
+  # We still haven't received from all producers.
+  defp emit_trigger_messages(_ref, old, {_, nil}, windows, _index, _lateness) do
+    {[], {old, windows}}
   end
-  defp emit_trigger_messages(ref, {old, _}, {new, windows}, index, lateness) do
-    emit_trigger_messages(ref, old, new, windows, index, lateness, [])
+  # We received data from all producers from the first time.
+  defp emit_trigger_messages(ref, nil, {min, _}, windows, index, lateness) do
+    emit_trigger_messages(ref, Enum.min(Map.keys(windows)), min, windows, index, lateness, [])
+  end
+  # Catch up the old (all) to the new minimum.
+  defp emit_trigger_messages(ref, old, {min, _}, windows, index, lateness) do
+    emit_trigger_messages(ref, old, min, windows, index, lateness, [])
   end
 
   defp emit_trigger_messages(_ref, new, new, windows, _index, _lateness, emit) do
@@ -100,24 +127,26 @@ defmodule Flow.Window.Fixed do
     emit_trigger_messages(ref, old + 1, new, windows, index, lateness, emit ++ new_emit)
   end
 
-  defp lateness_fun(0, _ref, reducer_acc, reducer_trigger) do
+  defp lateness_fun(lateness, ref, reducer_acc, reducer_trigger) do
     fn window, windows, index ->
       acc = Map.get_lazy(windows, window, reducer_acc)
-      {emit, _} = reducer_trigger.(acc, index, :keep, {:fixed, window, :done})
-      {emit, Map.delete(windows, window)}
-    end
-  end
-  defp lateness_fun(lateness, ref, reducer_acc, _reducer_trigger) do
-    fn window, windows, _index ->
-      Process.send_after(self(), {:trigger, :keep, {ref, window}}, lateness)
-      {[], Map.put_new_lazy(windows, window, reducer_acc)}
+
+      case lateness do
+        0 ->
+          {emit, window_acc} = reducer_trigger.(acc, index, :keep, {:fixed, window, :done})
+          {emit, Map.delete(windows, window)}
+        _ ->
+          Process.send_after(self(), {:trigger, :keep, {ref, window}}, lateness)
+          {emit, window_acc} = reducer_trigger.(acc, index, :keep, {:fixed, window, :watermark})
+          {emit, Map.put(windows, window, window_acc)}
+      end
     end
   end
 
   ## Trigger handling
 
-  # A particular window was triggered for termination.
-  def handle_trigger(ref, {current, windows}, index, op, {ref, window}, trigger) do
+  # Lateness termination.
+  def handle_trigger(ref, {current, windows}, index, op, {ref, window}, _acc, trigger) do
     case windows do
       %{^window => acc} ->
         {emit, _window_acc} = trigger.(acc, index, op, {:fixed, window, :done})
@@ -127,17 +156,24 @@ defmodule Flow.Window.Fixed do
     end
   end
 
-  # Trigger all windows
-  def handle_trigger(_ref, {current, windows}, index, op, name, trigger) do
-    {emit, windows} = trigger_all(Enum.sort(Map.to_list(windows)), %{}, index, op, name, trigger, [])
+  # Otherwise trigger all windows.
+  def handle_trigger(_ref, {current, windows}, _index, _op, _name, _acc, _trigger)
+      when map_size(windows) == 0 do
+    {[], {current, windows}}
+  end
+  def handle_trigger(_ref, {current, windows}, index, op, name, acc, trigger) do
+    {min, max} = windows |> Map.keys() |> Enum.min_max()
+    {emit, windows} = trigger_all(min, max, windows, index, op, name, acc, trigger, [])
     {emit, {current, windows}}
   end
 
-  defp trigger_all([{window, acc} | pairs], windows, index, op, name, trigger, emit) do
-    {new_emit, acc} = trigger.(acc, index, op, {:fixed, window, name})
-    trigger_all(pairs, Map.put(windows, window, acc), index, op, name, trigger, emit ++ new_emit)
-  end
-  defp trigger_all([], windows, _index, _op, _name, _trigger, emit) do
+  defp trigger_all(min, max, windows, _index, _op, _name, _acc, _trigger, emit) when min > max do
     {emit, windows}
+  end
+  defp trigger_all(min, max, windows, index, op, name, acc, trigger, emit) do
+    window_acc = Map.get_lazy(windows, min, acc)
+    {new_emit, window_acc} = trigger.(window_acc, index, op, {:fixed, min, name})
+    windows = Map.put(windows, min, window_acc)
+    trigger_all(min + 1, max, windows, index, op, name, acc, trigger, emit ++ new_emit)
   end
 end

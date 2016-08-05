@@ -103,7 +103,101 @@ defmodule Flow.Window do
 
   ## Fixed windows
 
-  TODO: Talk about fixed windows. Discuss window types.
+  Non-global windows allow us to group the data based on the event times.
+  Regardless if the data is bounded or not, fixed windows allows us to
+  gather time-based insight about the data.
+
+  Fixed windows are created via the `fixed/3` function which specified
+  the duration of the window and a function that retrieves the event time
+  from each event:
+
+      Flow.Window.fixed(1, :hours, fn {word, timestamp} -> timestamp end)
+
+  Let's see example that will use the window above to count the frequency
+  of words based on windows that are 1 hour long. The timestamps used by
+  Flow are integers in microseconds. For now we will also set the concurrency
+  down 1 and max demand down to 5 as it is simpler to reason about the results:
+
+      iex> data = [{"elixir", 0}, {"elixir", 1_000}, {"erlang", 60_000},
+      ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
+      ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}]
+      iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
+      iex> flow = Flow.new(max_demand: 5, stages: 1)
+      iex> flow = flow |> Flow.from_enumerable(data) |> Flow.partition(stages: 1) |> Flow.window(window)
+      iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
+      ...>   Map.update(acc, word, 1, & &1 + 1)
+      ...> end)
+      iex> flow |> Flow.emit(:state) |> Enum.to_list
+      [%{"elixir" => 2, "erlang" => 1, "concurrency" => 1},
+       %{"elixir" => 1, "erlang" => 2}]
+
+  Since the data has been broken in two windows, the first four events belong
+  to the same window while the last 3 belongs to the second one. Notice that
+  `reduce/3` is executed per window and that each event belongs to a single
+  window exclusively.
+
+  Similar to global windows, fixed windows can also have triggers, allowing
+  us to checkpoint the data as the computation happens.
+
+  ### Data ordering, watermarks and lateness
+
+  When working with event time, Flow assumes by default that events are time
+  ordered. This means that, when we move from one window to another, for
+  example when we received the entry `{"elixir", 4_000_000}` in the example
+  above, we assume the previous window has completed. We call this the
+  **watermark trigger**. Let's change the events above to be out of order.
+  We will get the first event, put it last, and see which results will be
+  emitted:
+
+      iex> data = [{"elixir", 1_000}, {"erlang", 60_000},
+      ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
+      ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}, {"elixir", 0}]
+      iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
+      iex> flow = Flow.new(max_demand: 5, stages: 1)
+      iex> flow = flow |> Flow.from_enumerable(data) |> Flow.partition(stages: 1) |> Flow.window(window)
+      iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
+      ...>   Map.update(acc, word, 1, & &1 + 1)
+      ...> end)
+      iex> flow |> Flow.emit(:state) |> Enum.to_list
+      [%{"elixir" => 1, "erlang" => 1, "concurrency" => 1},
+       %{"elixir" => 1, "erlang" => 2}]
+
+  Notice that now the first map did not count the "elixir" word twice.
+  Since the event arrived late, it was marked as lost. However, in many
+  flows we actually expect data to arrive late, specially when talking
+  about concurrent data processing.
+
+  Luckily fixed windows include the concept of lateness, which is a
+  processing time base period we would wait to receive late events.
+  Let's change the example above once more but now change the window
+  to include the allowed_lateness parameter:
+
+      iex> data = [{"elixir", 1_000}, {"erlang", 60_000},
+      ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
+      ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}, {"elixir", 0}]
+      iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
+      iex> window = Flow.Window.allowed_lateness(window, 5, :minutes)
+      iex> flow = Flow.new(max_demand: 5, stages: 1)
+      iex> flow = flow |> Flow.from_enumerable(data) |> Flow.partition(stages: 1) |> Flow.window(window)
+      iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
+      ...>   Map.update(acc, word, 1, & &1 + 1)
+      ...> end)
+      iex> flow |> Flow.emit(:state) |> Enum.to_list
+      [%{"concurrency" => 1, "elixir" => 1, "erlang" => 1},
+       %{"concurrency" => 1, "elixir" => 2, "erlang" => 1},
+       %{"elixir" => 1, "erlang" => 2}]
+
+  Now that we allow late events, we can see the first window emitted
+  twice: once at watermark and another when the collection is effectively
+  done. If desired, we can use `Flow.map_state/2` to get more information
+  about each particular window. Replace the last line above by the following:
+
+      flow = flow |> Flow.map_state(fn state, _index, trigger -> {state, trigger} end)
+      flow = flow |> Flow.emit(:state) |> Enum.to_list()
+
+  The trigger parameter will include the type of window, the current
+  window and what caused the window to be emitted (`:watermark` or
+  `:done`).
   """
 
   @type t :: %{required(:trigger) => {fun(), fun()} | nil,
@@ -155,6 +249,17 @@ defmodule Flow.Window do
   """
   def fixed(count, unit, by) when is_function(by, 1) do
     %Flow.Window.Fixed{duration: to_ms(count, unit), by: by}
+  end
+
+  @doc """
+  Sets a duration, in processing time, of how long we will
+  wait for late events for a given window.
+  """
+  def allowed_lateness(%{lateness: _} = window, count, unit) do
+    %{window | lateness: to_ms(count, unit)}
+  end
+  def allowed_lateness(window, _, _) do
+    raise ArgumentError, "allowed_lateness/3 not supported for window type #{inspect window}"
   end
 
   @doc """

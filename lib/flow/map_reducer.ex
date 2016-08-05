@@ -10,55 +10,55 @@ defmodule Flow.MapReducer do
     {type, {%{}, status, index, acc.(), reducer}, opts}
   end
 
-  def handle_subscribe(:producer, opts, {_, ref}, {tags, status, index, acc, reducer}) do
-    tags = Map.put(tags, ref, opts[:tag])
+  def handle_subscribe(:producer, opts, {_, ref}, {producers, status, index, acc, reducer}) do
+    producers = Map.put(producers, ref, opts[:tag])
     status = update_in status.done, &[ref | &1]
-    {:automatic, {tags, status, index, acc, reducer}}
+    {:automatic, {producers, status, index, acc, reducer}}
   end
 
-  def handle_subscribe(:consumer, _, {_, ref}, {tags, status, index, acc, reducer}) do
+  def handle_subscribe(:consumer, _, {_, ref}, {producers, status, index, acc, reducer}) do
     %{consumers: consumers} = status
     status = %{status | consumers: [ref | consumers]}
-    {:automatic, {tags, status, index, acc, reducer}}
+    {:automatic, {producers, status, index, acc, reducer}}
   end
 
-  def handle_cancel(_, {_, ref}, {tags, status, index, acc, reducer}) do
+  def handle_cancel(_, {_, ref}, {producers, status, index, acc, reducer}) do
     %{consumers: consumers} = status
 
     cond do
-      Map.has_key?(tags, ref) ->
+      Map.has_key?(producers, ref) ->
         {events, acc, done, done?} = maybe_done(status, index, acc, ref)
         status = %{status | done: done, done?: done?}
-        {:noreply, events, {Map.delete(tags, ref), status, index, acc, reducer}}
+        {:noreply, events, {Map.delete(producers, ref), status, index, acc, reducer}}
       consumers == [ref] ->
-        {:stop, :normal, {tags, status, index, acc, reducer}}
+        {:stop, :normal, {producers, status, index, acc, reducer}}
       true ->
         status = %{status | consumers: List.delete(consumers, ref)}
-        {:noreply, [], {tags, status, index, acc, reducer}}
+        {:noreply, [], {producers, status, index, acc, reducer}}
     end
   end
 
-  def handle_info({:trigger, keep_or_reset, name}, {tags, status, index, acc, reducer}) do
+  def handle_info({:trigger, keep_or_reset, name}, {producers, status, index, acc, reducer}) do
     %{trigger: trigger} = status
     {events, acc} = trigger.(acc, index, keep_or_reset, name)
-    {:noreply, events, {tags, status, index, acc, reducer}}
+    {:noreply, events, {producers, status, index, acc, reducer}}
   end
-  def handle_info({{_, ref}, {:producer, state}}, {tags, status, index, acc, reducer}) when state in [:halted, :done] do
+  def handle_info({{_, ref}, {:producer, state}}, {producers, status, index, acc, reducer}) when state in [:halted, :done] do
     {events, acc, done, done?} = maybe_done(status, index, acc, ref)
     status = %{status | done: done, done?: done?}
-    {:noreply, events, {tags, status, index, acc, reducer}}
+    {:noreply, events, {producers, status, index, acc, reducer}}
   end
   def handle_info(_msg, state) do
     {:noreply, [], state}
   end
 
-  def handle_events(events, _from, {tags, status, index, acc, reducer}) when is_function(reducer, 3) do
+  def handle_events(events, _from, {producers, status, index, acc, reducer}) when is_function(reducer, 3) do
     {events, acc} = reducer.(events, acc, index)
-    {:noreply, events, {tags, status, index, acc, reducer}}
+    {:noreply, events, {producers, status, index, acc, reducer}}
   end
-  def handle_events(events, {_, ref}, {tags, status, index, acc, reducer}) when is_function(reducer, 4) do
-    {events, acc} = reducer.(Map.get(tags, ref), events, acc, index)
-    {:noreply, events, {tags, status, index, acc, reducer}}
+  def handle_events(events, {_, ref}, {producers, status, index, acc, reducer}) when is_function(reducer, 5) do
+    {producers, events, acc} = reducer.(producers, ref, events, acc, index)
+    {:noreply, events, {producers, status, index, acc, reducer}}
   end
 
   defp maybe_done(%{done: [], done?: true}, _index, acc, _ref) do
