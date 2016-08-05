@@ -33,7 +33,7 @@ defmodule Flow.Materialize do
 
   @reduce "reduce/group_by/into"
   @map_state "map_state/each_state/emit"
-  @window "window"
+  @window "window" # TODO: Add window_join below
 
   defp split_operations([{:partition, opts} | ops], type, window?, acc_ops, acc_opts) do
     [stage(type, window?, acc_ops, acc_opts) | split_operations(ops, :mapper, false, [], opts)]
@@ -123,14 +123,14 @@ defmodule Flow.Materialize do
 
   ## Producers
 
-  defp start_producers({:join, bounded, kind, left, right, left_key, right_key, join}, ops, options, _) do
+  defp start_producers({:bounded_join, kind, left, right, left_key, right_key, join}, ops, options, _) do
     partitions = Keyword.fetch!(options, :stages)
     {left_producers, left_consumers} = start_join(:left, left, left_key, partitions)
     {right_producers, right_consumers} = start_join(:right, right, right_key, partitions)
     [{type, {acc, fun, trigger}, ops, options} | rest] = at_least_one_ops(ops, options)
     {left_producers ++ right_producers,
      left_consumers ++ right_consumers,
-     [{type, join_ops(bounded, kind, join, acc, fun, trigger), ops, options} | rest]}
+     [{type, join_ops(kind, join, acc, fun, trigger), ops, options} | rest]}
   end
   defp start_producers({:stages, producers}, ops, options, {_, last_opts}) do
     producers = for producer <- producers, do: {producer, []}
@@ -202,7 +202,7 @@ defmodule Flow.Materialize do
       end}
   end
 
-  defp join_ops(:bounded, kind, join, acc, fun, trigger) do
+  defp join_ops(kind, join, acc, fun, trigger) do
     acc = fn -> {%{}, %{}, acc.()} end
     events = fn tag, events, {left, right, acc}, index ->
       {events, left, right} = dispatch_join(events, tag, left, right, join, [])

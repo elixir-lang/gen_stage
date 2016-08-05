@@ -616,8 +616,8 @@ defmodule Flow do
                    left_key, right_key, join, options \\ [])
       when is_function(left_key, 1) and is_function(right_key, 1) and
            is_function(join, 2) and mode in @joins do
-    %Flow{producers: {:join, :bounded, mode, left, right, left_key, right_key, join},
-                   options: options}
+    %Flow{producers: {:bounded_join, mode, left, right, left_key, right_key, join},
+          options: options}
   end
 
   @doc """

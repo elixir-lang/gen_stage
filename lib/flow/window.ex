@@ -244,7 +244,7 @@ defmodule Flow.Window do
   Such trigger will apply to every window that has changed since the last
   periodic trigger.
 
-  `count` must be a positive integer and `unit` is one of `:microseconds`,
+  `count` must be a positive integer and `unit` is one of `:milliseconds`,
   `:seconds`, `:minutes`, `:hours`. Notice such times are an estimate and
   intrinsically inaccurate as they are based on the processing time.
 
@@ -273,7 +273,7 @@ defmodule Flow.Window do
     %{window | periodically: periodically}
   end
 
-  defp to_ms(count, :microseconds), do: count
+  defp to_ms(count, :milliseconds), do: count
   defp to_ms(count, :seconds), do: count * 1000
   defp to_ms(count, :minutes), do: count * 1000 * 60
   defp to_ms(count, :hours), do: count * 1000 * 60 * 60

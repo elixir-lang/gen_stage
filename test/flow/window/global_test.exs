@@ -76,7 +76,7 @@ defmodule Flow.Window.GlobalTest do
     assert Flow.new(max_demand: 5, stages: 2)
            |> Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)))
            |> Flow.partition(stages: 1, max_demand: 10)
-           |> Flow.window(Flow.Window.global |> Flow.Window.trigger_periodically(200, :microseconds))
+           |> Flow.window(Flow.Window.global |> Flow.Window.trigger_periodically(10, :milliseconds))
            |> Flow.reduce(fn -> 0 end, & &1 + &2)
            |> Flow.map_state(& &1 * 2)
            |> Flow.emit(:state)
