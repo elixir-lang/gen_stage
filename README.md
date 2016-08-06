@@ -6,7 +6,7 @@ This project currently provides the following functionality:
 
   * `Experimental.GenStage` ([docs](https://hexdocs.pm/gen_stage/Experimental.GenStage.html)) - a behaviour for implementing producer and consumer stages
 
-  * `Experimental.Flow` ([docs](https://hexdocs.pm/gen_stage/Experimental.Flow.html)) - `Flow` allows developers to express computations on collections, similar to the `Enum` and `Stream` modules, although computations will be executed in parallel using multiple `GenStage`s
+  * `Experimental.Flow` ([docs](https://hexdocs.pm/gen_stage/Experimental.GenStage.Flow.html)) - `Flow` allows developers to express computations on collections, similar to the `Enum` and `Stream` modules, although computations will be executed in parallel using multiple `GenStage`s
 
   * `Experimental.DynamicSupervisor` ([docs](https://hexdocs.pm/gen_stage/Experimental.DynamicSupervisor.html)) - a supervisor designed for starting children dynamically. Besides being a replacement for the `:simple_one_for_one` strategy in the regular `Supervisor`, a `DynamicSupervisor` can also be used as a stage consumer, making it straight-forward to spawn a new process for every event in a stage pipeline
 
