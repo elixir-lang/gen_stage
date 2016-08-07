@@ -238,9 +238,9 @@ defmodule Flow do
   is partitioned across the stages.
 
   By default all events belong to the same window, called global
-  window, which is partitioned accross stages. However different
+  window, which is partitioned across stages. However different
   windowing strategies may be used by building a `Flow.Window`
-  and passing it to the `Flow.window/2` function.
+  and passing it to the `Flow.partition/3` function.
 
   Once a window is specified, we can build triggers that tells us
   when to checkpoint the data, allowing us to report our progress
@@ -325,7 +325,7 @@ defmodule Flow do
 
   ### Configuration (demand and the number of stages)
 
-  Both `new/1` and `partition/2` allows a set of options to configure
+  Both `new/2` and `partition/3` allows a set of options to configure
   how flows work. In particular, we recommend developers to play with
   the `:min_demand` and `:max_demand` options, which control the amount
   of data sent between stages. The difference between max_demand and
@@ -381,8 +381,9 @@ defmodule Flow do
 
   """
 
-  defstruct producers: nil, options: [], operations: []
-  @type t :: %Flow{producers: producers, operations: [operation], options: Keyword.t}
+  defstruct producers: nil, window: nil, options: [], operations: []
+  @type t :: %Flow{producers: producers, operations: [operation],
+                   options: Keyword.t, window: Flow.Window.t}
 
   @typep producers :: nil |
                       {:stages, GenStage.stage} |
@@ -398,7 +399,45 @@ defmodule Flow do
   ## Building
 
   @doc """
-  Starts a new flow.
+  Creates a new flow.
+
+  It is a shortcut for:
+
+      Flow.new(Flow.Window.global, [])
+
+  See `new/2`.
+
+  ## Exaples
+
+      Flow.new
+
+  """
+  @spec new() :: t
+  def new() do
+    new(Flow.Window.global, [])
+  end
+
+  @doc """
+  Creates a new flow with the given window or options.
+
+  See `new/2`.
+
+  ## Exaples
+
+      Flow.new(Flow.Global.window)
+      Flow.new(stages: 4)
+
+  """
+  @spec new(Flow.Window.t | Keyword.t) :: t
+  def new(%{} = window) do
+    new(window, [])
+  end
+  def new(options) when is_list(options) do
+    new(Flow.Window.global, options)
+  end
+
+  @doc """
+  Starts a new flow with the given window and options.
 
   ## Options
 
@@ -411,9 +450,9 @@ defmodule Flow do
   All remaining options are sent during subscription, allowing developers
   to customize `:min_demand`, `:max_demand` and others.
   """
-  @spec new(Keyword.t) :: t
-  def new(options \\ []) do
-    %Flow{options: options}
+  @spec new(Flow.Window.t, Keyword.t) :: t
+  def new(window, options) do
+    %Flow{options: options, window: window}
   end
 
   @doc """
@@ -617,7 +656,7 @@ defmodule Flow do
       when is_function(left_key, 1) and is_function(right_key, 1) and
            is_function(join, 2) and mode in @joins do
     %Flow{producers: {:bounded_join, mode, left, right, left_key, right_key, join},
-          options: options}
+          options: options, window: Flow.Window.global}
   end
 
   @doc """
@@ -757,11 +796,53 @@ defmodule Flow do
   ## Reducers
 
   @doc """
-  Partitions the flow with the given options.
+  Creates a new partition for the given flow.
+
+  It is a shortcut for:
+
+      Flow.partition(flow, Flow.Window.global, [])
+
+  See `partition/3`.
+
+  ## Exaples
+
+      flow |> Flow.partition()
+
+  """
+  @spec partition(t) :: t
+  def partition(flow) do
+    partition(flow, Flow.Window.global, [])
+  end
+
+  @doc """
+  Creates a new partition for the given flow with the given
+  window or options.
+
+  See `partition/3`.
+
+  ## Exaples
+
+      flow |> Flow.partition(Flow.Global.window)
+      flow |> Flow.partition(stages: 4)
+  """
+  @spec partition(t, Flow.Window.t | Keyword.t) :: t
+  def partition(flow, %{} = window) do
+    partition(flow, window, [])
+  end
+  def partition(flow, options) when is_list(options) do
+    partition(flow, Flow.Window.global, options)
+  end
+
+  @doc """
+  Partitions the flow using the given window and options.
 
   Every time this function is called, a new partition
   is created. It is typically recommended to invoke it
-  before `reduce/3` so similar data is routed accordingly.
+  before a reducing function, such as `reduce/3`, so data
+  belonging to the same partition can be kept together.
+  The `window` parameter is a `Flow.Window` struct which
+  controls how the reducing function behaves, see
+  `Flow.Window` for more information.
 
   ## Options
 
@@ -773,7 +854,7 @@ defmodule Flow do
       the hash should be calculated on the first element of a tuple.
       See more information on the "Hash shortcuts" section below.
       The default value hashing function `:erlang.phash2/2`.
-    * `:dispatcher` - by default, `partition/2` uses `GenStage.PartitionDispatcher`
+    * `:dispatcher` - by default, `partition/3` uses `GenStage.PartitionDispatcher`
       with the given hash function but any other dispatcher can be given
 
   ## Hash shortcuts
@@ -786,14 +867,14 @@ defmodule Flow do
     * `{:key, key}` - apply the hash function to the key of a given map
 
   """
-  @spec partition(t, Keyword.t) :: t
-  def partition(flow, opts \\ []) when is_list(opts) do
-    opts =
-      case Keyword.fetch(opts, :hash) do
-        {:ok, hash} -> Keyword.put(opts, :hash, hash(hash))
-        :error -> opts
+  @spec partition(t, Flow.Window.t, Keyword.t) :: t
+  def partition(flow, %{} = window, options) when is_list(options) do
+    options =
+      case Keyword.fetch(options, :hash) do
+        {:ok, hash} -> Keyword.put(options, :hash, hash(hash))
+        :error -> options
       end
-    %Flow{producers: {:flows, [flow]}, options: opts}
+    %Flow{producers: {:flows, [flow]}, options: options, window: window}
   end
 
   defp hash(fun) when is_function(fun, 2) do
@@ -971,19 +1052,6 @@ defmodule Flow do
   end
   def each_state(flow, mapper) when is_function(mapper, 1) do
     add_operation(flow, {:map_state, fn acc, _, _ -> mapper.(acc); acc end})
-  end
-
-  @doc """
-  Assigns a window to the current flow.
-
-  It must be called with a `Flow.Window` struct once per
-  partition and before `reduce/3` or any reducing function
-  (like `group_by/3` and `into/3`). See `Flow.Window` for
-  more information.
-  """
-  @spec window(t, Flow.Window.t) :: t
-  def window(%Flow{} = flow, %{} = window) do
-    add_operation(flow, {:window, window})
   end
 
   defp add_producers(%Flow{producers: nil} = flow, producers) do

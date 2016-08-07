@@ -11,9 +11,9 @@ defmodule Flow.MapReducer do
   end
 
   def handle_subscribe(:producer, opts, {_, ref}, {producers, status, index, acc, reducer}) do
-    producers = Map.put(producers, ref, opts[:tag])
+    opts[:tag] && Process.put(ref, opts[:tag])
     status = update_in status.done, &[ref | &1]
-    {:automatic, {producers, status, index, acc, reducer}}
+    {:automatic, {Map.put(producers, ref, nil), status, index, acc, reducer}}
   end
 
   def handle_subscribe(:consumer, _, {_, ref}, {producers, status, index, acc, reducer}) do
@@ -27,6 +27,7 @@ defmodule Flow.MapReducer do
 
     cond do
       Map.has_key?(producers, ref) ->
+        Process.delete(ref)
         {events, acc, done, done?} = maybe_done(status, index, acc, ref)
         status = %{status | done: done, done?: done?}
         {:noreply, events, {Map.delete(producers, ref), status, index, acc, reducer}}

@@ -12,15 +12,15 @@ defmodule Flow.Materialize do
                          "please call \"from_enumerable\" or \"from_stage\" accordingly"
   end
 
-  def materialize(%{operations: operations, options: options, producers: producers},
+  def materialize(%{operations: operations, options: options, producers: producers, window: window},
                   type, type_options) do
     options =
       type_options
       |> Keyword.merge(options)
       |> Keyword.put_new(:stages, System.schedulers_online)
     ops = split_operations(operations)
-    {producers, next, ops} = start_producers(producers, ops, options)
-    {producers, start_stages(ops, next, type, options)}
+    {producers, consumers, ops} = start_producers(producers, ops, options)
+    {producers, start_stages(ops, window, consumers, type, options)}
   end
 
   ## Helpers
@@ -29,73 +29,49 @@ defmodule Flow.Materialize do
   Splits the flow operations into layers of stages.
   """
   def split_operations([]) do
-    []
+    :none
   end
   def split_operations(operations) do
-    split_operations(:lists.reverse(operations), :mapper, false, [])
+    split_operations(:lists.reverse(operations), :mapper, [])
   end
 
-  @reduce "reduce/group_by/into"
+  @reduce "reduce"
   @map_state "map_state/each_state/emit"
-  @window "window"
 
   # reducing? is false
-  defp split_operations([{:mapper, _, _} = op | ops], :mapper, window?, acc_ops) do
-    split_operations(ops, :mapper, window?, [op | acc_ops])
+  defp split_operations([{:mapper, _, _} = op | ops], :mapper, acc_ops) do
+    split_operations(ops, :mapper, [op | acc_ops])
   end
-  defp split_operations([{:map_state, _} | _], :mapper, _, _) do
+  defp split_operations([{:map_state, _} | _], :mapper, _) do
     raise ArgumentError, "#{@map_state} must be called after a #{@reduce} operation"
-  end
-  defp split_operations([{:window, _} = op| ops], :mapper, false, acc_ops) do
-    split_operations(ops, :mapper, true, [op | acc_ops])
-  end
-  defp split_operations([{:window, _}| _], :mapper, true, _) do
-    raise ArgumentError, "cannot call #{@window} on a flow after a #{@window} operation " <>
-                         "(it must be called only once per partition)"
   end
 
   # reducing? is true
-  defp split_operations([{:reduce, _, _} | _], :reducer, _, _) do
+  defp split_operations([{:reduce, _, _} | _], :reducer, _) do
     raise ArgumentError, "cannot call #{@reduce} on a flow after a #{@reduce} operation " <>
                          "(it must be called only once per partition, consider using map_state/2 instead)"
   end
-  defp split_operations([{:window, _} | _], :reducer, _, _) do
-    raise ArgumentError, "cannot call #{@window} on a flow after a #{@reduce} operation " <>
-                         "(it must be called before reduce and only once per partition)"
-  end
 
   # Remaining
-  defp split_operations([{:reduce, _, _} = op | ops], :mapper, false, acc_ops) do
-    split_operations(ops, :reducer, true, [op, {:window, Flow.Window.global} | acc_ops])
+  defp split_operations([op | ops], _type, acc_ops) do
+    split_operations(ops, :reducer, [op | acc_ops])
   end
-  defp split_operations([op | ops], _type, window?, acc_ops) do
-    split_operations(ops, :reducer, window?, [op | acc_ops])
+  defp split_operations([], :mapper, ops) do
+    {:mapper, mapper_ops(ops), :lists.reverse(ops)}
   end
-  defp split_operations([], type, window?, acc_ops) do
-    [stage(type, window?, acc_ops)]
-  end
-
-  defp stage(:mapper, true, _ops) do
-    raise ArgumentError, "#{@reduce} must be called after #{@window} operation"
-  end
-  defp stage(type, _window?, ops) do
+  defp split_operations([], :reducer, ops) do
     ops = :lists.reverse(ops)
-    {type, stage_ops(type, ops), ops}
+    {:reducer, reducer_ops(ops), ops}
   end
 
-  defp stage_ops(:mapper, ops),
-    do: mapper_ops(ops)
-  defp stage_ops(:reducer, ops),
-    do: reducer_ops(ops)
-
-  defp start_stages([], producers, _type, _options) do
+  defp start_stages(:none, window, producers, _type, _options) do
+    if window != Flow.Window.global do
+      raise ArgumentError, "a window was set but no computation is happening on this partition"
+    end
     producers
   end
-  defp start_stages([{_type, compiled_ops, _ops}], producers, type, options) do
-    start_stage(compiled_ops, {type, options}, producers)
-  end
-
-  defp start_stage({acc, reducer, trigger}, {type, opts}, producers) do
+  defp start_stages({_mr, compiled_ops, _ops}, window, producers, type, opts) do
+    {acc, reducer, trigger} = window_ops(window, compiled_ops)
     {stages, opts} = Keyword.pop(opts, :stages)
     {init_opts, subscribe_opts} = Keyword.split(opts, @map_reducer_opts)
 
@@ -116,14 +92,14 @@ defmodule Flow.Materialize do
     partitions = Keyword.fetch!(options, :stages)
     {left_producers, left_consumers} = start_join(:left, left, left_key, partitions)
     {right_producers, right_consumers} = start_join(:right, right, right_key, partitions)
-    [{type, {acc, fun, trigger}, ops} | rest] = at_least_one_ops(ops)
+    {type, {acc, fun, trigger}, ops} = ensure_ops(ops)
     {left_producers ++ right_producers,
      left_consumers ++ right_consumers,
-     [{type, join_ops(kind, join, acc, fun, trigger), ops} | rest]}
+     {type, join_ops(kind, join, acc, fun, trigger), ops}}
   end
   defp start_producers({:flows, [flow]}, ops, options) do
     {producers, consumers} = materialize(flow, :producer_consumer, partition(options))
-    {producers, consumers, at_least_one_ops(ops)}
+    {producers, consumers, ensure_ops(ops)}
   end
   defp start_producers({:stages, producers}, ops, options) do
     producers = for producer <- producers, do: {producer, []}
@@ -131,7 +107,7 @@ defmodule Flow.Materialize do
     # If there are no more stages and there is a need for a custom
     # dispatcher, we need to wrap the sources in a custom stage.
     if Keyword.has_key?(options, :dispatcher) do
-      {producers, producers, at_least_one_ops(ops)}
+      {producers, producers, ensure_ops(ops)}
     else
       {producers, producers, ops}
     end
@@ -142,15 +118,14 @@ defmodule Flow.Materialize do
     stages = Keyword.fetch!(options, :stages)
 
     case ops do
-      [{:mapper, _compiled_ops, mapper_ops} | ops] when stages < length(enumerables) ->
+      {:mapper, _compiled_ops, mapper_ops} when stages < length(enumerables) ->
         # Fuse mappers into enumerables if we have more enumerables than stages.
         producers = start_enumerables(enumerables, mapper_ops, partition(options))
-        {producers, producers, ops}
-      [] ->
-        # If there are no ops, we need to pass the last dispatcher info.
-        # In this case, options are discarded because there is no producer_consumer.
+        {producers, producers, :none}
+      :none ->
+        # If there are no ops, just start the enumerables with the options.
         producers = start_enumerables(enumerables, [], options)
-        {producers, producers, ops}
+        {producers, producers, :none}
       _ ->
         # Otherwise it is a regular producer consumer with demand dispatcher.
         # In this case, options is used by subsequent mapper/reducer stages.
@@ -178,9 +153,9 @@ defmodule Flow.Materialize do
     [dispatcher: {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}]
   end
 
-  defp at_least_one_ops([]),
-    do: [stage(:mapper, :none, [])]
-  defp at_least_one_ops(ops),
+  defp ensure_ops(:none),
+    do: {:mapper, mapper_ops([]), []}
+  defp ensure_ops(ops),
     do: ops
 
   ## Joins
@@ -205,7 +180,7 @@ defmodule Flow.Materialize do
     # TODO: This won't work with a follow-up window call due
     # fun being arity of 5 and the shared producers handling.
     events = fn producers, ref, events, {left, right, acc}, index ->
-      {events, left, right} = dispatch_join(events, Map.fetch!(producers, ref), left, right, join, [])
+      {events, left, right} = dispatch_join(events, Process.get(ref), left, right, join, [])
       {events, acc} = fun.(events, acc, index)
       {producers, events, {left, right, acc}}
     end
@@ -264,18 +239,71 @@ defmodule Flow.Materialize do
     {:lists.reverse(acc), left_acc, right_acc}
   end
 
+  ## Windows
+
+  defp window_ops(%{trigger: trigger, periodically: periodically} = window,
+                  {reducer_acc, reducer_fun, reducer_trigger}) do
+    {window_acc, window_fun, window_trigger} =
+      window_trigger(trigger, reducer_acc, reducer_fun, reducer_trigger)
+    {type_acc, type_fun, type_trigger} =
+      window.__struct__.materialize(window, window_acc, window_fun, window_trigger)
+    {window_periodically(type_acc, periodically), type_fun, type_trigger}
+  end
+
+  defp window_trigger(nil, reducer_acc, reducer_fun, reducer_trigger) do
+    {reducer_acc, reducer_fun, reducer_trigger}
+  end
+  defp window_trigger({punctuation_acc, punctuation_fun},
+                      reducer_acc, reducer_fun, reducer_trigger) do
+    {fn -> {punctuation_acc.(), reducer_acc.()} end,
+     build_punctuated_reducer(punctuation_fun, reducer_fun, reducer_trigger),
+     build_punctuated_trigger(reducer_trigger)}
+  end
+
+  defp build_punctuated_reducer(punctuation_fun, red_fun, trigger) do
+    fn events, {pun_acc, red_acc}, index, name ->
+      maybe_punctuate(events, punctuation_fun, pun_acc, red_acc, red_fun, index, name, trigger, [])
+    end
+  end
+
+  defp build_punctuated_trigger(trigger) do
+    fn {trigger_acc, red_acc}, index, op, name ->
+      {events, red_acc} = trigger.(red_acc, index, op, name)
+      {events, {trigger_acc, red_acc}}
+    end
+  end
+
+  defp maybe_punctuate(events, punctuation_fun, pun_acc, red_acc,
+                       red_fun, index, name, trigger, collected) do
+    case punctuation_fun.(events, pun_acc) do
+      {:trigger, trigger_name, pre, op, pos, pun_acc} ->
+        {red_events, red_acc} = red_fun.(pre, red_acc, index)
+        {trigger_events, red_acc} = trigger.(red_acc, index, op, put_elem(name, 2, trigger_name))
+        maybe_punctuate(pos, punctuation_fun, pun_acc, red_acc,
+                        red_fun, index, name, trigger, collected ++ trigger_events ++ red_events)
+      {:cont, pun_acc} ->
+        {red_events, red_acc} = red_fun.(events, red_acc, index)
+        {collected ++ red_events, {pun_acc, red_acc}}
+    end
+  end
+
+  defp window_periodically(window_acc, []) do
+    window_acc
+  end
+  defp window_periodically(window_acc, periodically) do
+    fn ->
+      for {time, keep_or_reset, name} <- periodically do
+        {:ok, _} = :timer.send_interval(time, self(), {:trigger, keep_or_reset, name})
+      end
+      window_acc.()
+    end
+  end
+
   ## Reducers
 
   defp reducer_ops(ops) do
-    case take_mappers(ops, []) do
-      {mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} ->
-        {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops, reducer_acc)}
-      {mappers, [{:window, window} | ops]} ->
-        {reducer_acc, reducer_fun, trigger} = reducer_ops(ops)
-        window_ops(window, mappers, reducer_acc, reducer_fun, trigger)
-      {mappers, ops} ->
-        {fn -> [] end, build_reducer(mappers, &[&1 | &2]), build_trigger(ops, fn -> [] end)}
-    end
+    {mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} = take_mappers(ops, [])
+    {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops, reducer_acc)}
   end
 
   defp build_reducer(mappers, fun) do
@@ -328,89 +356,10 @@ defmodule Flow.Materialize do
     end
   end
 
-  ## Windows
-
-  defp window_ops(%{trigger: trigger, periodically: periodically} = window,
-                  mappers, reducer_acc, reducer_fun, reducer_trigger) do
-    {window_acc, window_fun, window_trigger} =
-      window_trigger(trigger, mappers, reducer_acc, reducer_fun, reducer_trigger)
-    {type_acc, type_fun, type_trigger} =
-      window.__struct__.materialize(window, window_acc, window_fun, window_trigger)
-    {window_periodically(type_acc, periodically), type_fun, type_trigger}
-  end
-
-  defp window_trigger(nil, [], reducer_acc, reducer_fun, reducer_trigger) do
-    {reducer_acc, reducer_fun, reducer_trigger}
-  end
-  defp window_trigger(nil, mappers, reducer_acc, reducer_fun, reducer_trigger) do
-    {reducer_acc, build_unpunctuated_reducer(mappers, reducer_fun), reducer_trigger}
-  end
-  defp window_trigger({punctuation_acc, punctuation_fun}, mappers,
-                      reducer_acc, reducer_fun, reducer_trigger) do
-    {fn -> {punctuation_acc.(), reducer_acc.()} end,
-     build_punctuated_reducer(mappers, punctuation_fun, reducer_fun, reducer_trigger),
-     build_punctuated_trigger(reducer_trigger)}
-  end
-
-  defp build_unpunctuated_reducer([], reducer_fun) do
-    reducer_fun
-  end
-  defp build_unpunctuated_reducer(mappers, reducer_fun) do
-    reducer = :lists.foldl(&mapper/2, &[&1 | &2], mappers)
-    fn events, acc, index ->
-      :lists.foldl(reducer, [], events)
-      |> :lists.reverse()
-      |> reducer_fun.(acc, index)
-    end
-  end
-
-  defp build_punctuated_reducer(punctuation_mappers, punctuation_fun, red_fun, trigger) do
-    pre_reducer = :lists.foldl(&mapper/2, &[&1 | &2], punctuation_mappers)
-
-    fn events, {pun_acc, red_acc}, index, name ->
-      :lists.foldl(pre_reducer, [], events)
-      |> :lists.reverse()
-      |> maybe_punctuate(punctuation_fun, pun_acc, red_acc, red_fun, index, name, trigger, [])
-    end
-  end
-
-  defp build_punctuated_trigger(trigger) do
-    fn {trigger_acc, red_acc}, index, op, name ->
-      {events, red_acc} = trigger.(red_acc, index, op, name)
-      {events, {trigger_acc, red_acc}}
-    end
-  end
-
-  defp maybe_punctuate(events, punctuation_fun, pun_acc, red_acc,
-                       red_fun, index, name, trigger, collected) do
-    case punctuation_fun.(events, pun_acc) do
-      {:trigger, trigger_name, pre, op, pos, pun_acc} ->
-        {red_events, red_acc} = red_fun.(pre, red_acc, index)
-        {trigger_events, red_acc} = trigger.(red_acc, index, op, put_elem(name, 2, trigger_name))
-        maybe_punctuate(pos, punctuation_fun, pun_acc, red_acc,
-                        red_fun, index, name, trigger, collected ++ trigger_events ++ red_events)
-      {:cont, pun_acc} ->
-        {red_events, red_acc} = red_fun.(events, red_acc, index)
-        {collected ++ red_events, {pun_acc, red_acc}}
-    end
-  end
-
-  defp window_periodically(window_acc, []) do
-    window_acc
-  end
-  defp window_periodically(window_acc, periodically) do
-    fn ->
-      for {time, keep_or_reset, name} <- periodically do
-        {:ok, _} = :timer.send_interval(time, self(), {:trigger, keep_or_reset, name})
-      end
-      window_acc.()
-    end
-  end
-
   ## Mappers
 
   defp mapper_ops(ops) do
-    reducer = :lists.foldl(&mapper/2, &[&1 | &2], :lists.reverse(ops))
+    reducer = :lists.foldl(&mapper/2, &[&1 | &2], ops)
     {fn -> [] end,
      fn events, [], _index -> {:lists.reverse(:lists.foldl(reducer, [], events)), []} end,
      fn _acc, _index, _op, _trigger -> {[], []} end}

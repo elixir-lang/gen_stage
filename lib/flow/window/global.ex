@@ -9,12 +9,15 @@ defmodule Flow.Window.Global do
     acc = reducer_acc
 
     fun =
-      if is_function(reducer_fun, 3) do
-        reducer_fun
-      else
-        fn events, acc, index ->
-          reducer_fun.(events, acc, index, {:global, :global, :placeholder})
-        end
+      cond do
+        is_function(reducer_fun, 3) ->
+          reducer_fun
+        is_function(reducer_fun, 4) ->
+          fn events, acc, index ->
+            reducer_fun.(events, acc, index, {:global, :global, :placeholder})
+          end
+        is_function(reducer_fun, 5) ->
+          reducer_fun # TODO: Fix me
       end
 
     trigger =

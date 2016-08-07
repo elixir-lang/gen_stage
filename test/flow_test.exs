@@ -20,6 +20,40 @@ defmodule FlowTest do
     end
   end
 
+  describe "errors" do
+    test "on flow without producer" do
+      assert_raise ArgumentError, ~r"cannot execute a flow without producers", fn ->
+        Flow.new
+        |> Enum.to_list
+      end
+    end
+
+    test "on multiple reduce calls" do
+      assert_raise ArgumentError, ~r"cannot call reduce on a flow after a reduce operation", fn ->
+        Flow.from_enumerable([1, 2, 3])
+        |> Flow.reduce(fn -> 0 end, & &1 + &2)
+        |> Flow.reduce(fn -> 0 end, & &1 + &2)
+        |> Enum.to_list
+      end
+    end
+
+    test "on map_state without reduce" do
+      assert_raise ArgumentError, ~r"map_state/each_state/emit must be called after a reduce operation", fn ->
+        Flow.from_enumerable([1, 2, 3])
+        |> Flow.map_state(fn x -> x end)
+        |> Enum.to_list
+      end
+    end
+
+    test "on window without computation" do
+      assert_raise ArgumentError, ~r"a window was set but no computation is happening on this partition", fn ->
+        Flow.new(Flow.Window.fixed(1, :seconds, & &1))
+        |> Flow.from_enumerable([1, 2, 3])
+        |> Enum.to_list
+      end
+    end
+  end
+
   describe "enumerable-stream" do
     @flow Flow.new(stages: 2)
           |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
@@ -394,17 +428,6 @@ defmodule FlowTest do
              |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
              |> Flow.emit(:state)
              |> Enum.sort() == [9, 12]
-    end
-
-    test "joins two flows followed by window and reduce" do
-      assert Flow.bounded_join(:inner,
-                               Flow.from_enumerable(0..9),
-                               Flow.from_enumerable(10..19),
-                               & &1, & &1 - 10, &{&1, &2}, stages: 1)
-             |> Flow.window(Flow.Window.global |> Flow.Window.trigger_every(5, :reset))
-             |> Flow.reduce(fn -> 0 end, fn {k, v}, acc -> k + v + acc end)
-             |> Flow.emit(:state)
-             |> Enum.to_list() == [70, 120, 0]
     end
 
     test "joins mapper and reducer flows" do
