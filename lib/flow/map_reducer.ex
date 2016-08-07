@@ -53,11 +53,11 @@ defmodule Flow.MapReducer do
     {:noreply, [], state}
   end
 
-  def handle_events(events, _from, {producers, status, index, acc, reducer}) when is_function(reducer, 3) do
-    {events, acc} = reducer.(events, acc, index)
+  def handle_events(events, {_, ref}, {producers, status, index, acc, reducer}) when is_function(reducer, 4) do
+    {events, acc} = reducer.(ref, events, acc, index)
     {:noreply, events, {producers, status, index, acc, reducer}}
   end
-  def handle_events(events, {_, ref}, {producers, status, index, acc, reducer}) when is_function(reducer, 5) do
+  def handle_events(events, {_, ref}, {producers, status, index, acc, reducer}) do
     {producers, events, acc} = reducer.(producers, ref, events, acc, index)
     {:noreply, events, {producers, status, index, acc, reducer}}
   end

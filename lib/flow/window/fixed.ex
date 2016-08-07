@@ -27,7 +27,7 @@ defmodule Flow.Window.Fixed do
     fun =
       fn producers, ref, events, {all, windows}, index ->
         {reducer_emit, recent, windows} =
-          split_events(events, [], nil, by, duration, Map.fetch!(producers, ref),
+          split_events(events, ref, [], nil, by, duration, Map.fetch!(producers, ref),
                        windows, index, reducer_acc, reducer_fun, [])
 
         # Update the latest window for this producer
@@ -35,7 +35,7 @@ defmodule Flow.Window.Fixed do
         min_max = producers |> Map.values |> Enum.min_max()
 
         {trigger_emit, acc} =
-          emit_trigger_messages(ref, all, min_max, windows, index, lateness_fun)
+          emit_trigger_messages(all, min_max, windows, index, lateness_fun)
 
         {producers, reducer_emit ++ trigger_emit, acc}
       end
@@ -50,37 +50,37 @@ defmodule Flow.Window.Fixed do
 
   ## Reducer
 
-  defp split_events([event | events], buffer, current, by, duration,
+  defp split_events([event | events], ref, buffer, current, by, duration,
                     recent, windows, index, reducer_acc, reducer_fun, emit) do
     window = div(by!(by, event), duration)
     if is_nil(current) or window === current do
-      split_events(events, [event | buffer], window, by, duration, recent,
+      split_events(events, ref, [event | buffer], window, by, duration, recent,
                    windows, index, reducer_acc, reducer_fun, emit)
     else
       {emit, recent, windows} =
-        reduce_events(buffer, current, recent, windows, index, reducer_acc, reducer_fun, emit)
-      split_events(events, [event], window, by, duration, recent,
+        reduce_events(ref, buffer, current, recent, windows, index, reducer_acc, reducer_fun, emit)
+      split_events(events, ref, [event], window, by, duration, recent,
                    windows, index, reducer_acc, reducer_fun, emit)
     end
   end
-  defp split_events([], buffer, window, _by, _duration, recent,
+  defp split_events([], ref, buffer, window, _by, _duration, recent,
                     windows, index, reducer_acc, reducer_fun, emit) do
-    reduce_events(buffer, window, recent, windows, index, reducer_acc, reducer_fun, emit)
+    reduce_events(ref, buffer, window, recent, windows, index, reducer_acc, reducer_fun, emit)
   end
 
-  defp reduce_events([], _window, recent, windows, _index, _reducer_acc, _reducer_fun, emit) do
+  defp reduce_events(_ref, [], _window, recent, windows, _index, _reducer_acc, _reducer_fun, emit) do
     {emit, recent, windows}
   end
-  defp reduce_events(buffer, window, recent, windows, index, reducer_acc, reducer_fun, emit) do
+  defp reduce_events(ref, buffer, window, recent, windows, index, reducer_acc, reducer_fun, emit) do
     events = :lists.reverse(buffer)
 
     case recent_window(window, recent, windows, reducer_acc) do
       {:ok, window_acc, recent} ->
         {new_emit, window_acc} =
-          if is_function(reducer_fun, 3) do
-            reducer_fun.(events, window_acc, index)
+          if is_function(reducer_fun, 4) do
+            reducer_fun.(ref, events, window_acc, index)
           else
-            reducer_fun.(events, window_acc, index, {:fixed, window, :placeholder})
+            reducer_fun.(ref, events, window_acc, index, {:fixed, window, :placeholder})
           end
         {emit ++ new_emit, recent, Map.put(windows, window, window_acc)}
       :error ->
@@ -107,24 +107,24 @@ defmodule Flow.Window.Fixed do
   ## Trigger emission
 
   # We still haven't received from all producers.
-  defp emit_trigger_messages(_ref, old, {_, nil}, windows, _index, _lateness) do
+  defp emit_trigger_messages(old, {_, nil}, windows, _index, _lateness) do
     {[], {old, windows}}
   end
   # We received data from all producers from the first time.
-  defp emit_trigger_messages(ref, nil, {min, _}, windows, index, lateness) do
-    emit_trigger_messages(ref, Enum.min(Map.keys(windows)), min, windows, index, lateness, [])
+  defp emit_trigger_messages(nil, {min, _}, windows, index, lateness) do
+    emit_trigger_messages(Enum.min(Map.keys(windows)), min, windows, index, lateness, [])
   end
   # Catch up the old (all) to the new minimum.
-  defp emit_trigger_messages(ref, old, {min, _}, windows, index, lateness) do
-    emit_trigger_messages(ref, old, min, windows, index, lateness, [])
+  defp emit_trigger_messages(old, {min, _}, windows, index, lateness) do
+    emit_trigger_messages(old, min, windows, index, lateness, [])
   end
 
-  defp emit_trigger_messages(_ref, new, new, windows, _index, _lateness, emit) do
+  defp emit_trigger_messages(new, new, windows, _index, _lateness, emit) do
     {emit, {new, windows}}
   end
-  defp emit_trigger_messages(ref, old, new, windows, index, lateness, emit) do
+  defp emit_trigger_messages(old, new, windows, index, lateness, emit) do
     {new_emit, windows} = lateness.(old, windows, index)
-    emit_trigger_messages(ref, old + 1, new, windows, index, lateness, emit ++ new_emit)
+    emit_trigger_messages(old + 1, new, windows, index, lateness, emit ++ new_emit)
   end
 
   defp lateness_fun(lateness, ref, reducer_acc, reducer_trigger) do

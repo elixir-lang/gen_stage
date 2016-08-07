@@ -176,14 +176,15 @@ defmodule Flow.Materialize do
   end
 
   defp join_ops(kind, join, acc, fun, trigger) do
+    ref = make_ref()
     acc = fn -> {%{}, %{}, acc.()} end
-    # TODO: This won't work with a follow-up window call due
-    # fun being arity of 5 and the shared producers handling.
-    events = fn producers, ref, events, {left, right, acc}, index ->
+
+    events = fn ref, events, {left, right, acc}, index ->
       {events, left, right} = dispatch_join(events, Process.get(ref), left, right, join, [])
-      {events, acc} = fun.(events, acc, index)
-      {producers, events, {left, right, acc}}
+      {events, acc} = fun.(ref, events, acc, index)
+      {events, {left, right, acc}}
     end
+
     # TODO: This will be emitted on every trigger
     trigger = fn {left, right, acc}, index, op, name ->
       {kind_events, acc} =
@@ -191,19 +192,20 @@ defmodule Flow.Materialize do
           :inner ->
             {[], acc}
           :left_outer ->
-            fun.(left_events(Map.keys(left), Map.keys(right), left, join), acc, index)
+            fun.(ref, left_events(Map.keys(left), Map.keys(right), left, join), acc, index)
           :right_outer ->
-            fun.(right_events(Map.keys(right), Map.keys(left), right, join), acc, index)
+            fun.(ref, right_events(Map.keys(right), Map.keys(left), right, join), acc, index)
           :full_outer ->
             left_keys = Map.keys(left)
             right_keys = Map.keys(right)
-            {left_events, acc} = fun.(left_events(left_keys, right_keys, left, join), acc, index)
-            {right_events, acc} = fun.(right_events(right_keys, left_keys, right, join), acc, index)
+            {left_events, acc} = fun.(ref, left_events(left_keys, right_keys, left, join), acc, index)
+            {right_events, acc} = fun.(ref, right_events(right_keys, left_keys, right, join), acc, index)
             {left_events ++ right_events, acc}
         end
       {trigger_events, acc} = trigger.(acc, index, op, name)
       {kind_events ++ trigger_events, {left, right, acc}}
     end
+
     {acc, events, trigger}
   end
 
@@ -261,8 +263,8 @@ defmodule Flow.Materialize do
   end
 
   defp build_punctuated_reducer(punctuation_fun, red_fun, trigger) do
-    fn events, {pun_acc, red_acc}, index, name ->
-      maybe_punctuate(events, punctuation_fun, pun_acc, red_acc, red_fun, index, name, trigger, [])
+    fn ref, events, {pun_acc, red_acc}, index, name ->
+      maybe_punctuate(ref, events, punctuation_fun, pun_acc, red_acc, red_fun, index, name, trigger, [])
     end
   end
 
@@ -273,16 +275,16 @@ defmodule Flow.Materialize do
     end
   end
 
-  defp maybe_punctuate(events, punctuation_fun, pun_acc, red_acc,
+  defp maybe_punctuate(ref, events, punctuation_fun, pun_acc, red_acc,
                        red_fun, index, name, trigger, collected) do
     case punctuation_fun.(events, pun_acc) do
       {:trigger, trigger_name, pre, op, pos, pun_acc} ->
-        {red_events, red_acc} = red_fun.(pre, red_acc, index)
+        {red_events, red_acc} = red_fun.(ref, pre, red_acc, index)
         {trigger_events, red_acc} = trigger.(red_acc, index, op, put_elem(name, 2, trigger_name))
-        maybe_punctuate(pos, punctuation_fun, pun_acc, red_acc,
+        maybe_punctuate(ref, pos, punctuation_fun, pun_acc, red_acc,
                         red_fun, index, name, trigger, collected ++ trigger_events ++ red_events)
       {:cont, pun_acc} ->
-        {red_events, red_acc} = red_fun.(events, red_acc, index)
+        {red_events, red_acc} = red_fun.(ref, events, red_acc, index)
         {collected ++ red_events, {pun_acc, red_acc}}
     end
   end
@@ -308,7 +310,7 @@ defmodule Flow.Materialize do
 
   defp build_reducer(mappers, fun) do
     reducer = :lists.foldl(&mapper/2, fun, mappers)
-    fn events, acc, _index ->
+    fn _ref, events, acc, _index ->
       {[], :lists.foldl(reducer, acc, events)}
     end
   end
@@ -361,7 +363,7 @@ defmodule Flow.Materialize do
   defp mapper_ops(ops) do
     reducer = :lists.foldl(&mapper/2, &[&1 | &2], ops)
     {fn -> [] end,
-     fn events, [], _index -> {:lists.reverse(:lists.foldl(reducer, [], events)), []} end,
+     fn _ref, events, [], _index -> {:lists.reverse(:lists.foldl(reducer, [], events)), []} end,
      fn _acc, _index, _op, _trigger -> {[], []} end}
   end
 
