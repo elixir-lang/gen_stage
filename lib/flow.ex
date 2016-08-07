@@ -793,7 +793,7 @@ defmodule Flow do
         {:ok, hash} -> Keyword.put(opts, :hash, hash(hash))
         :error -> opts
       end
-    add_operation(flow, {:partition, opts})
+    %Flow{producers: {:flows, [flow]}, options: opts}
   end
 
   defp hash(fun) when is_function(fun, 2) do
@@ -1005,7 +1005,7 @@ defmodule Flow do
 
   defimpl Enumerable do
     def reduce(flow, acc, fun) do
-      {producers, consumers} = Flow.Materialize.materialize(flow, {:producer_consumer, []})
+      {producers, consumers} = Flow.Materialize.materialize(flow, :producer_consumer, [])
       pids = for {pid, _} <- producers, do: pid
       GenStage.stream(consumers, producers: pids).(acc, fun)
     end

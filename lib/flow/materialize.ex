@@ -7,16 +7,20 @@ defmodule Flow.Materialize do
   @map_reducer_opts [:buffer_keep, :buffer_size, :dispatcher]
   @dispatcher_opts [:hash]
 
-  def materialize(%{producers: nil}, _) do
+  def materialize(%{producers: nil}, _, _) do
     raise ArgumentError, "cannot execute a flow without producers, " <>
                          "please call \"from_enumerable\" or \"from_stage\" accordingly"
   end
 
-  def materialize(%{operations: operations, options: options, producers: producers}, last) do
-    options = Keyword.put_new(options, :stages, System.schedulers_online)
-    ops = split_operations(operations, options)
-    {producers, next, ops} = start_producers(producers, ops, options, last)
-    {producers, start_stages(ops, next, last)}
+  def materialize(%{operations: operations, options: options, producers: producers},
+                  type, type_options) do
+    options =
+      type_options
+      |> Keyword.merge(options)
+      |> Keyword.put_new(:stages, System.schedulers_online)
+    ops = split_operations(operations)
+    {producers, next, ops} = start_producers(producers, ops, options)
+    {producers, start_stages(ops, next, type, options)}
   end
 
   ## Helpers
@@ -24,64 +28,59 @@ defmodule Flow.Materialize do
   @doc """
   Splits the flow operations into layers of stages.
   """
-  def split_operations([], _) do
+  def split_operations([]) do
     []
   end
-  def split_operations(operations, opts) do
-    split_operations(:lists.reverse(operations), :mapper, false, [], opts)
+  def split_operations(operations) do
+    split_operations(:lists.reverse(operations), :mapper, false, [])
   end
 
   @reduce "reduce/group_by/into"
   @map_state "map_state/each_state/emit"
   @window "window"
 
-  defp split_operations([{:partition, opts} | ops], type, window?, acc_ops, acc_opts) do
-    [stage(type, window?, acc_ops, acc_opts) | split_operations(ops, :mapper, false, [], opts)]
-  end
-
   # reducing? is false
-  defp split_operations([{:mapper, _, _} = op | ops], :mapper, window?, acc_ops, acc_opts) do
-    split_operations(ops, :mapper, window?, [op | acc_ops], acc_opts)
+  defp split_operations([{:mapper, _, _} = op | ops], :mapper, window?, acc_ops) do
+    split_operations(ops, :mapper, window?, [op | acc_ops])
   end
-  defp split_operations([{:map_state, _} | _], :mapper, _, _, _) do
+  defp split_operations([{:map_state, _} | _], :mapper, _, _) do
     raise ArgumentError, "#{@map_state} must be called after a #{@reduce} operation"
   end
-  defp split_operations([{:window, _} = op| ops], :mapper, false, acc_ops, acc_opts) do
-    split_operations(ops, :mapper, true, [op | acc_ops], acc_opts)
+  defp split_operations([{:window, _} = op| ops], :mapper, false, acc_ops) do
+    split_operations(ops, :mapper, true, [op | acc_ops])
   end
-  defp split_operations([{:window, _}| _], :mapper, true, _, _) do
+  defp split_operations([{:window, _}| _], :mapper, true, _) do
     raise ArgumentError, "cannot call #{@window} on a flow after a #{@window} operation " <>
                          "(it must be called only once per partition)"
   end
 
   # reducing? is true
-  defp split_operations([{:reduce, _, _} | _], :reducer, _, _, _) do
+  defp split_operations([{:reduce, _, _} | _], :reducer, _, _) do
     raise ArgumentError, "cannot call #{@reduce} on a flow after a #{@reduce} operation " <>
                          "(it must be called only once per partition, consider using map_state/2 instead)"
   end
-  defp split_operations([{:window, _} | _], :reducer, _, _, _) do
+  defp split_operations([{:window, _} | _], :reducer, _, _) do
     raise ArgumentError, "cannot call #{@window} on a flow after a #{@reduce} operation " <>
                          "(it must be called before reduce and only once per partition)"
   end
 
   # Remaining
-  defp split_operations([{:reduce, _, _} = op | ops], :mapper, false, acc_ops, acc_opts) do
-    split_operations(ops, :reducer, true, [op, {:window, Flow.Window.global} | acc_ops], acc_opts)
+  defp split_operations([{:reduce, _, _} = op | ops], :mapper, false, acc_ops) do
+    split_operations(ops, :reducer, true, [op, {:window, Flow.Window.global} | acc_ops])
   end
-  defp split_operations([op | ops], _type, window?, acc_ops, acc_opts) do
-    split_operations(ops, :reducer, window?, [op | acc_ops], acc_opts)
+  defp split_operations([op | ops], _type, window?, acc_ops) do
+    split_operations(ops, :reducer, window?, [op | acc_ops])
   end
-  defp split_operations([], type, window?, acc_ops, acc_opts) do
-    [stage(type, window?, acc_ops, acc_opts)]
+  defp split_operations([], type, window?, acc_ops) do
+    [stage(type, window?, acc_ops)]
   end
 
-  defp stage(:mapper, true, _ops, _opts) do
+  defp stage(:mapper, true, _ops) do
     raise ArgumentError, "#{@reduce} must be called after #{@window} operation"
   end
-  defp stage(type, _window?, ops, opts) do
+  defp stage(type, _window?, ops) do
     ops = :lists.reverse(ops)
-    opts = Keyword.put_new(opts, :stages, System.schedulers_online)
-    {type, stage_ops(type, ops), ops, opts}
+    {type, stage_ops(type, ops), ops}
   end
 
   defp stage_ops(:mapper, ops),
@@ -89,21 +88,11 @@ defmodule Flow.Materialize do
   defp stage_ops(:reducer, ops),
     do: reducer_ops(ops)
 
-  defp dispatcher(opts, [], {kind, kind_opts}) do
-    {kind, Keyword.merge(opts, kind_opts)}
-  end
-  defp dispatcher(opts, [{_, _compiled_ops, _stage_ops, stage_opts} | _], _last) do
-    partitions = Keyword.fetch!(stage_opts, :stages)
-    dispatcher_opts = [partitions: partitions] ++ Keyword.take(stage_opts, @dispatcher_opts)
-    dispatcher = {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}
-    {:producer_consumer, Keyword.put_new(opts, :dispatcher, dispatcher)}
-  end
-
-  defp start_stages([], producers, _last) do
+  defp start_stages([], producers, _type, _options) do
     producers
   end
-  defp start_stages([{_type, compiled_ops, _ops, opts} | rest], producers, last) do
-    start_stages(rest, start_stage(compiled_ops, dispatcher(opts, rest, last), producers), last)
+  defp start_stages([{_type, compiled_ops, _ops}], producers, type, options) do
+    start_stage(compiled_ops, {type, options}, producers)
   end
 
   defp start_stage({acc, reducer, trigger}, {type, opts}, producers) do
@@ -123,51 +112,54 @@ defmodule Flow.Materialize do
 
   ## Producers
 
-  defp start_producers({:bounded_join, kind, left, right, left_key, right_key, join}, ops, options, _) do
+  defp start_producers({:bounded_join, kind, left, right, left_key, right_key, join}, ops, options) do
     partitions = Keyword.fetch!(options, :stages)
     {left_producers, left_consumers} = start_join(:left, left, left_key, partitions)
     {right_producers, right_consumers} = start_join(:right, right, right_key, partitions)
-    [{type, {acc, fun, trigger}, ops, options} | rest] = at_least_one_ops(ops, options)
+    [{type, {acc, fun, trigger}, ops} | rest] = at_least_one_ops(ops)
     {left_producers ++ right_producers,
      left_consumers ++ right_consumers,
-     [{type, join_ops(kind, join, acc, fun, trigger), ops, options} | rest]}
+     [{type, join_ops(kind, join, acc, fun, trigger), ops} | rest]}
   end
-  defp start_producers({:stages, producers}, ops, options, {_, last_opts}) do
+  defp start_producers({:flows, [flow]}, ops, options) do
+    {producers, consumers} = materialize(flow, :producer_consumer, partition(options))
+    {producers, consumers, at_least_one_ops(ops)}
+  end
+  defp start_producers({:stages, producers}, ops, options) do
     producers = for producer <- producers, do: {producer, []}
 
     # If there are no more stages and there is a need for a custom
     # dispatcher, we need to wrap the sources in a custom stage.
-    if Keyword.has_key?(last_opts, :dispatcher) do
-      {producers, producers, at_least_one_ops(ops, options)}
+    if Keyword.has_key?(options, :dispatcher) do
+      {producers, producers, at_least_one_ops(ops)}
     else
       {producers, producers, ops}
     end
   end
-  defp start_producers({:enumerables, enumerables}, ops, options, last) do
+  defp start_producers({:enumerables, enumerables}, ops, options) do
     # options configures all stages before partition, so it effectively
     # controls the number of stages consuming the enumerables.
     stages = Keyword.fetch!(options, :stages)
 
     case ops do
-      [{:mapper, _compiled_ops, mapper_ops, mapper_opts} | ops] when stages < length(enumerables) ->
+      [{:mapper, _compiled_ops, mapper_ops} | ops] when stages < length(enumerables) ->
         # Fuse mappers into enumerables if we have more enumerables than stages.
-        # In this case, mapper_opts contains the given options.
-        producers = start_enumerables(enumerables, mapper_ops, dispatcher(mapper_opts, ops, last))
+        producers = start_enumerables(enumerables, mapper_ops, partition(options))
         {producers, producers, ops}
       [] ->
         # If there are no ops, we need to pass the last dispatcher info.
         # In this case, options are discarded because there is no producer_consumer.
-        producers = start_enumerables(enumerables, [], last)
+        producers = start_enumerables(enumerables, [], options)
         {producers, producers, ops}
       _ ->
         # Otherwise it is a regular producer consumer with demand dispatcher.
         # In this case, options is used by subsequent mapper/reducer stages.
-        producers = start_enumerables(enumerables, [], {:producer_consumer, []})
+        producers = start_enumerables(enumerables, [], [])
         {producers, producers, ops}
     end
   end
 
-  defp start_enumerables(enumerables, ops, {_, opts}) do
+  defp start_enumerables(enumerables, ops, opts) do
     init_opts = [consumers: :permanent, demand: :accumulate] ++ Keyword.take(opts, @map_reducer_opts)
 
     for enumerable <- enumerables do
@@ -180,9 +172,15 @@ defmodule Flow.Materialize do
     end
   end
 
-  defp at_least_one_ops([], options),
-    do: [stage(:mapper, :none, [], options)]
-  defp at_least_one_ops(ops, _opts),
+  defp partition(options) do
+    partitions = Keyword.fetch!(options, :stages)
+    dispatcher_opts = [partitions: partitions] ++ Keyword.take(options, @dispatcher_opts)
+    [dispatcher: {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}]
+  end
+
+  defp at_least_one_ops([]),
+    do: [stage(:mapper, :none, [])]
+  defp at_least_one_ops(ops),
     do: ops
 
   ## Joins
@@ -194,7 +192,7 @@ defmodule Flow.Materialize do
     end
 
     opts = [dispatcher: {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}]
-    {producers, consumers} = materialize(flow, {:producer_consumer, opts})
+    {producers, consumers} = materialize(flow, :producer_consumer, opts)
 
     {producers,
       for {consumer, consumer_opts} <- consumers do
