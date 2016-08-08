@@ -96,6 +96,10 @@ defmodule FlowTest do
              [1, 3, 5]
     end
 
+    test "uniq_by/2" do
+      assert @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort() == [1, 2]
+    end
+
     test "keeps ordering" do
       flow =
         @flow
@@ -151,6 +155,10 @@ defmodule FlowTest do
     test "reduce/3" do
       assert @flow |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_state(&[&1]) |> Enum.sum() ==
              21
+    end
+
+    test "uniq_by/2" do
+      assert @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort() == [1, 2]
     end
 
     test "keeps ordering" do
@@ -239,6 +247,18 @@ defmodule FlowTest do
 
       assert @flow |> Flow.reject(&rem(&1, 2) == 0) |> Flow.reduce(fn -> 0 end, &+/2) |> Flow.map_state(&[&1]) |> Enum.sort() ==
              [0, 0, 3, 22]
+    end
+
+    test "uniq_by/2" do
+      assert @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort() == [1, 2, 3, 4, 10]
+    end
+
+    test "uniq_by/2 after reduce/3" do
+      assert @flow
+             |> Flow.reduce(fn -> [] end, &[&1 | &2])
+             |> Flow.map_state(&Enum.reverse/1)
+             |> Flow.uniq_by(&rem(&1, 2))
+             |> Enum.sort() == [1, 2, 3, 4, 10]
     end
 
     test "keeps ordering" do
@@ -515,7 +535,7 @@ defmodule FlowTest do
 
     test "outer joins two flows with windows" do
       window = Flow.Window.fixed(10, :milliseconds, & &1) |> Flow.Window.trigger_every(2)
-      # Notice how 9 and 12 do not form a pair for being in opposite windows.
+      # Notice how 9 and 12 do not form a pair for being in different windows.
       assert Flow.window_join(:full_outer,
                               Flow.from_enumerable([0, 1, 2, 3, 9, 10, 11]),
                               Flow.from_enumerable([4, 5, 6, 7, 8, 12, 13]),

@@ -320,8 +320,17 @@ defmodule Flow.Materialize do
   ## Reducers
 
   defp reducer_ops(ops) do
-    {mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} = take_mappers(ops, [])
-    {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops, reducer_acc)}
+    case take_mappers(ops, []) do
+      {mappers, [{:reduce, reducer_acc, reducer_fun} | ops]} ->
+        {reducer_acc, build_reducer(mappers, reducer_fun), build_trigger(ops, reducer_acc)}
+      {mappers, [{:uniq, uniq_by} | ops]} ->
+        {acc, reducer, trigger} = reducer_ops(ops)
+        {fn -> {%{}, acc.()} end,
+         build_uniq_reducer(mappers, reducer, uniq_by),
+         build_uniq_trigger(trigger)}
+      {mappers, ops} ->
+        {fn -> [] end, build_reducer(mappers, &[&1 | &2]), build_trigger(ops, fn -> [] end)}
+    end
   end
 
   defp build_reducer(mappers, fun) do
@@ -362,10 +371,38 @@ defmodule Flow.Materialize do
     end
   end
 
+  defp build_uniq_reducer(mappers, reducer, uniq_by) do
+    uniq_by = :lists.foldl(&mapper/2, uniq_by_reducer(uniq_by), mappers)
+    fn ref, events, {set, acc}, index ->
+      {set, events} = :lists.foldl(uniq_by, {set, []}, events)
+      {events, acc} = reducer.(ref, :lists.reverse(events), acc, index)
+      {events, {set, acc}}
+    end
+  end
+
+  defp uniq_by_reducer(uniq_by) do
+    fn event, {set, acc} ->
+      key = uniq_by.(event)
+      case set do
+        %{^key => true} -> {set, acc}
+        %{} -> {Map.put(set, key, true), [event | acc]}
+      end
+    end
+  end
+
+  defp build_uniq_trigger(trigger) do
+    fn {set, acc}, index, op, name ->
+      {events, acc} = trigger.(acc, index, op, name)
+      {events, {set, acc}}
+    end
+  end
+
   defp merge_map_state(ops) do
     case take_mappers(ops, []) do
       {[], [{:map_state, fun} | ops]} ->
         [fun | merge_map_state(ops)]
+      {[], [{:uniq, by} | ops]} ->
+        [fn acc, _, _ -> Enum.uniq_by(acc, by) end | merge_map_state(ops)]
       {[], []} ->
         []
       {mappers, ops} ->

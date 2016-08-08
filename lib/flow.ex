@@ -401,7 +401,7 @@ defmodule Flow do
   @doc """
   Creates a new flow.
 
-  It is a shortcut for:
+  Calling this function is equivalent to:
 
       Flow.new(Flow.Window.global, [])
 
@@ -458,7 +458,7 @@ defmodule Flow do
   @doc """
   Starts a flow with the given enumerable as producer.
 
-  It is effectively a shortcut for:
+  Calling this function is equivalent to:
 
       Flow.new |> Flow.from_enumerables([enumerable])
 
@@ -497,7 +497,7 @@ defmodule Flow do
   @doc """
   Starts a flow with the list of enumerables as producers.
 
-  It is effectively a shortcut for:
+  Calling this function is equivalent to:
 
       Flow.new |> Flow.from_enumerables(enumerables)
 
@@ -541,7 +541,7 @@ defmodule Flow do
   @doc """
   Starts a flow with the given stage as producer.
 
-  It is effectively a shortcut for:
+  Calling this function is equivalent to:
 
       Flow.new |> Flow.from_stages([stage])
 
@@ -571,7 +571,7 @@ defmodule Flow do
   @doc """
   Starts a flow with the list of stages as producers.
 
-  It is effectively a shortcut for:
+  Calling this function is equivalent to:
 
       Flow.new |> Flow.from_stages(stages)
 
@@ -851,7 +851,7 @@ defmodule Flow do
   @doc """
   Creates a new partition for the given flow.
 
-  It is a shortcut for:
+  Calling this function is equivalent to:
 
       Flow.partition(flow, Flow.Window.global, [])
 
@@ -928,7 +928,7 @@ defmodule Flow do
   @doc """
   Merges the given flows in a new partition.
 
-  It is a shortcut for:
+  Calling this function is equivalent to:
 
       Flow.merge(flows, Flow.Window.global, [])
 
@@ -1049,6 +1049,66 @@ defmodule Flow do
     else
       raise ArgumentError, "Flow.reduce/3 expects the accumulator to be given as a function"
     end
+  end
+
+  @doc """
+  Only emit unique events.
+
+  Calling this function is equivalent to:
+
+      Flow.uniq_by(flow, & &1)
+
+  See `uniq_by/2` for more information.
+  """
+  def uniq(flow) do
+    uniq_by(flow, & &1)
+  end
+
+  @doc """
+  Only emit events that are unique according to the `by` function.
+
+  In order to verify if an item is unique or not, `uniq_by/2`
+  must store the value computed by `by/1` into a set. This means
+  that, when working with unbounded data, it is recommended to
+  wrap `uniq_by/2` in a window otherwise the data set will grow
+  forever, eventually using all memory available.
+
+  Also keep in mind that `uniq_by/2` is applied per partition.
+  Therefore, if the data is not uniquely divided per partition,
+  it won't be able to calculate the unique items properly.
+
+  ## Examples
+
+  To get started, let's create a flow that emits only the first
+  odd and even number for a range:
+
+      iex> flow = Flow.from_enumerable(1..100)
+      iex> flow = Flow.partition(flow, stages: 1)
+      iex> flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
+      [1, 2]
+
+  Since we have used only one stages when partitioning, we
+  correctly calculate `[1, 2]` for the given partition. Let's see
+  what happens when we increase the number of stages in the partition:
+
+      iex> flow = Flow.from_enumerable(1..100)
+      iex> flow = Flow.partition(flow, stages: 4)
+      iex> flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
+      [1, 2, 3, 4, 10, 16, 23, 39]
+
+  Now we got 8 numbers, one odd and one even *per partition*. If
+  we want to compute the unique items per partition, we must properly
+  hash the events into two distinct partitions, one for odd numbers
+  and another for even numbers:
+
+      iex> flow = Flow.from_enumerable(1..100)
+      iex> flow = Flow.partition(flow, stages: 2, hash: fn event, 2 -> {event, rem(event, 2)} end)
+      iex> flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
+      [1, 2]
+  """
+  @spec uniq_by(t, (term -> term)) :: t
+  def uniq_by(flow, by) when is_function(by, 1) do
+    add_operation(flow, {:uniq, by})
   end
 
   @doc """
