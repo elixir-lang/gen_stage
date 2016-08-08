@@ -19,12 +19,12 @@ defmodule GenStage.Dispatcher do
   @doc """
   Called on initialization with the options given on `c:GenStage.init/1`.
   """
-  @callback init(opts :: Keyword.t) :: {:ok, state} when state: any
+  @callback init(opts :: keyword()) :: {:ok, state} when state: any
 
   @doc """
   Called every time the producer gets a new subscriber.
   """
-  @callback subscribe(opts :: Keyword.t, from :: {pid, reference}, state :: term) ::
+  @callback subscribe(opts :: keyword(), from :: {pid, reference}, state :: term) ::
     {:ok, demand :: non_neg_integer, new_state} when new_state: term
 
   @doc """

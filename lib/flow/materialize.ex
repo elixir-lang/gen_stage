@@ -19,7 +19,7 @@ defmodule Flow.Materialize do
       |> Keyword.merge(options)
       |> Keyword.put_new(:stages, System.schedulers_online)
     ops = split_operations(operations)
-    {producers, consumers, ops} = start_producers(producers, ops, options)
+    {producers, consumers, ops, window} = start_producers(producers, ops, window, options)
     {producers, start_stages(ops, window, consumers, type, options)}
   end
 
@@ -88,36 +88,44 @@ defmodule Flow.Materialize do
 
   ## Producers
 
-  defp start_producers({:bounded_join, kind, left, right, left_key, right_key, join}, ops, options) do
+  defp start_producers({:join, kind, left, right, left_key, right_key, join}, ops, window, options) do
     partitions = Keyword.fetch!(options, :stages)
     {left_producers, left_consumers} = start_join(:left, left, left_key, partitions)
     {right_producers, right_consumers} = start_join(:right, right, right_key, partitions)
     {type, {acc, fun, trigger}, ops} = ensure_ops(ops)
+
+    window =
+      case window do
+        %{by: by} -> %{window | by: fn x -> by.(elem(x, 1)) end}
+        %{} -> window
+      end
+
     {left_producers ++ right_producers,
      left_consumers ++ right_consumers,
-     {type, join_ops(kind, join, acc, fun, trigger), ops}}
+     {type, join_ops(kind, join, acc, fun, trigger), ops},
+     window}
   end
-  defp start_producers({:flows, flows}, ops, options) do
+  defp start_producers({:flows, flows}, ops, window, options) do
     options = partition(options)
     {producers, consumers} =
       Enum.reduce(flows, {[], []}, fn flow, {producers_acc, consumers_acc} ->
         {producers, consumers} = materialize(flow, :producer_consumer, options)
         {producers ++ producers_acc, consumers ++ consumers_acc}
       end)
-    {producers, consumers, ensure_ops(ops)}
+    {producers, consumers, ensure_ops(ops), window}
   end
-  defp start_producers({:stages, producers}, ops, options) do
+  defp start_producers({:stages, producers}, ops, window, options) do
     producers = for producer <- producers, do: {producer, []}
 
     # If there are no more stages and there is a need for a custom
     # dispatcher, we need to wrap the sources in a custom stage.
     if Keyword.has_key?(options, :dispatcher) do
-      {producers, producers, ensure_ops(ops)}
+      {producers, producers, ensure_ops(ops), window}
     else
-      {producers, producers, ops}
+      {producers, producers, ops, window}
     end
   end
-  defp start_producers({:enumerables, enumerables}, ops, options) do
+  defp start_producers({:enumerables, enumerables}, ops, window, options) do
     # options configures all stages before partition, so it effectively
     # controls the number of stages consuming the enumerables.
     stages = Keyword.fetch!(options, :stages)
@@ -126,16 +134,16 @@ defmodule Flow.Materialize do
       {:mapper, _compiled_ops, mapper_ops} when stages < length(enumerables) ->
         # Fuse mappers into enumerables if we have more enumerables than stages.
         producers = start_enumerables(enumerables, mapper_ops, partition(options))
-        {producers, producers, :none}
+        {producers, producers, :none, window}
       :none ->
         # If there are no ops, just start the enumerables with the options.
         producers = start_enumerables(enumerables, [], options)
-        {producers, producers, :none}
+        {producers, producers, :none, window}
       _ ->
         # Otherwise it is a regular producer consumer with demand dispatcher.
         # In this case, options is used by subsequent mapper/reducer stages.
         producers = start_enumerables(enumerables, [], [])
-        {producers, producers, ops}
+        {producers, producers, ops, window}
     end
   end
 
@@ -190,25 +198,28 @@ defmodule Flow.Materialize do
       {events, {left, right, acc}}
     end
 
-    # TODO: This will be emitted on every trigger
-    trigger = fn {left, right, acc}, index, op, name ->
-      {kind_events, acc} =
-        case kind do
-          :inner ->
-            {[], acc}
-          :left_outer ->
-            fun.(ref, left_events(Map.keys(left), Map.keys(right), left, join), acc, index)
-          :right_outer ->
-            fun.(ref, right_events(Map.keys(right), Map.keys(left), right, join), acc, index)
-          :full_outer ->
-            left_keys = Map.keys(left)
-            right_keys = Map.keys(right)
-            {left_events, acc} = fun.(ref, left_events(left_keys, right_keys, left, join), acc, index)
-            {right_events, acc} = fun.(ref, right_events(right_keys, left_keys, right, join), acc, index)
-            {left_events ++ right_events, acc}
-        end
-      {trigger_events, acc} = trigger.(acc, index, op, name)
-      {kind_events ++ trigger_events, {left, right, acc}}
+    trigger = fn
+      {left, right, acc}, index, op, {_, _, :done} = name ->
+        {kind_events, acc} =
+          case kind do
+            :inner ->
+              {[], acc}
+            :left_outer ->
+              fun.(ref, left_events(Map.keys(left), Map.keys(right), left, join), acc, index)
+            :right_outer ->
+              fun.(ref, right_events(Map.keys(right), Map.keys(left), right, join), acc, index)
+            :full_outer ->
+              left_keys = Map.keys(left)
+              right_keys = Map.keys(right)
+              {left_events, acc} = fun.(ref, left_events(left_keys, right_keys, left, join), acc, index)
+              {right_events, acc} = fun.(ref, right_events(right_keys, left_keys, right, join), acc, index)
+              {left_events ++ right_events, acc}
+          end
+        {trigger_events, acc} = trigger.(acc, index, op, name)
+        {kind_events ++ trigger_events, {left, right, acc}}
+      {left, right, acc}, index, op, name ->
+        {events, acc} = trigger.(acc, index, op, name)
+        {events, {left, right, acc}}
     end
 
     {acc, events, trigger}
@@ -229,7 +240,7 @@ defmodule Flow.Materialize do
           :lists.foldl(fn right, acc -> [join.(left, right) | acc] end, acc, rights)
         %{} -> acc
       end
-    left_acc = Map.update(left_acc, key, [left], &[&1 | left])
+    left_acc = Map.update(left_acc, key, [left], &[left | &1])
     dispatch_join(rest, :left, left_acc, right_acc, join, acc)
   end
   defp dispatch_join([{key, right} | rest], :right, left_acc, right_acc, join, acc) do
@@ -239,7 +250,7 @@ defmodule Flow.Materialize do
           :lists.foldl(fn left, acc -> [join.(left, right) | acc] end, acc, lefties)
         %{} -> acc
       end
-    right_acc = Map.update(right_acc, key, [right], &[&1 | right])
+    right_acc = Map.update(right_acc, key, [right], &[right | &1])
     dispatch_join(rest, :right, left_acc, right_acc, join, acc)
   end
   defp dispatch_join([], _, left_acc, right_acc, _join, acc) do

@@ -512,5 +512,16 @@ defmodule FlowTest do
              |> Flow.emit(:state)
              |> Enum.sort() == [44, 146]
     end
+
+    test "outer joins two flows with windows" do
+      window = Flow.Window.fixed(10, :milliseconds, & &1) |> Flow.Window.trigger_every(2)
+      # Notice how 9 and 12 do not form a pair for being in opposite windows.
+      assert Flow.window_join(:full_outer,
+                              Flow.from_enumerable([0, 1, 2, 3, 9, 10, 11]),
+                              Flow.from_enumerable([4, 5, 6, 7, 8, 12, 13]),
+                              window, & &1, & &1 - 3, &{&1, &2})
+             |> Enum.sort() == [{0, nil}, {1, 4}, {2, 5}, {3, 6}, {9, nil},
+                                {10, 13}, {11, nil}, {nil, 7}, {nil, 8}, {nil, 12}]
+    end
   end
 end

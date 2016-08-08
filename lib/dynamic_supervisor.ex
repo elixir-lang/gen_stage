@@ -237,7 +237,7 @@ defmodule DynamicSupervisor do
       options
   """
   @callback init(args :: term) ::
-    {:ok, [Supervisor.Spec.spec], options :: Keyword.t} | :ignore
+    {:ok, [Supervisor.Spec.spec], options :: keyword()} | :ignore
 
   defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
              :max_dynamic, children: %{}, producers: %{}, restarts: [],

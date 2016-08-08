@@ -950,7 +950,7 @@ defmodule GenStage do
   All other options that would be given for `start_link/3` are
   also accepted.
   """
-  @spec from_enumerable(Enumerable.t, Keyword.t) :: GenServer.on_start
+  @spec from_enumerable(Enumerable.t, keyword()) :: GenServer.on_start
   def from_enumerable(stream, opts \\ []) do
     case Keyword.pop(opts, :link, true) do
       {true, opts} -> start_link(GenStage.Streamer, {stream, opts}, opts)
@@ -1010,7 +1010,7 @@ defmodule GenStage do
   consume such streams from a separate process which will be
   discarded after the stream is consumed.
   """
-  @spec stream([stage | {stage, Keyword.t}], keyword()) :: Enumerable.t
+  @spec stream([stage | {stage, keyword()}], keyword()) :: Enumerable.t
   def stream(subscriptions, options \\ [])
 
   def stream(subscriptions, options) when is_list(subscriptions) do

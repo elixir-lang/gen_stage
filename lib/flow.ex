@@ -383,7 +383,7 @@ defmodule Flow do
 
   defstruct producers: nil, window: nil, options: [], operations: []
   @type t :: %Flow{producers: producers, operations: [operation],
-                   options: Keyword.t, window: Flow.Window.t}
+                   options: keyword(), window: Flow.Window.t}
 
   @typep producers :: nil |
                       {:stages, GenStage.stage} |
@@ -391,7 +391,7 @@ defmodule Flow do
                       {:join, t, t, fun(), fun(), fun()}
 
   @typep operation :: {:mapper, atom(), [term()]} |
-                      {:partition, Keyword.t} |
+                      {:partition, keyword()} |
                       {:map_state, fun()} |
                       {:reduce, fun(), fun()} |
                       {:window, Flow.Window.t}
@@ -407,7 +407,7 @@ defmodule Flow do
 
   See `new/2`.
 
-  ## Exaples
+  ## Examples
 
       Flow.new
 
@@ -422,13 +422,13 @@ defmodule Flow do
 
   See `new/2`.
 
-  ## Exaples
+  ## Examples
 
       Flow.new(Flow.Global.window)
       Flow.new(stages: 4)
 
   """
-  @spec new(Flow.Window.t | Keyword.t) :: t
+  @spec new(Flow.Window.t | keyword()) :: t
   def new(%{} = window) do
     new(window, [])
   end
@@ -450,7 +450,7 @@ defmodule Flow do
   All remaining options are sent during subscription, allowing developers
   to customize `:min_demand`, `:max_demand` and others.
   """
-  @spec new(Flow.Window.t, Keyword.t) :: t
+  @spec new(Flow.Window.t, keyword()) :: t
   def new(window, options) do
     %Flow{options: options, window: window}
   end
@@ -615,7 +615,11 @@ defmodule Flow do
   A join creates a new partitioned flow that subscribes to the
   two flows given as arguments.  The newly created partitions
   will accumulate the data received from both flows until there
-  is no more data.
+  is no more data. Therefore, this function is useful for merging
+  finite flows. If used for merging infinite flows, you will
+  eventually run out of memory due to the accumulated data. See
+  `window_join/8` for applying a window to a join, allowing the
+  join data to be reset per window.
 
   The join has 4 modes:
 
@@ -651,12 +655,61 @@ defmodule Flow do
        %{id: 1, title: "hello", comment: "outstanding"}]
 
   """
+  @spec bounded_join(:inner | :left_outer | :right_outer | :outer, t, t,
+                     fun(), fun(), fun(), keyword()) :: t
   def bounded_join(mode, %Flow{} = left, %Flow{} = right,
                    left_key, right_key, join, options \\ [])
       when is_function(left_key, 1) and is_function(right_key, 1) and
            is_function(join, 2) and mode in @joins do
-    %Flow{producers: {:bounded_join, mode, left, right, left_key, right_key, join},
-          options: options, window: Flow.Window.global}
+    window_join(mode, left, right, Flow.Window.global, left_key, right_key, join, options)
+  end
+
+  @doc """
+  Joins two flows with the given window.
+
+  It is similar to `bounded_join/7` with the addition a window
+  can be given. The window function applies to elements of both
+  left and right side in isolation (and not the joined value). A
+  trigger will cause the join state to be cleared.
+
+  ## Examples
+
+  As an example, let's expand the example given in `bounded_join/7`
+  and apply a window to it. The example in `bounded_join/7` returned
+  3 results but in this example, because we will split the posts
+  and comments in two different windows, we will get only two results
+  as the later comment for `post_id=1` won't have a matching comment for
+  its window:
+
+
+      iex> posts = [%{id: 1, title: "hello", timestamp: 0}, %{id: 2, title: "world", timestamp: 1000}]
+      iex> comments = [{1, "excellent", 0}, {1, "outstanding", 1000},
+      ...>             {2, "great follow up", 1000}, {3, "unknown", 1000}]
+      iex> window = Flow.Window.fixed(1, :seconds, fn
+      ...>   {_, _, timestamp} -> timestamp
+      ...>   %{timestamp: timestamp} -> timestamp
+      ...> end)
+      iex> flow = Flow.window_join(:inner,
+      ...>                         Flow.from_enumerable(posts),
+      ...>                         Flow.from_enumerable(comments),
+      ...>                         window,
+      ...>                         & &1.id, # left key
+      ...>                         & elem(&1, 0), # right key
+      ...>                         fn post, {_post_id, comment, _ts} -> Map.put(post, :comment, comment) end,
+      ...>                         stages: 1, max_demand: 1)
+      iex> Enum.sort(flow)
+      [%{id: 1, title: "hello", comment: "excellent", timestamp: 0},
+       %{id: 2, title: "world", comment: "great follow up", timestamp: 1000}]
+
+  """
+  @spec window_join(:inner | :left_outer | :right_outer | :outer, t, t, Flow.Window.t,
+                    fun(), fun(), fun(), keyword()) :: t
+  def window_join(mode, %Flow{} = left, %Flow{} = right, %{} = window,
+                  left_key, right_key, join, options \\ [])
+      when is_function(left_key, 1) and is_function(right_key, 1) and
+           is_function(join, 2) and mode in @joins do
+    %Flow{producers: {:join, mode, left, right, left_key, right_key, join},
+          options: options, window: window}
   end
 
   @doc """
@@ -804,7 +857,7 @@ defmodule Flow do
 
   See `partition/3`.
 
-  ## Exaples
+  ## Examples
 
       flow |> Flow.partition()
 
@@ -820,12 +873,12 @@ defmodule Flow do
 
   See `partition/3`.
 
-  ## Exaples
+  ## Examples
 
       flow |> Flow.partition(Flow.Global.window)
       flow |> Flow.partition(stages: 4)
   """
-  @spec partition(t, Flow.Window.t | Keyword.t) :: t
+  @spec partition(t, Flow.Window.t | keyword()) :: t
   def partition(flow, %{} = window) do
     partition(flow, window, [])
   end
@@ -867,7 +920,7 @@ defmodule Flow do
     * `{:key, key}` - apply the hash function to the key of a given map
 
   """
-  @spec partition(t, Flow.Window.t, Keyword.t) :: t
+  @spec partition(t, Flow.Window.t, keyword()) :: t
   def partition(flow, %{} = window, options) when is_list(options) do
     merge([flow], window, options)
   end
@@ -881,7 +934,7 @@ defmodule Flow do
 
   See `merge/3`.
 
-  ## Exaples
+  ## Examples
 
       Flow.merge([flow1, flow2])
 
@@ -896,12 +949,12 @@ defmodule Flow do
 
   See `merge/3`.
 
-  ## Exaples
+  ## Examples
 
       Flow.merge([flow1, flow2], Flow.Global.window)
       Flow.merge([flow1, flow2], stages: 4)
   """
-  @spec merge(t, Flow.Window.t | Keyword.t) :: t
+  @spec merge(t, Flow.Window.t | keyword()) :: t
   def merge(flows, %{} = window) do
     merge(flows, window, [])
   end
@@ -924,7 +977,7 @@ defmodule Flow do
   It accepts the same options and hash shortcuts as
   `partition/3`. See `partition/3` for more information.
   """
-  @spec merge([t], Flow.Window.t, Keyword.t) :: t
+  @spec merge([t], Flow.Window.t, keyword()) :: t
   def merge([%Flow{} | _] = flows, %{} = window, options) when is_list(options) do
     options =
       case Keyword.fetch(options, :hash) do
@@ -933,7 +986,7 @@ defmodule Flow do
       end
     %Flow{producers: {:flows, flows}, options: options, window: window}
   end
-  def merge(other, %{} = window, options) when is_list(options) do
+  def merge(other, %{}, options) when is_list(options) do
     raise ArgumentError, "Flow.merge/3 expects a non-empty list of flows as first argument, got: #{inspect other}"
   end
 
