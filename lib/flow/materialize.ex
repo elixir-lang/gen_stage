@@ -97,8 +97,13 @@ defmodule Flow.Materialize do
      left_consumers ++ right_consumers,
      {type, join_ops(kind, join, acc, fun, trigger), ops}}
   end
-  defp start_producers({:flows, [flow]}, ops, options) do
-    {producers, consumers} = materialize(flow, :producer_consumer, partition(options))
+  defp start_producers({:flows, flows}, ops, options) do
+    options = partition(options)
+    {producers, consumers} =
+      Enum.reduce(flows, {[], []}, fn flow, {producers_acc, consumers_acc} ->
+        {producers, consumers} = materialize(flow, :producer_consumer, options)
+        {producers ++ producers_acc, consumers ++ consumers_acc}
+      end)
     {producers, consumers, ensure_ops(ops)}
   end
   defp start_producers({:stages, producers}, ops, options) do

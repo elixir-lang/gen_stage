@@ -161,6 +161,22 @@ defmodule FlowTest do
         |> Flow.map(fn(x) -> x * 2 end)
       assert Enum.sort(flow) == [6, 10, 14]
     end
+
+    test "allows custom windowding" do
+      window =
+        Flow.Window.fixed(1, :seconds, fn
+          x when x <= 50 -> 0
+          x when x <= 100 -> 1_000
+        end)
+
+      windows = Flow.new(window, stages: 4, max_demand: 5)
+                |> Flow.from_enumerable(1..100)
+                |> Flow.reduce(fn -> 0 end, & &1 + &2)
+                |> Flow.emit(:state)
+                |> Enum.to_list()
+      assert length(windows) == 8
+      assert Enum.sum(windows) == 5050
+    end
   end
 
   describe "enumerable-partitioned-stream" do
@@ -343,9 +359,66 @@ defmodule FlowTest do
              |> Flow.map_state(fn acc -> [acc |> Enum.map(& &1.value) |> Enum.sort()] end)
              |> Enum.sort() == [[1, 2, 4, 5], [3, 6]]
     end
+
+    test "allows custom windowding" do
+      window =
+        Flow.Window.fixed(1, :seconds, fn
+          x when x <= 50 -> 0
+          x when x <= 100 -> 1_000
+        end)
+
+      assert Flow.from_enumerable(1..100)
+             |> Flow.partition(window, stages: 4)
+             |> Flow.reduce(fn -> [] end, &[&1 | &2])
+             |> Flow.map_state(&[Enum.sum(&1)])
+             |> Enum.sort() == [173, 361, 364, 377, 797, 865, 895, 1218]
+    end
   end
 
-  describe "bounded join" do
+  defp merged_flows(args) do
+    flow1 =
+      Stream.take_every(1..100, 2)
+      |> Flow.from_enumerable()
+      |> Flow.map(& &1 * 2)
+
+    flow2 =
+      Stream.take_every(2..100, 2)
+      |> Flow.from_enumerable()
+      |> Flow.map(& &1 * 2)
+
+    apply(Flow, :merge, [[flow1, flow2] | args])
+  end
+
+  describe "merge/2" do
+    test "merges different flows together" do
+      assert merged_flows([[stages: 4, min_demand: 5]])
+             |> Flow.reduce(fn -> 0 end, & &1 + &2)
+             |> Flow.emit(:state)
+             |> Enum.sum() == 10100
+    end
+
+    test "allows custom partitioning" do
+      assert merged_flows([[stages: 4, min_demand: 5, hash: fn x, _ -> {x, 0} end]])
+             |> Flow.reduce(fn -> [] end, &[&1 | &2])
+             |> Flow.map_state(&[Enum.sum(&1)])
+             |> Enum.sort() == [0, 0, 0, 10100]
+    end
+
+    test "allows custom windowding" do
+      window =
+        Flow.Window.fixed(1, :seconds, fn
+          x when x <= 100 -> 0
+          x when x <= 200 -> 1_000
+        end)
+
+      assert merged_flows([window, [stages: 4, min_demand: 5]])
+             |> Flow.reduce(fn -> [] end, &[&1 | &2])
+             |> Flow.map_state(&[Enum.sum(&1)])
+             |> Enum.sort() == [594, 596, 654, 706, 1248, 1964, 2066, 2272]
+    end
+  end
+
+  describe "bounded_join/7" do
     test "inner joins two matching flows" do
       assert Flow.bounded_join(:inner,
                                Flow.from_enumerable([0, 1, 2, 3]),

@@ -869,12 +869,72 @@ defmodule Flow do
   """
   @spec partition(t, Flow.Window.t, Keyword.t) :: t
   def partition(flow, %{} = window, options) when is_list(options) do
+    merge([flow], window, options)
+  end
+
+  @doc """
+  Merges the given flows in a new partition.
+
+  It is a shortcut for:
+
+      Flow.merge(flows, Flow.Window.global, [])
+
+  See `merge/3`.
+
+  ## Exaples
+
+      Flow.merge([flow1, flow2])
+
+  """
+  @spec merge([t]) :: t
+  def merge(flows) do
+    merge(flows, Flow.Window.global, [])
+  end
+
+  @doc """
+  Merges the given flows in a new partition with the given window or options.
+
+  See `merge/3`.
+
+  ## Exaples
+
+      Flow.merge([flow1, flow2], Flow.Global.window)
+      Flow.merge([flow1, flow2], stages: 4)
+  """
+  @spec merge(t, Flow.Window.t | Keyword.t) :: t
+  def merge(flows, %{} = window) do
+    merge(flows, window, [])
+  end
+  def merge(flows, options) when is_list(options) do
+    merge(flows, Flow.Window.global, options)
+  end
+
+  @doc """
+  Merges the given flow into a new partition with the given
+  window and options.
+
+  Every time this function is called, a new partition
+  is created. It is typically recommended to invoke it
+  before a reducing function, such as `reduce/3`, so data
+  belonging to the same partition can be kept together.
+  The `window` parameter is a `Flow.Window` struct which
+  controls how the reducing function behaves, see
+  `Flow.Window` for more information.
+
+  It accepts the same options and hash shortcuts as
+  `partition/3`. See `partition/3` for more information.
+  """
+  @spec merge([t], Flow.Window.t, Keyword.t) :: t
+  def merge([%Flow{} | _] = flows, %{} = window, options) when is_list(options) do
     options =
       case Keyword.fetch(options, :hash) do
         {:ok, hash} -> Keyword.put(options, :hash, hash(hash))
         :error -> options
       end
-    %Flow{producers: {:flows, [flow]}, options: options, window: window}
+    %Flow{producers: {:flows, flows}, options: options, window: window}
+  end
+  def merge(other, %{} = window, options) when is_list(options) do
+    raise ArgumentError, "Flow.merge/3 expects a non-empty list of flows as first argument, got: #{inspect other}"
   end
 
   defp hash(fun) when is_function(fun, 2) do
