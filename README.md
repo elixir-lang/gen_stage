@@ -36,26 +36,11 @@ GenStage requires Elixir v1.3.
           [applications: [:gen_stage]]
         end
 
-## Future research
+## Future integration
 
 Here is a list of potential topics to be explored by this project (in no particular order or guarantee):
 
   * Consider using DynamicSupervisor to implement Task.Supervisor (as a consumer)
-
-  * TCP and UDP acceptors as producers
-
-  * Explore different windowing strategies - the ideas behind the Apache Beam project are interesting, specially the mechanism that divides operations between what/where/when/how (1, 2) as well as windowing from the perspective of aggregation (3)
-
-Other research topics include the Titan (4), Naiad's Differential Dataflow engine (5) and Lasp (6).
-
-### Links
-
-  1. https://cloud.google.com/blog/big-data/2016/05/why-apache-beam-a-google-perspective
-  2. http://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf
-  3. http://www.vldb.org/pvldb/vol8/p702-tangwongsan.pdf
-  4. http://asc.di.fct.unl.pt/~nmp/pubs/clouddp-2013.pdf
-  5. http://research-srv.microsoft.com/pubs/176693/differentialdataflow.pdf
-  6. https://lasp-lang.org/
 
 ## License
 
