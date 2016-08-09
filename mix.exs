@@ -1,7 +1,7 @@
 defmodule GenStage.Mixfile do
   use Mix.Project
 
-  @version "0.4.3"
+  @version "0.5.0"
 
   def project do
     [app: :gen_stage,

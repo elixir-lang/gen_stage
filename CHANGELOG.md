@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.0 (2016-08-09)
+
+This release moves `Flow` from under the `GenStage` namespace and into `Experimental.Flow`.
+
+### Enhancements
+
+  * Add `Flow.uniq/2` and `Flow.uniq_by/2`
+  * Add `Flow.start_link/2` and `Flow.into_stages/3`
+  * Add `Flow.window_join/8`
+  * Unify window and partition APIs
+  * Support `Flow.Window.global/0` and `Flow.Window.fixed/3`
+
 ## v0.4.3 (2016-07-28)
 
 ### Enhancements
