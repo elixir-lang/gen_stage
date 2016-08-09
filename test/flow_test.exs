@@ -20,6 +20,19 @@ defmodule FlowTest do
     end
   end
 
+  defmodule Forwarder do
+    use GenStage
+
+    def init(parent) do
+      {:consumer, parent}
+    end
+
+    def handle_events(events, _from, parent) do
+      send parent, {:consumed, events}
+      {:noreply, [], parent}
+    end
+  end
+
   describe "errors" do
     test "on flow without producer" do
       assert_raise ArgumentError, ~r"cannot execute a flow without producers", fn ->
@@ -108,6 +121,33 @@ defmodule FlowTest do
         |> Flow.map(fn(x) -> x * 2 end)
       assert Enum.sort(flow) == [6, 10, 14]
     end
+
+    test "start_link/2" do
+      parent = self()
+
+      {:ok, _} =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.each(&send(parent, &1))
+        |> Flow.start_link()
+
+      assert_receive 2
+      assert_receive 4
+      assert_receive 6
+      refute_received 1
+    end
+
+    test "into_stages/3" do
+      {:ok, forwarder} = GenStage.start_link(Forwarder, self())
+
+      {:ok, _} =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.into_stages([forwarder])
+
+      assert_receive {:consumed, [2]}
+      assert_receive {:consumed, [4, 6]}
+    end
   end
 
   describe "enumerable-unpartioned-stream" do
@@ -184,6 +224,33 @@ defmodule FlowTest do
                 |> Enum.to_list()
       assert length(windows) == 8
       assert Enum.sum(windows) == 5050
+    end
+
+    test "start_link/2" do
+      parent = self()
+
+      {:ok, _} =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.each(&send(parent, &1))
+        |> Flow.start_link()
+
+      assert_receive 2
+      assert_receive 4
+      assert_receive 6
+      refute_received 1
+    end
+
+    test "into_stages/3" do
+      {:ok, forwarder} = GenStage.start_link(Forwarder, self())
+
+      {:ok, _} =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.into_stages([forwarder])
+
+      assert_receive {:consumed, [2]}
+      assert_receive {:consumed, [4, 6]}
     end
   end
 
@@ -293,6 +360,36 @@ defmodule FlowTest do
                                  {{1, 4}, [22]},
                                  {{2, 4}, []},
                                  {{3, 4}, [10]}]
+    end
+
+    test "start_link/2" do
+      parent = self()
+
+      {:ok, _} =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.each(&send(parent, &1))
+        |> Flow.start_link()
+
+      assert_receive 2
+      assert_receive 4
+      assert_receive 6
+      refute_received 1
+    end
+
+    test "into_stages/3" do
+      {:ok, forwarder} = GenStage.start_link(Forwarder, self())
+
+      {:ok, _} =
+        @flow
+        |> Flow.filter(&rem(&1, 2) == 0)
+        |> Flow.into_stages([forwarder])
+
+      assert_receive {:consumed, [2]}
+      assert_receive {:consumed, [4]}
+      assert_receive {:consumed, [6]}
+      assert_receive {:consumed, '\b'}
+      assert_receive {:consumed, '\n'}
     end
   end
 

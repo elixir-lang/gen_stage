@@ -985,6 +985,9 @@ defmodule GenStage do
       to either an empty list or the list of actual producers so they
       receive the proper notification message.
 
+    * `:demand` - the demand to set on the producers specified above.
+      Defaults to `:forward` but may be set to `:accumulate`
+
   ## Known limitations
 
   ### from_enumerable
@@ -1024,10 +1027,10 @@ defmodule GenStage do
     raise ArgumentError, "GenStage.stream/1 expects a list of subscriptions, got: #{inspect subscriptions}"
   end
 
-  defp stream_validate_opts({to, full_opts}) when is_list(full_opts) do
-    with {:ok, cancel, opts} <- validate_in(full_opts, :cancel, :permanent, [:temporary, :permanent]),
-         {:ok, max, opts} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
-         {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
+  defp stream_validate_opts({to, opts}) when is_list(opts) do
+    with {:ok, cancel, _} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
+         {:ok, max, _} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
+         {:ok, min, _} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
       {to, cancel, min, max, opts}
     else
       {:error, message} ->
@@ -1037,6 +1040,26 @@ defmodule GenStage do
 
   defp stream_validate_opts(to) do
     stream_validate_opts({to, []})
+  end
+
+  defp init_stream(subscriptions, options) do
+    parent = self()
+
+    {monitor_pid, monitor_ref} =
+      spawn_monitor(fn -> init_monitor(parent, subscriptions) end)
+    send(monitor_pid, {parent, monitor_ref})
+
+    receive do
+      {:DOWN, ^monitor_ref, _, _, reason} ->
+        exit(reason)
+      {^monitor_ref, {:subscriptions, subscriptions}} ->
+        producers = options[:producers] || Enum.map(subscriptions, fn
+          {_, {:subscribed, pid, _, _, _, _}} -> pid
+        end)
+        demand = options[:demand] || :forward
+        for pid <- producers, do: demand(pid, demand)
+        {:receive, monitor_ref, subscriptions}
+    end
   end
 
   defp init_monitor(parent, subscriptions) do
@@ -1077,28 +1100,9 @@ defmodule GenStage do
         exit(reason)
       {:DOWN, ref, _, _, reason} ->
         if ref in keys do
-          send(parent, {{monitor_ref, ref}, {:down, reason}})
+          send(parent, {monitor_ref, {:DOWN, ref, reason}})
         end
         loop_monitor(parent, parent_ref, monitor_ref, keys -- [ref])
-    end
-  end
-
-  defp init_stream(subscriptions, options) do
-    parent = self()
-
-    {monitor_pid, monitor_ref} =
-      spawn_monitor(fn -> init_monitor(parent, subscriptions) end)
-    send(monitor_pid, {parent, monitor_ref})
-
-    receive do
-      {:DOWN, ^monitor_ref, _, _, reason} ->
-        exit(reason)
-      {^monitor_ref, {:subscriptions, subscriptions}} ->
-        producers = options[:producers] || Enum.map(subscriptions, fn
-          {_, {:subscribed, pid, _, _, _, _}} -> pid
-        end)
-        for pid <- producers, do: demand(pid, :forward)
-        {:receive, monitor_ref, subscriptions}
     end
   end
 
@@ -1158,7 +1162,7 @@ defmodule GenStage do
       {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, _} = reason} ->
         cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
 
-      {{^monitor_ref, inner_ref}, {:down, reason}} ->
+      {^monitor_ref, {:DOWN, inner_ref, reason}} ->
         cancel_stream(inner_ref, reason, monitor_ref, subscriptions)
     end
   end
@@ -1921,16 +1925,16 @@ defmodule GenStage do
     {:reply, {:error, :not_a_consumer}, stage}
   end
 
-  defp consumer_subscribe(to, full_opts, stage) do
-    with {:ok, cancel, opts} <- validate_in(full_opts, :cancel, :permanent, [:temporary, :permanent]),
-         {:ok, max, opts} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
-         {:ok, min, opts} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
+  defp consumer_subscribe(to, opts, stage) do
+    with {:ok, cancel, _} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
+         {:ok, max, _} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
+         {:ok, min, _} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
       producer_pid = GenServer.whereis(to)
       cond do
         producer_pid != nil ->
           ref = Process.monitor(producer_pid)
           send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}})
-          consumer_subscribe(full_opts, ref, producer_pid, cancel, min, max, stage)
+          consumer_subscribe(opts, ref, producer_pid, cancel, min, max, stage)
         cancel == :temporary ->
           {:reply, {:ok, make_ref()}, stage}
         cancel == :permanent ->

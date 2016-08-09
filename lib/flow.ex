@@ -736,25 +736,41 @@ defmodule Flow do
   end
 
   @doc """
+  Starts and runs the flow as a separate process.
+
+  See `into_stages/3` in case you want the flow to
+  work as a producer for another series of stages.
+
   ## Options
 
     * `:dispatcher` - the dispatcher responsible for handling demands.
       Defaults to `GenStage.DemandDispatch`. May be either an atom or
       a tuple with the dispatcher and the dispatcher options
 
-    * `:demand` - configures the demand to `:forward` or `:accumulate`
-      mode. The default is `:forward`. See `demand/2` for more information.
+    * `:demand` - configures the demand on the flow producers to `:forward`
+      or `:accumulate`. The default is `:forward`. See `GenStage.demand/2`
+      for more information.
 
   """
-  @spec start_link(t, :producer_consumer | :consumer, keyword()) :: GenServer.on_start
-  def start_link(flow, type, options \\ [])
-
-  def start_link(flow, :producer_consumer, options) do
-    GenServer.start_link(Flow.Coordinator, {flow, :producer_consumer, options}, options)
+  @spec start_link(t, keyword()) :: GenServer.on_start
+  def start_link(flow, options \\ []) do
+    GenServer.start_link(Flow.Coordinator, {emit(flow, :nothing), :consumer, [], options}, options)
   end
 
-  def start_link(flow, :consumer, options) do
-    GenServer.start_link(Flow.Coordinator, {emit(flow, :nothing), :consumer, options}, options)
+  @doc """
+  Starts and runs the flow as a separate process which
+  will be a producer to the given `consumers`.
+
+  It expects a list of consumers to subscribe to. Each element
+  represents the consumer or a tuple with the consumer and the
+  subscription options as defined in `GenStage.sync_subscribe/2`.
+
+  Receives the same options as `start_link/2`.
+  """
+  @spec into_stages(t, consumers, keyword()) :: GenServer.on_start when
+        consumers: [GenStage.stage | {GenStage.stage, keyword()}]
+  def into_stages(flow, consumers, options \\ []) do
+    GenServer.start_link(Flow.Coordinator, {flow, :producer_consumer, consumers, options}, options)
   end
 
   ## Mappers
