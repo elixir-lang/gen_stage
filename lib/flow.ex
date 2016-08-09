@@ -730,20 +730,32 @@ defmodule Flow do
 
   """
   @spec run(t) :: :ok
-  def run(%{operations: operations} = flow) do
-    case inject_to_run(operations) do
-      :map_state ->
-        [] = flow |> map_state(fn _, _, _ -> [] end) |> Enum.to_list()
-      :reduce ->
-        [] = flow |> reduce(fn -> [] end, fn _, acc -> acc end) |> Enum.to_list()
-    end
+  def run(flow) do
+    [] = flow |> emit(:nothing) |> Enum.to_list()
     :ok
   end
 
-  defp inject_to_run([{:reduce, _, _} | _]), do: :map_state
-  defp inject_to_run([{:partition, _} | _]), do: :reduce
-  defp inject_to_run([_ | ops]), do: inject_to_run(ops)
-  defp inject_to_run([]), do: :reduce
+  @doc """
+  ## Options
+
+    * `:dispatcher` - the dispatcher responsible for handling demands.
+      Defaults to `GenStage.DemandDispatch`. May be either an atom or
+      a tuple with the dispatcher and the dispatcher options
+
+    * `:demand` - configures the demand to `:forward` or `:accumulate`
+      mode. The default is `:forward`. See `demand/2` for more information.
+
+  """
+  @spec start_link(t, :producer_consumer | :consumer, keyword()) :: GenServer.on_start
+  def start_link(flow, type, options \\ [])
+
+  def start_link(flow, :producer_consumer, options) do
+    GenServer.start_link(Flow.Coordinator, {flow, :producer_consumer, options}, options)
+  end
+
+  def start_link(flow, :consumer, options) do
+    GenServer.start_link(Flow.Coordinator, {emit(flow, :nothing), :consumer, options}, options)
+  end
 
   ## Mappers
 
@@ -1087,7 +1099,7 @@ defmodule Flow do
       iex> flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
       [1, 2]
 
-  Since we have used only one stages when partitioning, we
+  Since we have used only one stage when partitioning, we
   correctly calculate `[1, 2]` for the given partition. Let's see
   what happens when we increase the number of stages in the partition:
 
@@ -1132,9 +1144,19 @@ defmodule Flow do
   def emit(flow, :state) do
     map_state(flow, fn acc, _, _ -> [acc] end)
   end
+  def emit(%{operations: operations} = flow, :nothing) do
+    case inject_to_nothing(operations) do
+      :map_state -> map_state(flow, fn _, _, _ -> [] end)
+      :reduce -> reduce(flow, fn -> [] end, fn _, acc -> acc end)
+    end
+  end
   def emit(_, emit) do
     raise ArgumentError, "unknown option for emit: #{inspect emit}"
   end
+
+  defp inject_to_nothing([{:reduce, _, _} | _]), do: :map_state
+  defp inject_to_nothing([_ | ops]), do: inject_to_nothing(ops)
+  defp inject_to_nothing([]), do: :reduce
 
   @doc """
   Applies the given function over the window state.
@@ -1246,7 +1268,8 @@ defmodule Flow do
 
   defimpl Enumerable do
     def reduce(flow, acc, fun) do
-      {producers, consumers} = Flow.Materialize.materialize(flow, :producer_consumer, [])
+      {producers, consumers} =
+        Flow.Materialize.materialize(flow, &GenStage.start_link/3, :producer_consumer, [])
       pids = for {pid, _} <- producers, do: pid
       GenStage.stream(consumers, producers: pids).(acc, fun)
     end
