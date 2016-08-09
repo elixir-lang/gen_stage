@@ -120,6 +120,8 @@ defmodule GenStage.PartitionDispatcherTest do
     assert {_, _, 0, 0, _, _} = disp
     refute_received {:"$gen_consumer", {_, ^ref0}, _}
 
+    # The notification should not count as an event
+    {:ok, disp} = D.notify(:hello, disp)
     {:ok, 5, disp} = D.cancel({pid0, ref0}, disp)
     assert {_, _, 5, 0, _, _} = disp
   end

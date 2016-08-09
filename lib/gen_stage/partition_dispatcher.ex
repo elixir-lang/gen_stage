@@ -80,7 +80,7 @@ defmodule GenStage.PartitionDispatcher do
       demand when is_integer(demand) ->
         {:ok, 0, {tag, hash, waiting, pending + demand, partitions, references}}
       queue ->
-        length = :queue.len(queue) # TODO: Do not count notifications
+        length = count_from_queue(queue, tag, 0)
         {:ok, length, {tag, hash, waiting + length, pending, partitions, references}}
     end
   end
@@ -118,6 +118,17 @@ defmodule GenStage.PartitionDispatcher do
         send_from_queue(queue, tag, pid, ref, counter - 1, [event | acc])
       {:empty, _queue} ->
         maybe_send(acc, pid, ref)
+        counter
+    end
+  end
+
+  defp count_from_queue(queue, tag, counter) do
+    case :queue.out(queue) do
+      {{:value, {^tag, _}}, queue} ->
+        count_from_queue(queue, tag, counter)
+      {{:value, _}, queue} ->
+        count_from_queue(queue, tag, counter + 1)
+      {:empty, _queue} ->
         counter
     end
   end

@@ -257,8 +257,8 @@ defmodule Flow do
 
   In the examples so far we have started a flow dynamically
   and consumed it using `Enum.to_list/1`. Unfortunately calling
-  a function from `Enum` will cause the computed dataset to be
-  sent to a single process.
+  a function from `Enum` will cause the whole computed dataset
+  to be sent to a single process.
 
   In many situations, this is either too expensive or completely
   undesired. For example, in data-processing pipelines, it is
@@ -267,11 +267,10 @@ defmodule Flow do
   processed, without a need to be sent to a single process.
 
   Flow allows computations to be started as a group of processes
-  which may run indefinitely.
-
-  TODO: Add an example with start_link/1. Talk about hot code
-  swaps and anonymous functions. Talk about attaching your own
-  producer.
+  which may run indefinitely. Such can can be done by starting
+  the flow as part of a supervision tree using `Flow.start_link/2`.
+  `Flow.into_stages/3` can also be used to start the flow as a
+  linked process which will send the events to a given consumers.
 
   ## Performance discussions
 
