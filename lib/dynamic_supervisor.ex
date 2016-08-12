@@ -19,7 +19,7 @@ defmodule DynamicSupervisor do
 
   ## Example
 
-  Before we start our dymamic supervisor, let's first build an agent
+  Before we start our dynamic supervisor, let's first build an agent
   that represents a stack. That's the process we will start dynamically:
 
       defmodule Stack do
