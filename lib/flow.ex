@@ -267,7 +267,7 @@ defmodule Flow do
   processed, without a need to be sent to a single process.
 
   Flow allows computations to be started as a group of processes
-  which may run indefinitely. Such can can be done by starting
+  which may run indefinitely. Such can be done by starting
   the flow as part of a supervision tree using `Flow.start_link/2`.
   `Flow.into_stages/3` can also be used to start the flow as a
   linked process which will send the events to a given consumers.
