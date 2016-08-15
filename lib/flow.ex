@@ -10,13 +10,24 @@ defmodule Flow do
   multiple `GenStage`s.
 
   Flow was also designed to work with both bounded (finite)
-  and unbounded (infinite) data. Allowing the data to be
-  partitioned into arbitrary windows which are materialized
-  at different triggers.
+  and unbounded (infinite) data. By default, Flow will work
+  with batches of 500 items. This means flow will only show
+  improvements when working with larger collections. However,
+  for certain cases like IO-bound flows, a smaller batch size
+  can be configured through the `:min_demand` and `:max_demand`
+  options supported by `new/2` or `partition/3`.
+
+  Flow also provides the concept of windows and triggers,
+  allowing developers to split the data into arbitrary
+  windows according to event time. Triggers allow computations
+  to be materialized at different intervals, allowing developers
+  to peek at results as they are computed.
 
   **Note:** this module is currently namespaced under
   `Experimental.Flow`. You will need to `alias Experimental.Flow`
   before writing the examples below.
+
+  ## Example
 
   As an example, let's implement the classical word counting
   algorithm using flow. The word counting program will receive
@@ -122,7 +133,7 @@ defmodule Flow do
        {"blue", 1}]
 
   Although both stages have performed word counting, we have words
-  like "are" that appears on both stages. This means we would need
+  like "are" that appear on both stages. This means we would need
   to perform yet another pass on the data merging the duplicated
   words accross stages.
 
@@ -327,14 +338,14 @@ defmodule Flow do
   Both `new/2` and `partition/3` allows a set of options to configure
   how flows work. In particular, we recommend developers to play with
   the `:min_demand` and `:max_demand` options, which control the amount
-  of data sent between stages. The difference between max_demand and
-  min_demand works as the batch size when the producer is full. If the
-  producer has less events than the batch size, its current events are
-  sent.
+  of data sent between stages. The difference between `max_demand` and
+  `min_demand` works as the batch size when the producer is full. If the
+  producer has less events than asked by consumers, it usually sends the
+  remaining events available.
 
-  If stages may perform IO computations, we also recommend increasing
+  If stages may perform IO computations, it may also be worth to increase
   the number of stages. The default value is `System.schedulers_online/0`,
-  which is a good default if the stages are CPU bound, however, if stages
+  which is a good default if the stages are CPU bound. However, if stages
   are waiting on external resources or other processes, increasing the
   number of stages may be helpful.
 
