@@ -199,7 +199,7 @@ defmodule GenStage do
   `GenStage` is implemented on top of a `GenServer` with two additions.
   Besides exposing all of the `GenServer` callbacks, it also provides
   `handle_demand/2` to be implemented by producers and `handle_events/3`
-  to be implemented by consumers, as shown above. Futhermore, all the
+  to be implemented by consumers, as shown above. Furthermore, all the
   callback responses have been modified to potentially emit events.
   See the callbacks documentation for more information.
 
