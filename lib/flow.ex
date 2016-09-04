@@ -11,14 +11,14 @@ defmodule Flow do
 
   Flow was also designed to work with both bounded (finite)
   and unbounded (infinite) data. By default, Flow will work
-  with batches of 500 items. This means flow will only show
+  with batches of 500 items. This means Flow will only show
   improvements when working with larger collections. However,
-  for certain cases like IO-bound flows, a smaller batch size
+  for certain cases, such as IO-bound flows, a smaller batch size
   can be configured through the `:min_demand` and `:max_demand`
   options supported by `new/2` or `partition/3`.
 
-  Flow also provides the concept of windows and triggers,
-  allowing developers to split the data into arbitrary
+  Flow also provides the concepts of "windows" and "triggers",
+  which allow developers to split the data into arbitrary
   windows according to event time. Triggers allow computations
   to be materialized at different intervals, allowing developers
   to peek at results as they are computed.
@@ -29,7 +29,7 @@ defmodule Flow do
 
   ## Example
 
-  As an example, let's implement the classical word counting
+  As an example, let's implement the classic word counting
   algorithm using flow. The word counting program will receive
   one file and count how many times each word appears in the
   document. Using the `Enum` module it could be implemented
@@ -42,7 +42,7 @@ defmodule Flow do
       end)
       |> Enum.to_list()
 
-  Unfortunately the implementation above is not quite efficient
+  Unfortunately, the implementation above is not very efficient
   as `Enum.flat_map/2` will build a list with all the words in
   the document before reducing it. If the document is, for example,
   2GB, we will load 2GB of data into memory.
@@ -71,18 +71,18 @@ defmodule Flow do
       end)
       |> Enum.to_list()
 
-  To convert from stream to flow, we have done two changes:
+  To convert from Stream to Flow, we have made two changes:
 
-    1. We have replaced the calls to `Stream` by `Flow`
-    2. We called `partition/1` so words are properly partitioned between stages
+    1. We have replaced the calls to `Stream` with `Flow`
+    2. We call `partition/1` so words are properly partitioned between stages
 
-  The example above will now use all cores available as well
-  as keep an on going flow of data instead of traversing them
+  The example above will use all available cores and will
+  keep an ongoing flow of data instead of traversing them
   line by line. Once all data is computed, it is sent to the
   process which invoked `Enum.to_list/1`.
 
-  While we gain concurrency by using flow, many of the benefits
-  in using flow is in the partioning the data. We will discuss
+  While we gain concurrency by using Flow, many of the benefits
+  of Flow are in partioning the data. We will discuss
   the need for data partioning next.
 
   ## Partitioning
@@ -99,7 +99,7 @@ defmodule Flow do
       end)
       |> Enum.to_list()
 
-  The example above will execute the `flat_map` and `reduce`
+  This will execute the `flat_map` and `reduce`
   operations in parallel inside multiple stages. When running
   on a machine with two cores:
 
@@ -118,12 +118,12 @@ defmodule Flow do
       M1 - ["roses", "are", "red"]
       M2 - ["violets", "are", "blue"]
 
-  Then `reduce/3` will make each stage have the following state:
+  Then `reduce/3` will result in each stage having the following state:
 
       M1 - %{"roses" => 1, "are" => 1, "red" => 1}
       M2 - %{"violets" => 1, "are" => 1, "blue" => 1}
 
-  Which is converted to the list (in no particular ordering):
+  Which is converted to the list (in no particular order):
 
       [{"roses", 1},
        {"are", 1},
@@ -168,9 +168,9 @@ defmodule Flow do
       M1 - ["roses", "are", "red"]
       M2 - ["violets", "are", "blue"]
 
-  Now any given word will be consistently routed to `R1` or `R2`
+  Now, any given word will be consistently routed to `R1` or `R2`
   regardless of its origin. The default hashing function will route
-  them such as:
+  them like this:
 
       R1 - ["roses", "are", "red", "are"]
       R2 - ["violets", "blue"]
@@ -180,7 +180,7 @@ defmodule Flow do
       R1 - %{"roses" => 1, "are" => 2, "red" => 1}
       R2 - %{"violets" => 1, "blue" => 1}
 
-  Which is converted to the list (in no particular ordering):
+  Which is converted to the list (in no particular order):
 
       [{"roses", 1},
        {"are", 2},
@@ -188,14 +188,14 @@ defmodule Flow do
        {"violets", 1},
        {"blue", 1}]
 
-  In a way that each stage has a distinct subset of the data.
-  This way, we know we don't need to merge the data later on
-  as the word in each stage is guaranteed to be unique.
+  Each stage has a distinct subset of the data so we know
+  that we don't need to merge the data later on, because a given
+  word is guaranteed to have only been routed to one stage.
 
   Partioning the data is a very useful technique. For example,
-  if we want to count the number of unique elements in a dataset,
-  we could perform such count in each partition and then later
-  sum their results as the partitioning guarantees the data on
+  if we wanted to count the number of unique elements in a dataset,
+  we could perform such a count in each partition and then sum
+  their results, as the partitioning guarantees the data in
   each partition won't overlap. A unique element would never
   be counted twice.
 
@@ -216,18 +216,18 @@ defmodule Flow do
   break line by line into words without any need for coordination.
 
   However, the reducing stage is a bit more complicated. Reducer
-  stages typically aggregate some result based on its inputs, such
-  as how many times a word have appeared. This implies reducer
+  stages typically aggregate some result based on their inputs, such
+  as how many times a word has appeared. This implies reducer
   computations need to traverse the whole data set and, in order
   to do so in parallel, we partition the data into distinct
   datasets.
 
   The goal of the `reduce/3` operation is to accumulate a value
   which then becomes the partition state. Any operation that
-  happens after `reduce/3` work on the whole state and are only
+  happens after `reduce/3` works on the whole state and is only
   executed after all the data for a partition is collected.
 
-  While this approach works great for bounded (finite) data, it
+  While this approach works well for bounded (finite) data, it
   is quite limited for unbounded (infinite) data. After all, if
   the reduce operation needs to traverse the whole partition to
   complete, how can we do so if the data never finishes?
@@ -238,7 +238,7 @@ defmodule Flow do
   ## Data completion, windows and triggers
 
   When working with an unbounded stream of data, there is no such thing
-  as data completion. Therefore when can we consider a reduce function
+  as data completion. So when can we consider a reduce function
   to be "completed"?
 
   To handle such cases, Flow provides windows and triggers. Windows
@@ -248,18 +248,18 @@ defmodule Flow do
   across stages. Instead each event belongs to a window and the window
   is partitioned across the stages.
 
-  By default all events belong to the same window, called global
-  window, which is partitioned across stages. However different
-  windowing strategies may be used by building a `Flow.Window`
+  By default, all events belong to the same window (called the global
+  window) which is partitioned across stages. However, different
+  windowing strategies can be used by building a `Flow.Window`
   and passing it to the `Flow.partition/3` function.
 
-  Once a window is specified, we can build triggers that tells us
+  Once a window is specified, we can create triggers that tell us
   when to checkpoint the data, allowing us to report our progress
   while the data streams through the system, regardless if the data
-  is bounded (finite) or unbounded (infinite).
+  is bounded or unbounded.
 
   Windows and triggers effectively control how the `reduce/3` function
-  work. `reduce/3/` is invoked per window while a trigger configures
+  works. `reduce/3/` is invoked per window while a trigger configures
   when `reduce/3` halts so we can checkpoint the data before resuming
   the computation with an old or new accumulator. See `Flow.Window`
   for a complete introduction into windows and triggers.
@@ -272,16 +272,16 @@ defmodule Flow do
   to be sent to a single process.
 
   In many situations, this is either too expensive or completely
-  undesired. For example, in data-processing pipelines, it is
-  common to constantly receive data from external sources. This
-  data is either written to disk or to another storage after
-  processed, without a need to be sent to a single process.
+  undesirable. For example, in data-processing pipelines, it is
+  common to receive data continuously from external sources. This
+  data is written to disk or other storage mechanism after being
+  processed, rather than being sent to a single process.
 
   Flow allows computations to be started as a group of processes
-  which may run indefinitely. Such can be done by starting
+  which may run indefinitely. This can be done by starting
   the flow as part of a supervision tree using `Flow.start_link/2`.
   `Flow.into_stages/3` can also be used to start the flow as a
-  linked process which will send the events to a given consumers.
+  linked process which will send the events to a given consumer.
 
   ## Performance discussions
 
@@ -292,7 +292,7 @@ defmodule Flow do
 
   There are many optimizations we could perform in the flow above
   that are not necessarily related to flows themselves. Let's rewrite
-  the flow above using some of them:
+  the flow using some of them:
 
       alias Experimental.Flow
 
@@ -326,26 +326,26 @@ defmodule Flow do
       reading large chunks of data at once
 
     * ETS - the third stores the data in a ETS table and uses its counter
-      operations. For counters and large dataset this provide a great
+      operations. For counters and a large dataset this provides a great
       performance benefit as it generates less garbage. At the end, we
       call `map_state/2` to transfer the ETS table to the parent process
       and wrap the table in a list so we can access it on `Enum.to_list/1`.
-      Such step is not strictly required. For example, one could write the
+      This step is not strictly required. For example, one could write the
       table to disk with `:ets.tab2file/2` at the end of the computation
 
   ### Configuration (demand and the number of stages)
 
-  Both `new/2` and `partition/3` allows a set of options to configure
-  how flows work. In particular, we recommend developers to play with
+  Both `new/2` and `partition/3` allow a set of options to configure
+  how flows work. In particular, we recommend that developers play with
   the `:min_demand` and `:max_demand` options, which control the amount
   of data sent between stages. The difference between `max_demand` and
   `min_demand` works as the batch size when the producer is full. If the
-  producer has less events than asked by consumers, it usually sends the
+  producer has fewer events than requested by consumers, it usually sends the
   remaining events available.
 
-  If stages may perform IO computations, it may also be worth to increase
+  If stages perform IO, it may also be worth increasing
   the number of stages. The default value is `System.schedulers_online/0`,
-  which is a good default if the stages are CPU bound. However, if stages
+  which is a good default if the stages are CPU bound, but if stages
   are waiting on external resources or other processes, increasing the
   number of stages may be helpful.
 
@@ -353,7 +353,7 @@ defmodule Flow do
 
   In the examples so far we have used a single file as our data
   source. In practice such should be avoided as the source could
-  end-up being the bottleneck of our whole computation.
+  end up being the bottleneck of our whole computation.
 
   In the file stream case above, instead of having one single
   large file, it is preferrable to break the file into smaller
@@ -377,8 +377,8 @@ defmodule Flow do
   option which tells Elixir to buffer file data in memory to
   avoid multiple IO lookups.
 
-  If the number of enumerables is equal to or more than the number of
-  cores, flow will automatically fuse the enumerables with the mapper
+  If the number of enumerables is equal to or greater than the number of
+  cores, Flow will automatically fuse the enumerables with the mapper
   logic. For example, if three file streams are given as enumerables
   to a machine with two cores, we will have the following topology:
 
