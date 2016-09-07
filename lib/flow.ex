@@ -135,7 +135,7 @@ defmodule Flow do
   Although both stages have performed word counting, we have words
   like "are" that appear on both stages. This means we would need
   to perform yet another pass on the data merging the duplicated
-  words accross stages.
+  words across stages.
 
   Partioning solves this by introducing a new set of stages and
   making sure the same word is always mapped to the same stage
@@ -259,7 +259,7 @@ defmodule Flow do
   is bounded or unbounded.
 
   Windows and triggers effectively control how the `reduce/3` function
-  works. `reduce/3/` is invoked per window while a trigger configures
+  works. `reduce/3` is invoked per window while a trigger configures
   when `reduce/3` halts so we can checkpoint the data before resuming
   the computation with an old or new accumulator. See `Flow.Window`
   for a complete introduction into windows and triggers.
@@ -1054,10 +1054,10 @@ defmodule Flow do
   @doc """
   Reduces the given values with the given accumulator.
 
-  `acc` is a function that receives no arguments and returns
-  the actual accumulator. The `acc` function is invoked per window
+  `acc_fun` is a function that receives no arguments and returns
+  the actual accumulator. The `acc_fun` function is invoked per window
   whenever a new window starts. If a trigger is emitted and it is
-  configured to reset the accumulator, the `acc` function will
+  configured to reset the accumulator, the `acc_fun` function will
   be invoked once again.
 
   Reducing will accumulate data until the a trigger is emitted
@@ -1152,7 +1152,7 @@ defmodule Flow do
   @doc """
   Controls which values should be emitted from now.
 
-  It can either be `:events` (the default)  or the current
+  It can either be `:events` (the default) or the current
   stage state as `:state`. This step must be called after
   the reduce operation and it will guarantee the state is
   a list that can be sent downstream.

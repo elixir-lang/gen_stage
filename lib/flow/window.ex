@@ -10,7 +10,7 @@ defmodule Flow.Window do
   window is materialized.
 
   Windows must be created by calling one of the window type functions.
-  There is currently two window types:
+  There are currently two window types:
 
     * Global windows - that's the default window which means all data
       belongs to one single window. In other words, the data is not
@@ -78,7 +78,7 @@ defmodule Flow.Window do
   given to `map_state/2` and `each_state/2`.
 
   For every emitted trigger, developers have the choice of either
-  reseting the reducer accumulator (`:reset`) or keeping it as is (`:keep`).
+  resetting the reducer accumulator (`:reset`) or keeping it as is (`:keep`).
   The resetting option is useful when you are interested only on intermediate
   results, usually because another step is aggregating the data. Keeping the
   accumulator is the default and used to checkpoint the values while still
@@ -162,7 +162,7 @@ defmodule Flow.Window do
 
   Notice that now the first map did not count the "elixir" word twice.
   Since the event arrived late, it was marked as lost. However, in many
-  flows we actually expect data to arrive late, specially when talking
+  flows we actually expect data to arrive late, especially when talking
   about concurrent data processing.
 
   Luckily fixed windows include the concept of lateness, which is a
