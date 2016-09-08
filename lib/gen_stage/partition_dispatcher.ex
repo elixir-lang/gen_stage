@@ -16,9 +16,9 @@ defmodule GenStage.PartitionDispatcher do
       of partitions we will dispatch to
 
     * `:hash` - the hashing algorithm, defaults to `:erlang.phash2/2`
-      which receives the message and the number of partitions and
-      it must the event to be dispatched and a number between 0 and
-      `number_of_partitions - 1`
+      which receives the message and the number of partitions. The function
+      must take as arguments the event to be dispatched and a
+      number between 0 and `number_of_partitions - 1`
   """
 
   @behaviour GenStage.Dispatcher

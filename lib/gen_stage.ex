@@ -28,7 +28,7 @@ defmodule GenStage do
 
     * A is only a producer (and therefore a source)
     * B is both producer and consumer
-    * C is only consumer (and therefore a sink)
+    * C is only a consumer (and therefore a sink)
 
   As we will see in the upcoming Examples section, we must
   specify the type of the stage when we implement each of them.
@@ -86,7 +86,7 @@ defmodule GenStage do
   its producer. Once A receives the demand from B, it will send
   events to B which will be transformed by B as desired. In
   our case, B will receive events and multiply them by a number
-  giving on initialization and stored as the state:
+  given on initialization and stored as the state:
 
       defmodule B do
         use GenStage
