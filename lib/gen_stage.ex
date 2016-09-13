@@ -1,7 +1,7 @@
 alias Experimental.GenStage
 
 defmodule GenStage do
-  @moduledoc """
+  @moduledoc ~S"""
   Stages are computation steps that send and/or receive data
   from other stages.
 
@@ -158,13 +158,24 @@ defmodule GenStage do
   50 seconds to be consumed by C, which will then request another
   batch of 50 items.
 
-  ## Buffer events
+  ## Buffering
+
+  In many situations, producers may have events to dispatch while no
+  consumer has yet subscribed or consumers may ask producers for events
+  that are not yet available. In such cases, it is necessary for
+  producers to respectively buffer events until a consumer is available
+  or buffer the consumer demand until events arrive. As we will see next,
+  buffering events can be done automatically by GenStage, while buffering
+  the demand is a case that must be explicitly considered by developers
+  implementing producers.
+
+  ### Buffering events
 
   Due to the concurrent nature of Elixir software, sometimes
   a producer may receive events without consumers to send those
   events to. For example, imagine a consumer C subscribes to
-  producer B. Next, the consumer C sends demand to B, which sends
-  the demand upstream. Now, if the consumer C crashes, B may
+  producer_consumer B. Next, the consumer C sends demand to B, which
+  sends the demand upstream. Now, if the consumer C crashes, B may
   receive the events from upstream but it no longer has a consumer
   to send those events to. In such cases, B will buffer the events
   which have arrived from upstream.
@@ -173,12 +184,169 @@ defmodule GenStage do
   events in batches larger than asked for. For example, if you are
   receiving events from an external source that only sends events
   in batches of 1000 in 1000 and the internal demand is smaller than
-  that.
+  that, the buffer allows you to always emit batches of 1000 events
+  even when the consumer has asked for less.
 
-  In all of those cases, if the message cannot be sent immediately,
-  it is stored and sent whenever there is an opportunity to. The
-  size of the buffer is configured via the `:buffer_size` option
-  returned by `init/1`. The default value is 10000.
+  In all of those cases when an event cannot be sent immediately by
+  a producer, the event will be automatically stored and sent the next
+  time consumers ask for events. The size of the buffer is configured
+  via the `:buffer_size` option returned by `init/1` and the default
+  value is 10000. If the `buffer_size` is exceeded, an error is logged.
+
+  ### Buffering demand
+
+  In case consumers send demand and the producer is not yet ready to
+  fill in the demand, producers must buffer the demand until data arrives.
+
+  As an example, let's implement a producer that broadcasts messages
+  to consumers. For producers, we need to consider two scenarios:
+
+    1. what if events arrives and there are no consumers?
+    2. what if consumers send demand and there are not enough events?
+
+  One way to implement such broadcaster is to simply rely on the internal
+  buffer available in GenStage, dispatching events as they arrive, as explained
+  in the previous section:
+
+      defmodule NaiveBroadcaster do
+        use GenStage
+
+        @doc "Starts the broadcaster."
+        def start_link() do
+          GenStage.start_link(__MODULE__, :ok, name: __MODULE__)
+        end
+
+        @doc "Sends an event and returns only after the event is dispatched."
+        def sync_notify(pid, event, timeout \\ 5000) do
+          GenStage.call(__MODULE__, {:notify, event}, timeout)
+        end
+
+        def init(:ok) do
+          {:producer, :ok, dispatcher: GenStage.BroadcastDispatcher}
+        end
+
+        def handle_call({:notify, event}, _from, state) do
+          {:reply, :ok, [event], state} # Dispatch immediately
+        end
+
+        def handle_demand(_demand, state) do
+          {:noreply, [], state} # We don't care about the demand
+        end
+      end
+
+  By always sending events as soon as they arrive, if there is any demand,
+  we will serve the existing demand, otherwise the event will be queue in
+  GenStage's internal buffer.
+
+  While the implementation above is enough to solve the constraints above,
+  a more robust implementation would have tighter control over the events
+  and demand by tracking this data locally, leaving the GenStage internal
+  buffer only for cases where consumers crash without consuming all data.
+
+  To handle such cases, we will make the broadcaster state a tuple with
+  two elements: a queue and the pending demand. When events arrives and
+  there are no consumers, we store the event in the queue alongside the
+  process information that broadcasted the event. When consumers send
+  demand and there are not enough events, we increase the pending demand.
+  Once we have both the data and the demand, we acknowledge the process
+  that has sent the event to the broadcaster and finally broadcast the
+  event downstream.
+
+      defmodule Broadcaster do
+        use GenStage
+
+        @doc "Starts the broadcaster."
+        def start_link() do
+          GenStage.start_link(__MODULE__, :ok, name: __MODULE__)
+        end
+
+        @doc "Sends an event and returns only after the event is dispatched."
+        def sync_notify(pid, event, timeout \\ 5000) do
+          GenStage.call(__MODULE__, {:notify, event}, timeout)
+        end
+
+        ## Callbacks
+
+        def init(:ok) do
+          {:producer, {:queue.new, 0}, dispatcher: GenStage.BroadcastDispatcher}
+        end
+
+        def handle_call({:notify, event}, from, {queue, pending_demand}) do
+          queue = :queue.in({from, event}, queue)
+          dispatch_events(queue, pending_demand, [])
+        end
+
+        def handle_demand(incoming_demand, {queue, pending_demand}) do
+          dispatch_events(queue, incoming_demand + pending_demand, [])
+        end
+
+        defp dispatch_events(queue, 0, events) do
+          {:noreply, Enum.reverse(events), {queue, 0}}
+        end
+        defp dispatch_events(queue, demand, events) do
+          case :queue.out(queue) do
+            {{:value, {from, event}}, queue} ->
+              GenStage.reply(from, :ok)
+              dispatch_events(queue, demand - 1, [event | events])
+            {:empty, queue} ->
+              {:noreply, Enum.reverse(events), {queue, demand}}
+          end
+        end
+      end
+
+  Let's also implement a consumer that automatically subscribes to the
+  broadcaster on `c:init/1`. The advantage of doing so on initialization
+  is that, if the consumer crashes while it is supervised, the subscrition
+  is automatically restablished when the supervisors restarts it.
+
+      defmodule Printer do
+        use GenStage
+
+        @doc "Starts the consumer."
+        def start_link() do
+          GenStage.start_link(__MODULE__, :ok)
+        end
+
+        def init(:ok) do
+          # Starts a permanent subscription to the broadcaster
+          # which will automatically start requesting items.
+          {:consumer, :ok, subscribe_to: [Broadcaster]}
+        end
+
+        def handle_events(events, _from, state) do
+          for event <- events do
+            IO.inspect {self(), event}
+          end
+          {:noreply, [], state}
+        end
+      end
+
+  With the broadcaster in hand, now let's start the producer as well
+  as multiple consumers:
+
+      # Start the producer
+      Broadcaster.start_link()
+
+      # Start multiple consumers
+      Printer.start_link()
+      Printer.start_link()
+      Printer.start_link()
+      Printer.start_link()
+
+  At this point, all consumers must have sent their demand which we were
+  not able to fullfil. Now by calling `sync_notify`, the event shall be
+  broadcast to all consumers at once as we have buffered the demand in
+  the producer:
+
+      Broadcaster.sync_notify(:hello_world)
+
+  If we had called `Broadcaster.sync_notify(:hello_world)` before any
+  consumer was available, the event would also be buffered in our own
+  queue and served only demand arrived.
+
+  By having control over the demand and queue, the `Broadcaster` has
+  full control on how to behave when there are no consumers, when the
+  queue grows too large and so forth.
 
   ## Notifications
 
@@ -779,8 +947,9 @@ defmodule GenStage do
   @doc """
   Asks the given demand to the producer.
 
-  This is an asynchronous request typically used
-  by consumers in `:manual` demand mode.
+  This function must only be used in the rare cases when a consumer
+  sets a subscription to `:manual` mode in the `c:handle_subscribe/4`
+  callback.
 
   It accepts the same options as `Process.send/3`.
   """
