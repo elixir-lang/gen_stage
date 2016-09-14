@@ -201,7 +201,7 @@ defmodule GenStage do
   As an example, let's implement a producer that broadcasts messages
   to consumers. For producers, we need to consider two scenarios:
 
-    1. what if events arrives and there are no consumers?
+    1. what if events arrive and there are no consumers?
     2. what if consumers send demand and there are not enough events?
 
   One way to implement such broadcaster is to simply rely on the internal
@@ -244,7 +244,7 @@ defmodule GenStage do
   buffer only for cases where consumers crash without consuming all data.
 
   To handle such cases, we will make the broadcaster state a tuple with
-  two elements: a queue and the pending demand. When events arrives and
+  two elements: a queue and the pending demand. When events arrive and
   there are no consumers, we store the event in the queue alongside the
   process information that broadcasted the event. When consumers send
   demand and there are not enough events, we increase the pending demand.
@@ -296,8 +296,8 @@ defmodule GenStage do
 
   Let's also implement a consumer that automatically subscribes to the
   broadcaster on `c:init/1`. The advantage of doing so on initialization
-  is that, if the consumer crashes while it is supervised, the subscrition
-  is automatically restablished when the supervisors restarts it.
+  is that, if the consumer crashes while it is supervised, the subscription
+  is automatically reestablished when the supervisor restarts it.
 
       defmodule Printer do
         use GenStage
@@ -334,7 +334,7 @@ defmodule GenStage do
       Printer.start_link()
 
   At this point, all consumers must have sent their demand which we were
-  not able to fullfil. Now by calling `sync_notify`, the event shall be
+  not able to fulfill. Now by calling `sync_notify`, the event shall be
   broadcast to all consumers at once as we have buffered the demand in
   the producer:
 
@@ -407,7 +407,7 @@ defmodule GenStage do
   than it has asked for from any given producer stage.
 
   A consumer may have multiple producers, where each demand is
-  managed invidually. A producer may have multiple consumers,
+  managed individually. A producer may have multiple consumers,
   where the demand and events are managed and delivered according
   to a `GenStage.Dispatcher` implementation.
 
