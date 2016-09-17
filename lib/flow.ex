@@ -59,7 +59,7 @@ defmodule Flow do
   Now instead of loading the whole set into memory, we will only
   keep the current line in memory while we process it. While this
   allows us to process the whole data set efficiently, it does
-  not leverage concurency. Flow solves that:
+  not leverage concurrency. Flow solves that:
 
       alias Experimental.Flow
       File.stream!("path/to/some/file")
