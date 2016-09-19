@@ -1114,7 +1114,7 @@ defmodule GenStage do
       a tuple with the dispatcher and the dispatcher options
 
     * `:demand` - configures the demand to `:forward` or `:accumulate`
-      mode. See `demand/2` for more information.
+      mode. See `c:init/1` and `demand/2` for more information.
 
   All other options that would be given for `start_link/3` are
   also accepted.
@@ -1135,7 +1135,8 @@ defmodule GenStage do
   represents the producer or a tuple with the producer and the
   subscription options as defined in `sync_subscribe/2`. Once
   all producers are subscribed to, their demand is automatically
-  set to `:forward` mode. See `demand/2` for more information.
+  set to `:forward` mode. See the `:demand` and `:producers`
+  options below for more information.
 
   `GenStage.stream/1` will "hijack" the inbox of the process
   enumerating the stream to subscribe and receive messages
@@ -1147,15 +1148,15 @@ defmodule GenStage do
 
   ## Options
 
+    * `:demand` - configures the demand to `:forward` or `:accumulate`
+      mode. See `c:init/1` and `demand/2` for more information.
+
     * `:producers` - the processes to set the demand to `:forward`
       on subscription. It defaults to the processes being subscribed
       to. Sometimes the stream is subscribing to a `:producer_consumer`
       instead of a `:producer`, in such cases, you can set this option
       to either an empty list or the list of actual producers so they
       receive the proper notification message.
-
-    * `:demand` - the demand to set on the producers specified above.
-      Defaults to `:forward` but may be set to `:accumulate`
 
   ## Known limitations
 

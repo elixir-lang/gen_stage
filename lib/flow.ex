@@ -237,9 +237,21 @@ defmodule Flow do
 
   ## Data completion, windows and triggers
 
-  When working with an unbounded stream of data, there is no such thing
-  as data completion. So when can we consider a reduce function
-  to be "completed"?
+  By default, Flow uses GenStage's notification system to notify
+  stages when a producer has emitted all events. This is done
+  automatically by Flow when using `from_enumerable/2`. Custom
+  producers can also send such notifications by calling
+  `GenStage.async_notification/2` from themselves:
+
+      # In case all the data is done
+      GenStage.async_notification(self(), {:producer, :done})
+
+      # In case the producer halted due to an external factor
+      GenStage.async_notification(self(), {:producer, :halt})
+
+  However, When working with an unbounded stream of data, there is
+  no such thing as data completion. So when can we consider a reduce
+  function to be "completed"?
 
   To handle such cases, Flow provides windows and triggers. Windows
   allow us to split the data based on the event time while triggers
@@ -264,7 +276,7 @@ defmodule Flow do
   the computation with an old or new accumulator. See `Flow.Window`
   for a complete introduction into windows and triggers.
 
-  ## Long running-flows
+  ## Supervisable flows
 
   In the examples so far we have started a flow dynamically
   and consumed it using `Enum.to_list/1`. Unfortunately calling
@@ -273,15 +285,15 @@ defmodule Flow do
 
   In many situations, this is either too expensive or completely
   undesirable. For example, in data-processing pipelines, it is
-  common to receive data continuously from external sources. This
-  data is written to disk or other storage mechanism after being
-  processed, rather than being sent to a single process.
+  common to receive data continuously from external sources. At
+  the end, this data is written to disk or another storage mechanism
+  after being processed, rather than being sent to a single process.
 
   Flow allows computations to be started as a group of processes
   which may run indefinitely. This can be done by starting
   the flow as part of a supervision tree using `Flow.start_link/2`.
   `Flow.into_stages/3` can also be used to start the flow as a
-  linked process which will send the events to a given consumer.
+  linked process which will send the events to the given consumers.
 
   ## Performance discussions
 
@@ -555,6 +567,8 @@ defmodule Flow do
 
       Flow.new |> Flow.from_stages([stage])
 
+  See `from_stages/2` for more information.
+
   ## Examples
 
       Flow.from_stage(MyStage)
@@ -589,6 +603,18 @@ defmodule Flow do
 
       stages = [pid1, pid2, pid3]
       Flow.from_stage(stages)
+
+  ## Termination
+
+  Producer stages can signal the flow that it has emitted all
+  events by emitting a notication using `GenStage.async_notification/2`
+  from themselves:
+
+      # In case all the data is done
+      GenStage.async_notification(self(), {:producer, :done})
+
+      # In case the producer halted due to an external factor
+      GenStage.async_notification(self(), {:producer, :halt})
 
   """
   @spec from_stages([GenStage.stage]) :: t
