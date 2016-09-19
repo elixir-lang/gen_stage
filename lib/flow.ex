@@ -526,6 +526,8 @@ defmodule Flow do
       # In case the producer halted due to an external factor
       GenStage.async_notification(self(), {:producer, :halt})
 
+  Your producer may also keep track of all consumers and automatically
+  shut down when all consumers have exited.
   """
   @spec from_stages([GenStage.stage], keyword) :: t
   def from_stages(stages, options \\ [])
