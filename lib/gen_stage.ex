@@ -1093,7 +1093,7 @@ defmodule GenStage do
   When the enumerable finishes or halts, a notification is sent
   to all consumers in the format of
   `{{pid, subscription_tag}, {:producer, :halted | :done}}`. If the stage
-  is meant to terminate when there are no more consumers, we recomemnd
+  is meant to terminate when there are no more consumers, we recommend
   setting the `:consumers` option to `:permanent`.
 
   Keep in mind that streams that require the use of the process
