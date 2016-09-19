@@ -421,71 +421,11 @@ defmodule Flow do
   ## Building
 
   @doc """
-  Creates a new flow.
-
-  Calling this function is equivalent to:
-
-      Flow.new(Flow.Window.global, [])
-
-  See `new/2`.
-
-  ## Examples
-
-      Flow.new
-
-  """
-  @spec new() :: t
-  def new() do
-    new(Flow.Window.global, [])
-  end
-
-  @doc """
-  Creates a new flow with the given window or options.
-
-  See `new/2`.
-
-  ## Examples
-
-      Flow.new(Flow.Global.window)
-      Flow.new(stages: 4)
-
-  """
-  @spec new(Flow.Window.t | keyword()) :: t
-  def new(%{} = window) do
-    new(window, [])
-  end
-  def new(options) when is_list(options) do
-    new(Flow.Window.global, options)
-  end
-
-  @doc """
-  Starts a new flow with the given window and options.
-
-  ## Options
-
-  These options configure the stages connected to producers before partitioning.
-
-    * `:stages` - the number of stages
-    * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
-    * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
-
-  All remaining options are sent during subscription, allowing developers
-  to customize `:min_demand`, `:max_demand` and others.
-  """
-  @spec new(Flow.Window.t, keyword()) :: t
-  def new(window, options) do
-    %Flow{options: options, window: window}
-  end
-
-  @doc """
   Starts a flow with the given enumerable as producer.
 
   Calling this function is equivalent to:
 
-      Flow.new |> Flow.from_enumerables([enumerable])
-
-  See `GenStage.from_enumerable/2` for information and
-  limitations on enumerable-based stages.
+      Flow.from_enumerable([enumerable], options)
 
   ## Examples
 
@@ -494,69 +434,44 @@ defmodule Flow do
       |> Flow.from_enumerable()
 
   """
-  @spec from_enumerable(Enumerable.t) :: t
-  def from_enumerable(enumerable) do
-    new() |> from_enumerables([enumerable])
+  @spec from_enumerable(Enumerable.t, keyword) :: t
+  def from_enumerable(enumerable, options \\ []) do
+    from_enumerables([enumerable], options)
   end
 
   @doc """
-  Sets the given enumerable as a producer in the given flow.
+  Starts a flow with the given enumerable as producer.
 
   See `GenStage.from_enumerable/2` for information and
   limitations on enumerable-based stages.
 
-  ## Examples
+  ## Options
 
-      file = File.stream!("some/file", read_ahead: 100_000)
-      Flow.from_enumerable(Flow.new, file)
+  These options configure the stages connected to producers before partitioning.
 
-  """
-  @spec from_enumerable(t, Enumerable.t) :: t
-  def from_enumerable(flow, enumerable) do
-    flow |> from_enumerables([enumerable])
-  end
+    * `:window` - a window to run the next stages on, see `Flow.Window`
+    * `:stages` - the number of stages
+    * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
+    * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
 
-  @doc """
-  Starts a flow with the list of enumerables as producers.
-
-  Calling this function is equivalent to:
-
-      Flow.new |> Flow.from_enumerables(enumerables)
-
-  See `GenStage.from_enumerable/2` for information and
-  limitations on enumerable-based stages.
+  All remaining options are sent during subscription, allowing developers
+  to customize `:min_demand`, `:max_demand` and others.
 
   ## Examples
 
       files = [File.stream!("some/file1", read_ahead: 100_000),
                File.stream!("some/file2", read_ahead: 100_000),
                File.stream!("some/file3", read_ahead: 100_000)]
-      Flow.from_enumerable(files)
-
+      Flow.from_enumerables(files)
   """
-  @spec from_enumerables([Enumerable.t]) :: t
-  def from_enumerables(enumerables) do
-    new() |> from_enumerables(enumerables)
+  @spec from_enumerables([Enumerable.t], keyword) :: t
+  def from_enumerables(enumerables, options \\ [])
+
+  def from_enumerables([_ | _] = enumerables, options) do
+    {window, options} = Keyword.pop(options, :window, Flow.Window.global)
+    %Flow{options: options, window: window, producers: {:enumerables, enumerables}}
   end
-
-  @doc """
-  Sets the given enumerables as producers in the given flow.
-
-  See `GenStage.from_enumerable/2` for information and
-  limitations on enumerable-based stages.
-
-  ## Examples
-
-      files = [File.stream!("some/file1", read_ahead: 100_000),
-               File.stream!("some/file2", read_ahead: 100_000),
-               File.stream!("some/file3", read_ahead: 100_000)]
-      Flow.from_enumerable(Flow.new, files)
-  """
-  @spec from_enumerables(t, [Enumerable.t]) :: t
-  def from_enumerables(flow, [_ | _] = enumerables) do
-    add_producers(flow, {:enumerables, enumerables})
-  end
-  def from_enumerables(_flow, enumerables) do
+  def from_enumerables(enumerables, _options) do
     raise ArgumentError, "from_enumerables/2 expects a non-empty list as argument, got: #{inspect enumerables}"
   end
 
@@ -565,7 +480,7 @@ defmodule Flow do
 
   Calling this function is equivalent to:
 
-      Flow.new |> Flow.from_stages([stage])
+      Flow.from_stages([stage], options)
 
   See `from_stages/2` for more information.
 
@@ -574,35 +489,30 @@ defmodule Flow do
       Flow.from_stage(MyStage)
 
   """
-  @spec from_stage(GenStage.stage) :: t
-  def from_stage(stage) do
-    new() |> from_stages([stage])
-  end
-
-  @doc """
-  Sets the given stage as a producer in the given flow.
-
-  ## Examples
-
-      Flow.from_stage(Flow.new, MyStage)
-
-  """
-  @spec from_stage(t, GenStage.stage) :: t
-  def from_stage(flow, stage) do
-    flow |> from_stages([stage])
+  @spec from_stage(GenStage.stage, keyword) :: t
+  def from_stage(stage, options \\ []) do
+    from_stages([stage], options)
   end
 
   @doc """
   Starts a flow with the list of stages as producers.
 
-  Calling this function is equivalent to:
+  ## Options
 
-      Flow.new |> Flow.from_stages(stages)
+  These options configure the stages connected to producers before partitioning.
+
+    * `:window` - a window to run the next stages on, see `Flow.Window`
+    * `:stages` - the number of stages
+    * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
+    * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
+
+  All remaining options are sent during subscription, allowing developers
+  to customize `:min_demand`, `:max_demand` and others.
 
   ## Examples
 
       stages = [pid1, pid2, pid3]
-      Flow.from_stage(stages)
+      Flow.from_stages(stages)
 
   ## Termination
 
@@ -617,25 +527,14 @@ defmodule Flow do
       GenStage.async_notification(self(), {:producer, :halt})
 
   """
-  @spec from_stages([GenStage.stage]) :: t
-  def from_stages(stages) do
-    new() |> from_stages(stages)
+  @spec from_stages([GenStage.stage], keyword) :: t
+  def from_stages(stages, options \\ [])
+
+  def from_stages([_ | _] = stages, options) do
+    {window, options} = Keyword.pop(options, :window, Flow.Window.global)
+    %Flow{options: options, window: window, producers: {:stages, stages}}
   end
-
-  @doc """
-  Sets the given stages as producers in the given flow.
-
-  ## Examples
-
-      stages = [pid1, pid2, pid3]
-      Flow.from_stage(Flow.new, stages)
-
-  """
-  @spec from_stages(t, [GenStage.stage]) :: t
-  def from_stages(flow, [_ | _] = stages) do
-    add_producers(flow, {:stages, stages})
-  end
-  def from_stages(_flow, stages) do
+  def from_stages(stages, _options) do
     raise ArgumentError, "from_stages/2 expects a non-empty list as argument, got: #{inspect stages}"
   end
 
@@ -716,7 +615,6 @@ defmodule Flow do
   and comments in two different windows, we will get only two results
   as the later comment for `post_id=1` won't have a matching comment for
   its window:
-
 
       iex> posts = [%{id: 1, title: "hello", timestamp: 0}, %{id: 2, title: "world", timestamp: 1000}]
       iex> comments = [{1, "excellent", 0}, {1, "outstanding", 1000},
@@ -913,56 +811,22 @@ defmodule Flow do
   ## Reducers
 
   @doc """
-  Creates a new partition for the given flow.
-
-  Calling this function is equivalent to:
-
-      Flow.partition(flow, Flow.Window.global, [])
-
-  See `partition/3`.
-
-  ## Examples
-
-      flow |> Flow.partition()
-
-  """
-  @spec partition(t) :: t
-  def partition(flow) do
-    partition(flow, Flow.Window.global, [])
-  end
-
-  @doc """
-  Creates a new partition for the given flow with the given
-  window or options.
-
-  See `partition/3`.
-
-  ## Examples
-
-      flow |> Flow.partition(Flow.Global.window)
-      flow |> Flow.partition(stages: 4)
-  """
-  @spec partition(t, Flow.Window.t | keyword()) :: t
-  def partition(flow, %{} = window) do
-    partition(flow, window, [])
-  end
-  def partition(flow, options) when is_list(options) do
-    partition(flow, Flow.Window.global, options)
-  end
-
-  @doc """
-  Partitions the flow using the given window and options.
+  Creates a new partition for the given flow with the given options
 
   Every time this function is called, a new partition
   is created. It is typically recommended to invoke it
   before a reducing function, such as `reduce/3`, so data
   belonging to the same partition can be kept together.
-  The `window` parameter is a `Flow.Window` struct which
-  controls how the reducing function behaves, see
-  `Flow.Window` for more information.
+
+  ## Examples
+
+      flow |> Flow.partition(window: Flow.Global.window)
+      flow |> Flow.partition(stages: 4)
 
   ## Options
 
+    * `:window` - a `Flow.Window` struct which controls how the
+       reducing function behaves, see `Flow.Window` for more information.
     * `:stages` - the number of partitions (reducer stages)
     * `:hash` - the hash to use when partitioning. It is a function
       that receives two arguments: the event to partition on and the
@@ -984,46 +848,9 @@ defmodule Flow do
     * `{:key, key}` - apply the hash function to the key of a given map
 
   """
-  @spec partition(t, Flow.Window.t, keyword()) :: t
-  def partition(flow, %{} = window, options) when is_list(options) do
-    merge([flow], window, options)
-  end
-
-  @doc """
-  Merges the given flows in a new partition.
-
-  Calling this function is equivalent to:
-
-      Flow.merge(flows, Flow.Window.global, [])
-
-  See `merge/3`.
-
-  ## Examples
-
-      Flow.merge([flow1, flow2])
-
-  """
-  @spec merge([t]) :: t
-  def merge(flows) do
-    merge(flows, Flow.Window.global, [])
-  end
-
-  @doc """
-  Merges the given flows in a new partition with the given window or options.
-
-  See `merge/3`.
-
-  ## Examples
-
-      Flow.merge([flow1, flow2], Flow.Global.window)
-      Flow.merge([flow1, flow2], stages: 4)
-  """
-  @spec merge(t, Flow.Window.t | keyword()) :: t
-  def merge(flows, %{} = window) do
-    merge(flows, window, [])
-  end
-  def merge(flows, options) when is_list(options) do
-    merge(flows, Flow.Window.global, options)
+  @spec partition(t, keyword()) :: t
+  def partition(flow, options \\ []) when is_list(options) do
+    merge([flow], options)
   end
 
   @doc """
@@ -1034,23 +861,29 @@ defmodule Flow do
   is created. It is typically recommended to invoke it
   before a reducing function, such as `reduce/3`, so data
   belonging to the same partition can be kept together.
-  The `window` parameter is a `Flow.Window` struct which
-  controls how the reducing function behaves, see
-  `Flow.Window` for more information.
 
   It accepts the same options and hash shortcuts as
   `partition/3`. See `partition/3` for more information.
+
+  ## Examples
+
+      Flow.merge([flow1, flow2], window: Flow.Global.window)
+      Flow.merge([flow1, flow2], stages: 4)
+
   """
-  @spec merge([t], Flow.Window.t, keyword()) :: t
-  def merge([%Flow{} | _] = flows, %{} = window, options) when is_list(options) do
+  @spec merge([t], keyword()) :: t
+  def merge(flows, options \\ [])
+
+  def merge([%Flow{} | _] = flows, options) when is_list(options) do
     options =
       case Keyword.fetch(options, :hash) do
         {:ok, hash} -> Keyword.put(options, :hash, hash(hash))
         :error -> options
       end
+    {window, options} = Keyword.pop(options, :window, Flow.Window.global)
     %Flow{producers: {:flows, flows}, options: options, window: window}
   end
-  def merge(other, %{}, options) when is_list(options) do
+  def merge(other, options) when is_list(options) do
     raise ArgumentError, "Flow.merge/3 expects a non-empty list of flows as first argument, got: #{inspect other}"
   end
 
@@ -1299,16 +1132,6 @@ defmodule Flow do
   end
   def each_state(flow, mapper) when is_function(mapper, 1) do
     add_operation(flow, {:map_state, fn acc, _, _ -> mapper.(acc); acc end})
-  end
-
-  defp add_producers(%Flow{producers: nil} = flow, producers) do
-    %{flow | producers: producers}
-  end
-  defp add_producers(%Flow{producers: producers}, _producers) do
-    raise ArgumentError, "cannot set from_stages/from_enumerable because the flow already has set #{inspect producers} as producers"
-  end
-  defp add_producers(flow, _producers) do
-    raise ArgumentError, "expected a flow as argument, got: #{inspect flow}"
   end
 
   defp add_operation(%Flow{operations: operations} = flow, operation) do

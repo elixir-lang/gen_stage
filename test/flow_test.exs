@@ -34,13 +34,6 @@ defmodule FlowTest do
   end
 
   describe "errors" do
-    test "on flow without producer" do
-      assert_raise ArgumentError, ~r"cannot execute a flow without producers", fn ->
-        Flow.new
-        |> Enum.to_list
-      end
-    end
-
     test "on multiple reduce calls" do
       assert_raise ArgumentError, ~r"cannot call reduce on a flow after a reduce operation", fn ->
         Flow.from_enumerable([1, 2, 3])
@@ -60,16 +53,14 @@ defmodule FlowTest do
 
     test "on window without computation" do
       assert_raise ArgumentError, ~r"a window was set but no computation is happening on this partition", fn ->
-        Flow.new(Flow.Window.fixed(1, :seconds, & &1))
-        |> Flow.from_enumerable([1, 2, 3])
+        Flow.from_enumerable([1, 2, 3], window: Flow.Window.fixed(1, :seconds, & &1))
         |> Enum.to_list
       end
     end
   end
 
   describe "enumerable-stream" do
-    @flow Flow.new(stages: 2)
-          |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
+    @flow Flow.from_enumerables([[1, 2, 3], [4, 5, 6]], stages: 2)
 
     test "only sources"  do
       assert @flow |> Enum.sort() == [1, 2, 3, 4, 5, 6]
@@ -151,8 +142,7 @@ defmodule FlowTest do
   end
 
   describe "enumerable-unpartioned-stream" do
-    @flow Flow.new(stages: 4)
-          |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6]])
+    @flow Flow.from_enumerables([[1, 2, 3], [4, 5, 6]], stages: 4)
 
     test "only sources"  do
       assert @flow |> Enum.sort() == [1, 2, 3, 4, 5, 6]
@@ -217,8 +207,7 @@ defmodule FlowTest do
           x when x <= 100 -> 1_000
         end)
 
-      windows = Flow.new(window, stages: 4, max_demand: 5)
-                |> Flow.from_enumerable(1..100)
+      windows = Flow.from_enumerable(1..100, window: window, stages: 4, max_demand: 5)
                 |> Flow.reduce(fn -> 0 end, & &1 + &2)
                 |> Flow.emit(:state)
                 |> Enum.to_list()
@@ -255,18 +244,15 @@ defmodule FlowTest do
   end
 
   describe "enumerable-partitioned-stream" do
-    @flow Flow.new(stages: 4)
-          |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+    @flow Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10], stages: 4)
           |> Flow.partition(stages: 4)
 
     test "only sources"  do
-      assert Flow.new(stages: 4)
-             |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+      assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10], stages: 4)
              |> Flow.partition(stages: 4)
              |> Enum.sort() == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-      assert Flow.new(stages: 4)
-             |> Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+      assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10], stages: 4)
              |> Flow.partition(stages: 4)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.emit(:state)
@@ -394,7 +380,6 @@ defmodule FlowTest do
   end
 
   describe "stages-unpartioned-stream" do
-    @flow Flow.new(stages: 1)
     @tag report: [:counter]
 
     setup do
@@ -403,51 +388,65 @@ defmodule FlowTest do
     end
 
     test "only sources", %{counter: pid} do
-      assert @flow |> Flow.from_stage(pid) |> Enum.take(5) |> Enum.sort() == [0, 1, 2, 3, 4]
+      assert Flow.from_stage(pid, stages: 1)
+             |> Enum.take(5)
+             |> Enum.sort() == [0, 1, 2, 3, 4]
     end
 
     test "each/2", %{counter: pid} do
       parent = self()
-      assert @flow |> Flow.from_stage(pid) |> Flow.each(&send(parent, &1)) |> Enum.take(5) |> Enum.sort() ==
-             [0, 1, 2, 3, 4]
+      assert Flow.from_stage(pid, stages: 1)
+             |> Flow.each(&send(parent, &1))
+             |> Enum.take(5)
+             |> Enum.sort() == [0, 1, 2, 3, 4]
       assert_received 1
       assert_received 2
       assert_received 3
     end
 
     test "filter/2", %{counter: pid} do
-      assert @flow |> Flow.from_stage(pid) |> Flow.filter(&rem(&1, 2) == 0) |> Enum.take(5) |> Enum.sort() ==
-             [0, 2, 4, 6, 8]
+      assert Flow.from_stage(pid, stages: 1)
+             |> Flow.filter(&rem(&1, 2) == 0)
+             |> Enum.take(5)
+             |> Enum.sort() == [0, 2, 4, 6, 8]
     end
 
     test "filter_map/3", %{counter: pid} do
-      assert @flow |> Flow.from_stage(pid) |> Flow.filter_map(&rem(&1, 2) == 0, & &1 * 2) |> Enum.take(5) |> Enum.sort() ==
-             [0, 4, 8, 12, 16]
+      assert Flow.from_stage(pid, stages: 1)
+             |> Flow.filter_map(&rem(&1, 2) == 0, & &1 * 2)
+             |> Enum.take(5)
+             |> Enum.sort() == [0, 4, 8, 12, 16]
     end
 
     test "flat_map/2", %{counter: pid} do
-      assert @flow |> Flow.from_stage(pid) |> Flow.flat_map(&[&1, &1]) |> Enum.take(5) |> Enum.sort() ==
-             [0, 0, 1, 1, 2]
+      assert Flow.from_stage(pid, stages: 1)
+             |> Flow.flat_map(&[&1, &1])
+             |> Enum.take(5)
+             |> Enum.sort() == [0, 0, 1, 1, 2]
     end
 
     test "map/2", %{counter: pid} do
-      assert @flow |> Flow.from_stage(pid) |> Flow.map(& &1 * 2) |> Enum.take(5) |> Enum.sort() ==
-             [0, 2, 4, 6, 8]
+      assert Flow.from_stage(pid, stages: 1)
+             |> Flow.map(& &1 * 2)
+             |> Enum.take(5)
+             |> Enum.sort() == [0, 2, 4, 6, 8]
     end
 
     test "reject/2", %{counter: pid} do
-      assert @flow |> Flow.from_stage(pid) |> Flow.reject(&rem(&1, 2) == 0) |> Enum.take(5) |> Enum.sort() ==
+      assert Flow.from_stage(pid, stages: 1)
+             |> Flow.reject(&rem(&1, 2) == 0)
+             |> Enum.take(5)
+             |> Enum.sort() ==
              [1, 3, 5, 7, 9]
     end
 
     test "keeps ordering", %{counter: pid} do
-      flow =
-        @flow
-        |> Flow.from_stage(pid)
-        |> Flow.filter(&rem(&1, 2) == 0)
-        |> Flow.map(fn(x) -> x + 1 end)
-        |> Flow.map(fn(x) -> x * 2 end)
-      assert flow |> Enum.take(5) |> Enum.sort() == [2, 6, 10, 14, 18]
+      assert Flow.from_stage(pid, stages: 1)
+             |> Flow.filter(&rem(&1, 2) == 0)
+             |> Flow.map(fn(x) -> x + 1 end)
+             |> Flow.map(fn(x) -> x * 2 end)
+             |> Enum.take(5)
+             |> Enum.sort() == [2, 6, 10, 14, 18]
     end
   end
 
@@ -485,14 +484,14 @@ defmodule FlowTest do
         end)
 
       assert Flow.from_enumerable(1..100)
-             |> Flow.partition(window, stages: 4)
+             |> Flow.partition(window: window, stages: 4)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(&[Enum.sum(&1)])
              |> Enum.sort() == [173, 361, 364, 377, 797, 865, 895, 1218]
     end
   end
 
-  defp merged_flows(args) do
+  defp merged_flows(options) do
     flow1 =
       Stream.take_every(1..100, 2)
       |> Flow.from_enumerable()
@@ -503,19 +502,19 @@ defmodule FlowTest do
       |> Flow.from_enumerable()
       |> Flow.map(& &1 * 2)
 
-    apply(Flow, :merge, [[flow1, flow2] | args])
+    Flow.merge([flow1, flow2], options)
   end
 
   describe "merge/2" do
     test "merges different flows together" do
-      assert merged_flows([[stages: 4, min_demand: 5]])
+      assert merged_flows(stages: 4, min_demand: 5)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.sum() == 10100
     end
 
     test "allows custom partitioning" do
-      assert merged_flows([[stages: 4, min_demand: 5, hash: fn x, _ -> {x, 0} end]])
+      assert merged_flows(stages: 4, min_demand: 5, hash: fn x, _ -> {x, 0} end)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(&[Enum.sum(&1)])
              |> Enum.sort() == [0, 0, 0, 10100]
@@ -528,7 +527,7 @@ defmodule FlowTest do
           x when x <= 200 -> 1_000
         end)
 
-      assert merged_flows([window, [stages: 4, min_demand: 5]])
+      assert merged_flows(window: window, stages: 4, min_demand: 5)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(&[Enum.sum(&1)])
              |> Enum.sort() == [594, 596, 654, 706, 1248, 1964, 2066, 2272]

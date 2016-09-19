@@ -10,7 +10,7 @@ defmodule Flow.Window.FixedTest do
   describe "single window" do
     test "trigger keep with large demand" do
       assert Flow.from_enumerable(1..100)
-             |> Flow.partition(single_window() |> Flow.Window.trigger_every(10), stages: 1)
+             |> Flow.partition(window: single_window() |> Flow.Window.trigger_every(10), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [55, 210, 465, 820, 1275, 1830, 2485, 3240, 4095, 5050, 5050]
@@ -18,7 +18,7 @@ defmodule Flow.Window.FixedTest do
 
     test "trigger keep with small demand" do
       assert Flow.from_enumerable(1..100)
-             |> Flow.partition(single_window() |> Flow.Window.trigger_every(10), stages: 1, max_demand: 5)
+             |> Flow.partition(window: single_window() |> Flow.Window.trigger_every(10), stages: 1, max_demand: 5)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [55, 210, 465, 820, 1275, 1830, 2485, 3240, 4095, 5050, 5050]
@@ -26,7 +26,7 @@ defmodule Flow.Window.FixedTest do
 
     test "trigger discard with large demand" do
       assert Flow.from_enumerable(1..100)
-             |> Flow.partition(single_window() |> Flow.Window.trigger_every(10, :reset), stages: 1)
+             |> Flow.partition(window: single_window() |> Flow.Window.trigger_every(10, :reset), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
@@ -34,7 +34,7 @@ defmodule Flow.Window.FixedTest do
 
     test "trigger discard with small demand" do
       assert Flow.from_enumerable(1..100)
-             |> Flow.partition(single_window() |> Flow.Window.trigger_every(10, :reset), stages: 1, max_demand: 5)
+             |> Flow.partition(window: single_window() |> Flow.Window.trigger_every(10, :reset), stages: 1, max_demand: 5)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
@@ -47,7 +47,7 @@ defmodule Flow.Window.FixedTest do
         end)
 
       assert Flow.from_enumerable(1..10)
-             |> Flow.partition(window, stages: 1)
+             |> Flow.partition(window: window, stages: 1)
              |> Flow.map(& &1 + 1)
              |> Flow.map(& &1 * 2)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
@@ -57,7 +57,7 @@ defmodule Flow.Window.FixedTest do
 
     test "trigger names" do
       assert Flow.from_enumerable(1..100)
-             |> Flow.partition(single_window() |> Flow.Window.trigger_every(10, :reset), stages: 1)
+             |> Flow.partition(window: single_window() |> Flow.Window.trigger_every(10, :reset), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, 0, trigger} -> {trigger, state} end)
              |> Flow.emit(:state)
@@ -70,9 +70,8 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "trigger based on intervals" do
-      assert Flow.new(max_demand: 5, stages: 2)
-             |> Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)))
-             |> Flow.partition(single_window() |> Flow.Window.trigger_periodically(100, :milliseconds),
+      assert Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)), max_demand: 5, stages: 2)
+             |> Flow.partition(window: single_window() |> Flow.Window.trigger_periodically(100, :milliseconds),
                                stages: 1, max_demand: 10)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(& &1 * 2)
@@ -81,8 +80,7 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "trigger based on timers" do
-      assert Flow.new(max_demand: 5, stages: 2)
-             |> Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)))
+      assert Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)), max_demand: 5, stages: 2)
              |> Flow.partition(stages: 1, max_demand: 10)
              |> Flow.reduce(fn ->
                   Process.send_after(self(), {:trigger, :reset, :sample}, 200)
@@ -103,18 +101,16 @@ defmodule Flow.Window.FixedTest do
 
   describe "double ordered windows" do
     test "reduces per window with large demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_ordered_window(), stages: 1)
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_ordered_window(), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [1275, 3775]
     end
 
     test "triggers per window with large demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_ordered_window() |> Flow.Window.trigger_every(12), stages: 1)
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_ordered_window() |> Flow.Window.trigger_every(12), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
              |> Enum.to_list() == [{78, 0, {:every, 12}},
@@ -130,18 +126,16 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "reduces per window with small demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_ordered_window(), stages: 1, max_demand: 5, min_demand: 0)
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_ordered_window(), stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [1275, 3775]
     end
 
     test "triggers per window with small demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_ordered_window() |> Flow.Window.trigger_every(12),
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_ordered_window() |> Flow.Window.trigger_every(12),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
@@ -158,9 +152,8 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "triggers for all windows" do
-      assert Flow.new(max_demand: 5, stages: 1)
-             |> Flow.from_enumerable(Stream.concat(1..100, Stream.timer(:infinity)))
-             |> Flow.partition(double_ordered_window() |> Flow.Window.trigger_periodically(100, :milliseconds),
+      assert Flow.from_enumerable(Stream.concat(1..100, Stream.timer(:infinity)), max_demand: 5, stages: 1)
+             |> Flow.partition(window: double_ordered_window() |> Flow.Window.trigger_periodically(100, :milliseconds),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
@@ -180,18 +173,16 @@ defmodule Flow.Window.FixedTest do
   # With one stage, termination happens when one stage is done.
   describe "double unordered windows without lateness with one stage" do
     test "reduces per window with large demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_without_lateness(), stages: 1)
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_without_lateness(), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [2630, 0, 2420]
     end
 
     test "triggers per window with large demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_without_lateness() |> Flow.Window.trigger_every(12), stages: 1)
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_without_lateness() |> Flow.Window.trigger_every(12), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
              |> Enum.to_list() == [{78, 0, {:every, 12}},
@@ -208,9 +199,8 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "reduces per window with small demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_without_lateness(),
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_without_lateness(),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
@@ -218,9 +208,8 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "triggers per window with small demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_without_lateness() |> Flow.Window.trigger_every(12),
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_without_lateness() |> Flow.Window.trigger_every(12),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
@@ -236,9 +225,8 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "triggers for all windows" do
-      assert Flow.new(max_demand: 5, stages: 1)
-             |> Flow.from_enumerable(Stream.concat(1..100, Stream.timer(:infinity)))
-             |> Flow.partition(double_unordered_window_without_lateness() |> Flow.Window.trigger_periodically(100, :milliseconds),
+      assert Flow.from_enumerable(Stream.concat(1..100, Stream.timer(:infinity)), max_demand: 5, stages: 1)
+             |> Flow.partition(window: double_unordered_window_without_lateness() |> Flow.Window.trigger_periodically(100, :milliseconds),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
@@ -251,18 +239,16 @@ defmodule Flow.Window.FixedTest do
   # With two stages, termination is only guaranteed once both stages are done.
   describe "double unordered windows without lateness with two stages" do
     test "reduces per window with large demand" do
-      assert Flow.new(stages: 2)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_without_lateness(), stages: 1)
+      assert Flow.from_enumerable(1..100, stages: 2)
+             |> Flow.partition(window: double_unordered_window_without_lateness(), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [2630, 0, 2420]
     end
 
     test "triggers per window with large demand" do
-      assert Flow.new(stages: 2)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_without_lateness() |> Flow.Window.trigger_every(12),
+      assert Flow.from_enumerable(1..100, stages: 2)
+             |> Flow.partition(window: double_unordered_window_without_lateness() |> Flow.Window.trigger_every(12),
                                stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
@@ -284,10 +270,9 @@ defmodule Flow.Window.FixedTest do
       # because we have two stages, we are only done
       # once both stages are done, so we end-up consuming
       # late events while the other producer is open.
-      assert Flow.new(stages: 2)
-             |> Flow.from_enumerable(1..100)
+      assert Flow.from_enumerable(1..100, stages: 2)
              |> Flow.map(& &1)
-             |> Flow.partition(double_unordered_window_without_lateness(),
+             |> Flow.partition(window: double_unordered_window_without_lateness(),
                                stages: 1, max_demand: 100)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
@@ -295,10 +280,9 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "triggers per window with small demand" do
-      assert Flow.new(stages: 2)
-             |> Flow.from_enumerable(1..100)
+      assert Flow.from_enumerable(1..100, stages: 2)
              |> Flow.map(& &1)
-             |> Flow.partition(double_unordered_window_without_lateness() |> Flow.Window.trigger_every(12),
+             |> Flow.partition(window: double_unordered_window_without_lateness() |> Flow.Window.trigger_every(12),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
@@ -327,18 +311,16 @@ defmodule Flow.Window.FixedTest do
   # With one stage, termination happens when one stage is done.
   describe "double unordered windows with lateness with one stage" do
     test "reduces per window with large demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_with_lateness(), stages: 1)
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_with_lateness(), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [2630, 0, 2630, 0, 2420]
     end
 
     test "triggers per window with large demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_with_lateness() |> Flow.Window.trigger_every(12), stages: 1)
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_with_lateness() |> Flow.Window.trigger_every(12), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
              |> Enum.to_list() == [{78, 0, {:every, 12}},
@@ -357,9 +339,8 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "reduces per window with small demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_with_lateness(),
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_with_lateness(),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
@@ -367,9 +348,8 @@ defmodule Flow.Window.FixedTest do
     end
 
     test "triggers per window with small demand" do
-      assert Flow.new(stages: 1)
-             |> Flow.from_enumerable(1..100)
-             |> Flow.partition(double_unordered_window_with_lateness() |> Flow.Window.trigger_every(12),
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_with_lateness() |> Flow.Window.trigger_every(12),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)

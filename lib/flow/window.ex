@@ -50,7 +50,7 @@ defmodule Flow.Window do
   trigger to emit the values being summed as we sum them:
 
       iex> window = Flow.Window.global |> Flow.Window.trigger_every(10)
-      iex> flow = Flow.from_enumerable(1..100) |> Flow.partition(window, stages: 1)
+      iex> flow = Flow.from_enumerable(1..100) |> Flow.partition(window: window, stages: 1)
       iex> flow |> Flow.reduce(fn -> 0 end, & &1 + &2) |> Flow.emit(:state) |> Enum.to_list()
       [55, 210, 465, 820, 1275, 1830, 2485, 3240, 4095, 5050, 5050]
 
@@ -121,8 +121,8 @@ defmodule Flow.Window do
       ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
       ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}]
       iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
-      iex> flow = Flow.new(max_demand: 5, stages: 1)
-      iex> flow = flow |> Flow.from_enumerable(data) |> Flow.partition(window, stages: 1)
+      iex> flow = Flow.from_enumerable(data, max_demand: 5, stages: 1)
+      iex> flow = Flow.partition(flow, window: window, stages: 1)
       iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
       ...>   Map.update(acc, word, 1, & &1 + 1)
       ...> end)
@@ -152,7 +152,7 @@ defmodule Flow.Window do
       ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
       ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}, {"elixir", 0}]
       iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
-      iex> flow = Flow.new |> Flow.from_enumerable(data) |> Flow.partition(window, stages: 1, max_demand: 5)
+      iex> flow = Flow.from_enumerable(data) |> Flow.partition(window: window, stages: 1, max_demand: 5)
       iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
       ...>   Map.update(acc, word, 1, & &1 + 1)
       ...> end)
@@ -175,7 +175,7 @@ defmodule Flow.Window do
       ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}, {"elixir", 0}]
       iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
       iex> window = Flow.Window.allowed_lateness(window, 5, :minutes)
-      iex> flow = Flow.new |> Flow.from_enumerable(data) |> Flow.partition(window, stages: 1, max_demand: 5)
+      iex> flow = Flow.from_enumerable(data) |> Flow.partition(window: window, stages: 1, max_demand: 5)
       iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
       ...>   Map.update(acc, word, 1, & &1 + 1)
       ...> end)
@@ -308,7 +308,7 @@ defmodule Flow.Window do
   end is the trigger emitted because processing is done.
 
       iex> window = Flow.Window.global |> Flow.Window.trigger_every(10)
-      iex> flow = Flow.from_enumerable(1..100) |> Flow.partition(window, stages: 1)
+      iex> flow = Flow.from_enumerable(1..100) |> Flow.partition(window: window, stages: 1)
       iex> flow |> Flow.reduce(fn -> 0 end, & &1 + &2) |> Flow.emit(:state) |> Enum.to_list()
       [55, 210, 465, 820, 1275, 1830, 2485, 3240, 4095, 5050, 5050]
 
@@ -316,7 +316,7 @@ defmodule Flow.Window do
   on every trigger. At the end, the sum of all values is still 5050:
 
       iex> window = Flow.Window.global |> Flow.Window.trigger_every(10, :reset)
-      iex> flow = Flow.from_enumerable(1..100) |> Flow.partition(window, stages: 1)
+      iex> flow = Flow.from_enumerable(1..100) |> Flow.partition(window: window, stages: 1)
       iex> flow |> Flow.reduce(fn -> 0 end, & &1 + &2) |> Flow.emit(:state) |> Enum.to_list()
       [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
 
