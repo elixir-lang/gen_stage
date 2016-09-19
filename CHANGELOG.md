@@ -2,6 +2,11 @@
 
 ## v0.6.0-dev
 
+### Backwards incompatible changes
+
+  * Remove `Flow.new/0`, `Flow.new/1` and `Flow.new/2` in favor of passing options to `from_enumerable/2` and `from_stage/2`
+  * Remove `Flow.partition/3` and `Flow.merge/3` in favor of passing the `:window` option to `Flow.partition/2` and `Flow.merge/2`
+
 ## v0.5.0 (2016-08-09)
 
 This release moves `Flow` from under the `GenStage` namespace and into `Experimental.Flow`.
