@@ -114,7 +114,7 @@ defmodule Flow.Window do
 
   Let's see example that will use the window above to count the frequency
   of words based on windows that are 1 hour long. The timestamps used by
-  Flow are integers in microseconds. For now we will also set the concurrency
+  Flow are integers in milliseconds. For now we will also set the concurrency
   down 1 and max demand down to 5 as it is simpler to reason about the results:
 
       iex> data = [{"elixir", 0}, {"elixir", 1_000}, {"erlang", 60_000},
@@ -206,7 +206,7 @@ defmodule Flow.Window do
   @typedoc """
   A function that retrieves the field to window by.
 
-  It must be an integer representing the time in microseconds.
+  It must be an integer representing the time in milliseconds.
   Flow does not care if the integer is using the UNIX epoch,
   Gregorian epoch or any other as long as it is consistent.
   """
