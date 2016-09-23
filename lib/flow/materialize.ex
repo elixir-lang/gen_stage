@@ -88,6 +88,17 @@ defmodule Flow.Materialize do
 
   ## Producers
 
+  defp start_producers({:zip, left, right}, ops, start_link, window, options) do
+    options = partition(options)
+    {left_producers, left_consumers} = start_zip(:left, left, start_link, options)
+    {right_producers, right_consumers} = start_zip(:right, right, start_link, options)
+    {type, {acc, fun, trigger}, ops} = ensure_ops(ops)
+
+    {left_producers ++ right_producers,
+     left_consumers ++ right_consumers,
+     {type, zip_ops(acc, fun, trigger), ops},
+     window}
+  end
   defp start_producers({:join, kind, left, right, left_key, right_key, join}, ops, start_link, window, options) do
     partitions = Keyword.fetch!(options, :stages)
     {left_producers, left_consumers} = start_join(:left, left, left_key, partitions, start_link)
@@ -171,6 +182,53 @@ defmodule Flow.Materialize do
   defp ensure_ops(ops),
     do: ops
 
+  ## Zips
+
+  defp start_zip(side, flow, start_link, options) do
+    {producers, consumers} = materialize(flow, start_link, :producer_consumer, options)
+    {producers,
+      for {consumer, consumer_opts} <- consumers do
+        {consumer, [tag: side] ++ consumer_opts}
+      end}
+  end
+
+  defp zip_ops(acc, fun, trigger) do
+    acc = fn -> {[], [], acc.()} end
+
+    events = fn ref, events, {left, right, acc}, index ->
+      {events, left, right} = dispatch_zip(Process.get(ref), events, left, right)
+      {events, acc} = fun.(ref, events, acc, index)
+      {events, {left, right, acc}}
+    end
+
+    trigger = fn {left, right, acc}, index, op, name ->
+      {events, acc} = trigger.(acc, index, op, name)
+      {events, {left, right, acc}}
+    end
+
+    {acc, events, trigger}
+  end
+
+  defp dispatch_zip(:left, events, [], right) do
+    dispatch_zip(events, right, [])
+  end
+  defp dispatch_zip(:left, events, left, right) do
+    {[], left ++ events, right}
+  end
+  defp dispatch_zip(:right, events, left, []) do
+    dispatch_zip(left, events, [])
+  end
+  defp dispatch_zip(:right, events, left, right) do
+    {[], left, right ++ events}
+  end
+
+  defp dispatch_zip([left | lefties], [right | righties], acc) do
+    dispatch_zip(lefties, righties, [{left, right} | acc])
+  end
+  defp dispatch_zip(lefties, righties, acc) do
+    {Enum.reverse(acc), lefties, righties}
+  end
+
   ## Joins
 
   defp start_join(side, flow, key_fun, partitions, start_link) do
@@ -189,7 +247,6 @@ defmodule Flow.Materialize do
   end
 
   defp join_ops(kind, join, acc, fun, trigger) do
-    ref = make_ref()
     acc = fn -> {%{}, %{}, acc.()} end
 
     events = fn ref, events, {left, right, acc}, index ->
@@ -197,6 +254,9 @@ defmodule Flow.Materialize do
       {events, acc} = fun.(ref, events, acc, index)
       {events, {left, right, acc}}
     end
+
+    # A fake ref for events coming from the trigger
+    ref = make_ref()
 
     trigger = fn
       {left, right, acc}, index, op, {_, _, :done} = name ->

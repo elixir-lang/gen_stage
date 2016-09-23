@@ -855,6 +855,12 @@ defmodule Flow do
     merge([flow], options)
   end
 
+  @spec zip(t, t, keyword()) :: t
+  def zip(%Flow{} = left, %Flow{} = right, options \\ []) do
+    {window, options} = Keyword.pop(options, :window, Flow.Window.global)
+    %Flow{producers: {:zip, left, right}, options: options, window: window}
+  end
+
   @doc """
   Merges the given flow into a new partition with the given
   window and options.

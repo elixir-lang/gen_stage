@@ -200,7 +200,7 @@ defmodule FlowTest do
       assert Enum.sort(flow) == [6, 10, 14]
     end
 
-    test "allows custom windowding" do
+    test "allows custom windowing" do
       window =
         Flow.Window.fixed(1, :seconds, fn
           x when x <= 50 -> 0
@@ -476,7 +476,7 @@ defmodule FlowTest do
              |> Enum.sort() == [[1, 2, 4, 5], [3, 6]]
     end
 
-    test "allows custom windowding" do
+    test "allows custom windowing" do
       window =
         Flow.Window.fixed(1, :seconds, fn
           x when x <= 50 -> 0
@@ -520,7 +520,7 @@ defmodule FlowTest do
              |> Enum.sort() == [0, 0, 0, 10100]
     end
 
-    test "allows custom windowding" do
+    test "allows custom windowing" do
       window =
         Flow.Window.fixed(1, :seconds, fn
           x when x <= 100 -> 0
@@ -531,6 +531,53 @@ defmodule FlowTest do
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(&[Enum.sum(&1)])
              |> Enum.sort() == [594, 596, 654, 706, 1248, 1964, 2066, 2272]
+    end
+  end
+
+  defp zipped_flows(options) do
+    flow1 =
+      Stream.take_every(1..100, 2)
+      |> Flow.from_enumerable()
+      |> Flow.map(& &1 * 2)
+
+    flow2 =
+      Stream.take_every(2..100, 2)
+      |> Flow.from_enumerable()
+      |> Flow.map(& &1 * 2)
+
+    Flow.zip(flow1, flow2, options)
+  end
+
+  describe "zip/3" do
+    test "zips different flows together" do
+      assert zipped_flows(stages: 1, min_demand: 5)
+             |> Flow.reduce(fn -> [] end, &[&1 | &2])
+             |> Enum.sort()
+             |> Enum.take(5) == [{2, 4}, {6, 8}, {10, 12}, {14, 16}, {18, 20}]
+    end
+
+    test "zips custom partitioning" do
+      assert zipped_flows(stages: 4, min_demand: 5, hash: fn x, _ -> {x, 0} end)
+             |> Flow.reduce(fn -> [] end, &[&1 | &2])
+             |> Flow.map_state(&[&1 |> Enum.sort |> Enum.take(5)])
+             |> Enum.sort() == [[], [], [], [{2, 4}, {6, 8}, {10, 12}, {14, 16}, {18, 20}]]
+    end
+
+    test "zips custom windowing" do
+      window =
+        Flow.Window.fixed(1, :seconds, fn
+          x when x <= 100 -> 0
+          x when x <= 200 -> 1_000
+        end)
+
+      windows =
+        zipped_flows(window: window, stages: 4, min_demand: 5)
+        |> Flow.reduce(fn -> [] end, &[&1 | &2])
+        |> Flow.map_state(&[&1 |> Enum.sort |> Enum.take(5)])
+        |> Enum.sort()
+
+      assert length(windows) == 8
+      assert hd(windows) == [{2, 8}, {6, 36}, {42, 40}, {58, 64}, {82, 72}]
     end
   end
 
