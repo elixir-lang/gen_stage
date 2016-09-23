@@ -160,25 +160,25 @@ defmodule GenStage do
 
   ## Buffering
 
-  In many situations, producers may have events to dispatch while no
-  consumer has yet subscribed or consumers may ask producers for events
-  that are not yet available. In such cases, it is necessary for
-  producers to respectively buffer events until a consumer is available
-  or buffer the consumer demand until events arrive. As we will see next,
-  buffering events can be done automatically by GenStage, while buffering
-  the demand is a case that must be explicitly considered by developers
-  implementing producers.
+  In many situations, producers may attempt to emit events while no consumers
+  have yet subscribed. Similarly, consumers may ask producers for events
+  that are not yet available. In such cases, it is necessary for producers
+  to buffer events until a consumer is available or buffer the consumer
+  demand until events arrive, respectively. As we will see next, buffering
+  events can be done automatically by GenStage, while buffering the demand
+  is a case that must be explicitly considered by developers implementing
+  producers.
 
   ### Buffering events
 
-  Due to the concurrent nature of Elixir software, sometimes
-  a producer may receive events without consumers to send those
-  events to. For example, imagine a consumer C subscribes to
-  producer_consumer B. Next, the consumer C sends demand to B, which
-  sends the demand upstream. Now, if the consumer C crashes, B may
-  receive the events from upstream but it no longer has a consumer
-  to send those events to. In such cases, B will buffer the events
-  which have arrived from upstream.
+  Due to the concurrent nature of Elixir software, sometimes a producer
+  may dispatch events without consumers to send those events to. For example,
+  imagine a `:consumer` B subscribes to `:producer` A. Next, the consumer B
+  sends demand to A, which uses to start producing events. Now, if the
+  consumer B crashes, the producer may attempt to dispatch the now produced
+  events but it no longer has a consumer to send those events to. In such
+  cases, the producer will automatically buffer the events until another
+  consumer subscribes.
 
   The buffer can also be used in cases external sources only send
   events in batches larger than asked for. For example, if you are
