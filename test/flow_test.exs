@@ -309,7 +309,7 @@ defmodule FlowTest do
     test "uniq_by/2 after reduce/3" do
       assert @flow
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
-             |> Flow.map_state(&Enum.reverse/1)
+             |> Flow.map_state(&Enum.sort/1)
              |> Flow.uniq_by(&rem(&1, 2))
              |> Enum.sort() == [1, 2, 3, 4, 10]
     end
