@@ -10,7 +10,7 @@ This project currently provides the following functionality:
 
   * `Experimental.DynamicSupervisor` ([docs](https://hexdocs.pm/gen_stage/Experimental.DynamicSupervisor.html)) - a supervisor designed for starting children dynamically. Besides being a replacement for the `:simple_one_for_one` strategy in the regular `Supervisor`, a `DynamicSupervisor` can also be used as a stage consumer, making it straight-forward to spawn a new process for every event in a stage pipeline
 
-The module names are marked as `Experimental` to avoid conflicts as they are meant to be included in future Elixir releases. In your code, you may add `alias Experimental.{DynamicSupervisor, GenStage}` to the top of your files and use the relative names from then on.
+The module names are marked as `Experimental` to avoid conflicts as they are meant to be included in future Elixir releases. In your code, you may add `alias Experimental.{DynamicSupervisor, Flow, GenStage}` to the top of your files and use the relative names from then on.
 
 You can find examples on how to use the modules above in the [examples](examples) directory:
 
