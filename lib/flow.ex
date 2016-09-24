@@ -831,12 +831,11 @@ defmodule Flow do
        reducing function behaves, see `Flow.Window` for more information.
     * `:stages` - the number of partitions (reducer stages)
     * `:hash` - the hash to use when partitioning. It is a function
-      that receives two arguments: the event to partition on and the
-      maximum number of partitions. However, to facilitate customization,
-      `:hash` also allows common values, such `{:elem, 0}`, to specify
-      the hash should be calculated on the first element of a tuple.
-      See more information on the "Hash shortcuts" section below.
-      The default value hashing function `:erlang.phash2/2`.
+      that receives a single argument: the event to partition on. However, to
+      facilitate customization, `:hash` also allows common values, such
+      `{:elem, 0}`, to specify the hash should be calculated on the first
+      element of a tuple. See more information on the "Hash shortcuts" section
+      below. The default value hashing function `&:erlang.phash2(&1, stages)`.
     * `:dispatcher` - by default, `partition/3` uses `GenStage.PartitionDispatcher`
       with the given hash function but any other dispatcher can be given
 
@@ -877,9 +876,10 @@ defmodule Flow do
   def merge(flows, options \\ [])
 
   def merge([%Flow{} | _] = flows, options) when is_list(options) do
+    {options, stages} = stages(options)
     options =
       case Keyword.fetch(options, :hash) do
-        {:ok, hash} -> Keyword.put(options, :hash, hash(hash))
+        {:ok, hash} -> Keyword.put(options, :hash, hash(hash, stages))
         :error -> options
       end
     {window, options} = Keyword.pop(options, :window, Flow.Window.global)
@@ -889,21 +889,31 @@ defmodule Flow do
     raise ArgumentError, "Flow.merge/3 expects a non-empty list of flows as first argument, got: #{inspect other}"
   end
 
-  defp hash(fun) when is_function(fun, 2) do
+  defp stages(options) do
+    case Keyword.fetch(options, :stages) do
+      {:ok, stages} ->
+        {options, stages}
+      :error ->
+        stages = System.schedulers_online()
+        {[stages: stages] ++ options, stages}
+    end
+  end
+
+  defp hash(fun, _) when is_function(fun, 1) do
     fun
   end
-  defp hash({:elem, pos}) when pos >= 0 do
+  defp hash({:elem, pos}, stages) when pos >= 0 do
     pos = pos + 1
-    &{&1, :erlang.phash2(:erlang.element(pos, &1), &2)}
+    &{&1, :erlang.phash2(:erlang.element(pos, &1), stages)}
   end
-  defp hash({:key, key}) do
-    &{&1, :erlang.phash2(Map.fetch!(&1, key), &2)}
+  defp hash({:key, key}, stages) do
+    &{&1, :erlang.phash2(Map.fetch!(&1, key), stages)}
   end
   defp hash(other) do
     raise ArgumentError, """
     expected :hash to be one of:
 
-      * a function expecting two arguments and returning
+      * a function expecting a single argument and returning
         the event and the partition in a tuple
       * {:elem, pos} when pos >= 0
       * {:key, key}
@@ -1001,7 +1011,7 @@ defmodule Flow do
   and another for even numbers:
 
       iex> flow = Flow.from_enumerable(1..100)
-      iex> flow = Flow.partition(flow, stages: 2, hash: fn event, 2 -> {event, rem(event, 2)} end)
+      iex> flow = Flow.partition(flow, stages: 2, hash: fn event -> {event, rem(event, 2)} end)
       iex> flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
       [1, 2]
   """

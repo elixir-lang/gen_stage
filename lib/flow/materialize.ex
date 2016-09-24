@@ -161,9 +161,9 @@ defmodule Flow.Materialize do
   end
 
   defp partition(options) do
-    partitions = Keyword.fetch!(options, :stages)
-    dispatcher_opts = [partitions: partitions] ++ Keyword.take(options, @dispatcher_opts)
-    [dispatcher: {GenStage.PartitionDispatcher, [partitions: partitions] ++ dispatcher_opts}]
+    stages = Keyword.fetch!(options, :stages)
+    dispatcher_opts = [partitions: 0..stages-1] ++ Keyword.take(options, @dispatcher_opts)
+    [dispatcher: {GenStage.PartitionDispatcher, dispatcher_opts}]
   end
 
   defp ensure_ops(:none),
@@ -173,13 +173,13 @@ defmodule Flow.Materialize do
 
   ## Joins
 
-  defp start_join(side, flow, key_fun, partitions, start_link) do
-    hash = fn event, count ->
+  defp start_join(side, flow, key_fun, stages, start_link) do
+    hash = fn event ->
       key = key_fun.(event)
-      {{key, event}, :erlang.phash2(key, count)}
+      {{key, event}, :erlang.phash2(key, stages)}
     end
 
-    opts = [dispatcher: {GenStage.PartitionDispatcher, partitions: partitions, hash: hash}]
+    opts = [dispatcher: {GenStage.PartitionDispatcher, partitions: 0..stages-1, hash: hash}]
     {producers, consumers} = materialize(flow, start_link, :producer_consumer, opts)
 
     {producers,
