@@ -26,7 +26,7 @@ defmodule GenStage.PartitionDispatcher do
   option is required:
 
     * `:partition` - the name of the partition, must be included in the
-      `:partitions` enumerable set on initialiation of the dispatcher.
+      `:partitions` enumerable set on initialization of the dispatcher.
   """
 
   @behaviour GenStage.Dispatcher
