@@ -42,7 +42,7 @@ defmodule Flow do
       end)
       |> Enum.to_list()
 
-  Unfortunately, the implementation above is not very efficient
+  Unfortunately, the implementation above is not very efficient,
   as `Enum.flat_map/2` will build a list with all the words in
   the document before reducing it. If the document is, for example,
   2GB, we will load 2GB of data into memory.
@@ -334,7 +334,7 @@ defmodule Flow do
       to split the string on
 
     * READ_AHEAD - the second optimization is to use the `:read_ahead`
-      option for file streams allowing us to do less IO operations by
+      option for file streams allowing us to do fewer IO operations by
       reading large chunks of data at once
 
     * ETS - the third stores the data in a ETS table and uses its counter
