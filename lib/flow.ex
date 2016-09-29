@@ -909,7 +909,7 @@ defmodule Flow do
   defp hash({:key, key}, stages) do
     &{&1, :erlang.phash2(Map.fetch!(&1, key), stages)}
   end
-  defp hash(other) do
+  defp hash(other, _) do
     raise ArgumentError, """
     expected :hash to be one of:
 
