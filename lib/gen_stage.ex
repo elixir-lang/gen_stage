@@ -348,6 +348,108 @@ defmodule GenStage do
   full control on how to behave when there are no consumers, when the
   queue grows too large and so forth.
 
+  ## Asynchronous work and `handle_subscribe`
+
+  Both producer_consumer and consumer have been designed to do their
+  work in the `c:handle_events/3` callback. This means that, after
+  `c:handle_events/3` is invoked, both producer_consumer and consumer
+  will immediatally send demand upstream and ask for more items, as
+  it assumes events have been fully processed by `c:handle_event/3`.
+
+  Such default behaviour makes producer_consumer and consumer
+  unfeasable for doing asynchronous work. Fortunately, GenStage
+  comes with an option that allows developers to manually control
+  how demand is sent upstream, avoiding the default behaviour where
+  demand is sent after `c:handle_events/3`. Such can be done by
+  implementing the `c:handle_subscribe/4` callback and returning
+  `{:manual, state}` instead of the default `{:automatic, state}`.
+  Once the producer mode is set to `:manual`, developers must use
+  `GenStage.ask/3` to send demand upstream when necessary.
+
+  For example, the `DynamicSupervisor` module processes events
+  asynchronously by starting child process and such is done by
+  manully sending demand to producers.
+
+  Setting the demand to `:manual` in `c:handle_subscribe/4` is not
+  only useful for asynchronous work but also for setting up other
+  mechanisms for back-pressure. As an example, let's implement a
+  consumer that is allowed to process a limited number of events
+  per time interval. Those are often called rate limitters:
+
+      defmodule RateLimiter do
+        use GenStage
+
+        def init(_) do
+          # Our state will keep all producers and their pending demand
+          {:consumer, %{}}
+        end
+
+        def handle_subscribe(:producer, opts, from, producers) do
+          # We will only allow max_demand events every 5000 miliseconds
+          pending = opts[:max_demand] || 1000
+          interval = opts[:interval] || 5000
+
+          # Register the producer in the state
+          producers = Map.put(producers, from, {pending, interval})
+          # Ask for the pending events and schedule the next time around
+          producers = ask_and_schedule(producers, from)
+
+          # Returns manual as we want control over the demand
+          {:manual, producers}
+        end
+
+        def handle_cancel(_, from, producers) do
+          # Remove the producers from the map on unsubscribe
+          {:noreply, [], Map.delete(producers, from)}
+        end
+
+        def handle_events(events, from, producers) do
+          # Bump the amount of pending events for the given producer
+          producers = Map.update!(producers, from, fn {pending, interval} ->
+            {pending + length(events), interval}
+          end)
+
+          # Consume the events by printing them.
+          IO.inspect(events)
+
+          # A producer_consumer would return the processed events here.
+          {:noreply, [], producers}
+        end
+
+        def handle_info({:ask, from}, producers) do
+          # This callback is invoked by the Process.send_after/3 message below.
+          {:noreply, [], ask_and_schedule(producers, from)}
+        end
+
+        defp ask_and_schedule(producers, from) do
+          case producers do
+            %{^from => {pending, interval}} ->
+              # Ask for any pending events
+              GenStage.ask(from, pending)
+              # And let's check again after interval
+              Process.send_after(self(), {:ask, from}, interval)
+              # Finally, reset pending events to 0
+              Map.put(producers, from, {0, interval})
+            %{} ->
+              producers
+          end
+        end
+      end
+
+  With the `RateLimiter` implemented, let's subscribe it to the
+  producer we have implemented at the beginning of the module
+  documentation:
+
+      {:ok, a} = GenStage.start_link(A, 0)
+      {:ok, b} = GenStage.start_link(RateLimiter, :ok)
+
+      # Ask for 10 items every 2 seconds
+      GenStage.sync_subscribe(b, to: a, max_demand: 10, interval: 2000)
+
+  Although the rate limiter above is a consumer, it could be made a
+  producer_consumer by changing `c:init/1` to return a `:producer_consumer`
+  and then forwarding the events in `c:handle_events/3`.
+
   ## Notifications
 
   `GenStage` also supports the ability to send notifications to all
@@ -947,13 +1049,23 @@ defmodule GenStage do
   @doc """
   Asks the given demand to the producer.
 
+  The demand is a non-negative integer with the amount of events to
+  ask a producer for. If the demand is 0, it simply returns `:ok`
+  without asking for data.
+
   This function must only be used in the rare cases when a consumer
   sets a subscription to `:manual` mode in the `c:handle_subscribe/4`
   callback.
 
   It accepts the same options as `Process.send/3`.
   """
-  def ask({pid, ref}, demand, opts \\ []) when is_integer(demand) and demand > 0 do
+  def ask(producer, demand, opts \\ [])
+
+  def ask({_, _}, 0, _opts) do
+    :ok
+  end
+
+  def ask({pid, ref}, demand, opts) when is_integer(demand) and demand > 0 do
     Process.send(pid, {:"$gen_producer", {self(), ref}, {:ask, demand}}, opts)
     :ok
   end
@@ -1280,7 +1392,7 @@ defmodule GenStage do
     receive_stream(monitor_ref, subscriptions)
   end
   defp consume_stream({:ask, from, ask, batches, monitor_ref, subscriptions}) do
-    ask > 0 and ask(from, ask, [:noconnect])
+    ask(from, ask, [:noconnect])
     deliver_stream(batches, from, monitor_ref, subscriptions)
   end
 
@@ -1625,7 +1737,6 @@ defmodule GenStage do
                   %{type: :consumer, producers: producers, mod: mod, state: state} = stage) when is_list(events) do
     case producers do
       %{^ref => entry} ->
-        {producer_pid, _, _} = entry
         {batches, stage} = consumer_receive(from, entry, events, stage)
         {_, reply} = consumer_dispatch(batches, from, mod, state, stage, 0, false)
         reply
@@ -2065,11 +2176,11 @@ defmodule GenStage do
     case mod.handle_events(batch, from, state) do
       {:noreply, events, state} when is_list(events) ->
         stage = dispatch_events(events, stage)
-        ask > 0 and ask(from, ask, [:noconnect])
+        ask(from, ask, [:noconnect])
         consumer_dispatch(batches, from, mod, state, stage, count + length(events), false)
       {:noreply, events, state, :hibernate} when is_list(events) ->
         stage = dispatch_events(events, stage)
-        ask > 0 and ask(from, ask, [:noconnect])
+        ask(from, ask, [:noconnect])
         consumer_dispatch(batches, from, mod, state, stage, count + length(events), true)
       {:stop, reason, state} ->
         {count, {:stop, reason, %{stage | state: state}}}
@@ -2168,7 +2279,7 @@ defmodule GenStage do
         consumer_dispatch(batches, from, mod, state, stage, 0, false)
       %{} ->
         # We queued but producer was removed
-        consumer_dispatch([{events, 0}], :unused, mod, state, stage, 0, false)
+        consumer_dispatch([{events, 0}], {:pid, :ref}, mod, state, stage, 0, false)
     end
   end
 

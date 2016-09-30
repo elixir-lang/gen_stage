@@ -2,10 +2,9 @@
 #
 # Hit Ctrl+C twice to stop it.
 #
-# This is a very straight-forward example where
-# a producer A emits items, which are amplified
-# by a producer consumer B and printed by consumer
-# C.
+# This is a base example where a producer A emits items,
+# which are amplified by a producer consumer B and printed
+# by consumer C.
 alias Experimental.{GenStage}
 
 defmodule A do
