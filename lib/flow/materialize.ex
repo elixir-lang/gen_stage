@@ -14,10 +14,7 @@ defmodule Flow.Materialize do
 
   def materialize(%{operations: operations, options: options, producers: producers, window: window},
                   start_link, type, type_options) do
-    options =
-      type_options
-      |> Keyword.merge(options)
-      |> Keyword.put_new(:stages, System.schedulers_online)
+    options = Keyword.merge(type_options, options)
     ops = split_operations(operations)
     {producers, consumers, ops, window} = start_producers(producers, ops, start_link, window, options)
     {producers, start_stages(ops, window, consumers, start_link, type, options)}
@@ -35,24 +32,9 @@ defmodule Flow.Materialize do
     split_operations(:lists.reverse(operations), :mapper, [])
   end
 
-  @reduce "reduce"
-  @map_state "map_state/each_state/emit"
-
-  # reducing? is false
   defp split_operations([{:mapper, _, _} = op | ops], :mapper, acc_ops) do
     split_operations(ops, :mapper, [op | acc_ops])
   end
-  defp split_operations([{:map_state, _} | _], :mapper, _) do
-    raise ArgumentError, "#{@map_state} must be called after a #{@reduce} operation"
-  end
-
-  # reducing? is true
-  defp split_operations([{:reduce, _, _} | _], :reducer, _) do
-    raise ArgumentError, "cannot call #{@reduce} on a flow after a #{@reduce} operation " <>
-                         "(it must be called only once per partition, consider using map_state/2 instead)"
-  end
-
-  # Remaining
   defp split_operations([op | ops], _type, acc_ops) do
     split_operations(ops, :reducer, [op | acc_ops])
   end

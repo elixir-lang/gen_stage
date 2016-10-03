@@ -35,7 +35,7 @@ defmodule FlowTest do
 
   describe "errors" do
     test "on multiple reduce calls" do
-      assert_raise ArgumentError, ~r"cannot call reduce on a flow after a reduce operation", fn ->
+      assert_raise ArgumentError, ~r"cannot call reduce/3 on a flow after another reduce/3 operation", fn ->
         Flow.from_enumerable([1, 2, 3])
         |> Flow.reduce(fn -> 0 end, & &1 + &2)
         |> Flow.reduce(fn -> 0 end, & &1 + &2)
@@ -44,7 +44,7 @@ defmodule FlowTest do
     end
 
     test "on map_state without reduce" do
-      assert_raise ArgumentError, ~r"map_state/each_state/emit must be called after a reduce operation", fn ->
+      assert_raise ArgumentError, ~r"map_state/2 must be called after a reduce/3 operation", fn ->
         Flow.from_enumerable([1, 2, 3])
         |> Flow.map_state(fn x -> x end)
         |> Enum.to_list

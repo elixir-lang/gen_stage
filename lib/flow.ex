@@ -468,8 +468,9 @@ defmodule Flow do
   def from_enumerables(enumerables, options \\ [])
 
   def from_enumerables([_ | _] = enumerables, options) do
+    {options, _} = stages(options)
     {window, options} = Keyword.pop(options, :window, Flow.Window.global)
-    %Flow{options: options, window: window, producers: {:enumerables, enumerables}}
+    %Flow{producers: {:enumerables, enumerables}, options: options, window: window}
   end
   def from_enumerables(enumerables, _options) do
     raise ArgumentError, "from_enumerables/2 expects a non-empty list as argument, got: #{inspect enumerables}"
@@ -533,8 +534,9 @@ defmodule Flow do
   def from_stages(stages, options \\ [])
 
   def from_stages([_ | _] = stages, options) do
+    {options, _} = stages(options)
     {window, options} = Keyword.pop(options, :window, Flow.Window.global)
-    %Flow{options: options, window: window, producers: {:stages, stages}}
+    %Flow{producers: {:stages, stages}, options: options, window: window}
   end
   def from_stages(stages, _options) do
     raise ArgumentError, "from_stages/2 expects a non-empty list as argument, got: #{inspect stages}"
@@ -644,6 +646,7 @@ defmodule Flow do
                   left_key, right_key, join, options \\ [])
       when is_function(left_key, 1) and is_function(right_key, 1) and
            is_function(join, 2) and mode in @joins do
+    {options, _} = stages(options)
     %Flow{producers: {:join, mode, left, right, left_key, right_key, join},
           options: options, window: window}
   end
@@ -836,8 +839,10 @@ defmodule Flow do
       `{:elem, 0}`, to specify the hash should be calculated on the first
       element of a tuple. See more information on the "Hash shortcuts" section
       below. The default value hashing function `&:erlang.phash2(&1, stages)`.
-    * `:dispatcher` - by default, `partition/3` uses `GenStage.PartitionDispatcher`
+    * `:dispatcher` - by default, `partition/2` uses `GenStage.PartitionDispatcher`
       with the given hash function but any other dispatcher can be given
+    * `:min_demand` - the minimum demand for this subscription
+    * `:max_demand` - the maximum demand for this subscription
 
   ## Hash shortcuts
 
@@ -855,16 +860,63 @@ defmodule Flow do
   end
 
   @doc """
-  Merges the given flow into a new partition with the given
+  Unifies multiple partitions into one single stage.
+
+  Once `Flow.departition/2` is called, computations no longer
+  happen concurrently until the data is once again partitioned.
+
+  `departition/2` is typically called as the last step in a flow
+  to merge the state from all previous partitions per window.
+
+  It requires the a flow and three functions as arguments as
+  described:
+
+    * the accumulator function - a zero-arity function that returns
+      the initial accumulator. This function is invoked per window.
+    * the merger function - a function that receives the state of
+      a given partition and the accumulator and merges them together.
+    * the done function - a function that receives the final accumulator.
+
+  A set of options may also be given to customize with `:min_demand`
+  and `:max_demand`.
+  """
+  def departition(%Flow{} = flow, acc_fun, merge_fun, done_fun, options \\ [])
+      when is_function(acc_fun, 0) and is_function(done_fun, 1) and
+           (is_function(merge_fun, 2) or is_function(merge_fun, 3)) do
+    unless has_reduce?(flow) do
+      raise ArgumentError, "departition/5 must be called after a reduce/3 operation"
+    end
+
+    merge_fun =
+      if is_function(merge_fun, 2) do
+        fn item, acc, _ -> merge_fun.(item, acc) end
+      else
+        merge_fun
+      end
+
+    flow = map_state(flow, fn state, partition, trigger ->
+      [{state, partition, trigger}]
+    end)
+
+    options =
+      options
+      |> Keyword.put(:dispatcher, GenStage.DemandDispatcher)
+      |> Keyword.put(:stages, 1)
+
+    %Flow{producers: {:departition, flow, acc_fun, merge_fun, done_fun},
+          options: options, window: Flow.Window.global}
+  end
+
+  @doc """
+  Merges the given flows into a new partition with the given
   window and options.
 
-  Every time this function is called, a new partition
-  is created. It is typically recommended to invoke it
-  before a reducing function, such as `reduce/3`, so data
-  belonging to the same partition can be kept together.
+  Similar to `partition/2`, this function will partition
+  the data, routing events with the same characteristics
+  to the same partition.
 
   It accepts the same options and hash shortcuts as
-  `partition/3`. See `partition/3` for more information.
+  `partition/2`. See `partition/2` for more information.
 
   ## Examples
 
@@ -886,7 +938,7 @@ defmodule Flow do
     %Flow{producers: {:flows, flows}, options: options, window: window}
   end
   def merge(other, options) when is_list(options) do
-    raise ArgumentError, "Flow.merge/3 expects a non-empty list of flows as first argument, got: #{inspect other}"
+    raise ArgumentError, "Flow.merge/2 expects a non-empty list of flows as first argument, got: #{inspect other}"
   end
 
   defp stages(options) do
@@ -953,10 +1005,14 @@ defmodule Flow do
   """
   @spec reduce(t, (() -> acc), (term, acc -> acc)) :: t when acc: term()
   def reduce(flow, acc_fun, reducer_fun) when is_function(reducer_fun, 2) do
-    if is_function(acc_fun, 0) do
-      add_operation(flow, {:reduce, acc_fun, reducer_fun})
-    else
-      raise ArgumentError, "Flow.reduce/3 expects the accumulator to be given as a function"
+    cond do
+      has_reduce?(flow) ->
+        raise ArgumentError, "cannot call reduce/3 on a flow after another reduce/3 operation " <>
+                             "(it must be called only once per partition, consider using map_state/2 instead)"
+      is_function(acc_fun, 0) ->
+        add_operation(flow, {:reduce, acc_fun, reducer_fun})
+      true ->
+        raise ArgumentError, "Flow.reduce/3 expects the accumulator to be given as a function"
     end
   end
 
@@ -1039,6 +1095,9 @@ defmodule Flow do
     flow
   end
   def emit(flow, :state) do
+    unless has_reduce?(flow) do
+      raise ArgumentError, "emit/2 must be called after a reduce/3 operation"
+    end
     map_state(flow, fn acc, _, _ -> [acc] end)
   end
   def emit(%{operations: operations} = flow, :nothing) do
@@ -1066,11 +1125,11 @@ defmodule Flow do
 
   The `mapper` function may have arity 1, 2 or 3:
 
-    * when one - the state is given as argument
-    * when two - the state and the stage indexes are given as arguments.
+    * when 1 - the state is given as argument
+    * when 2 - the state and the stage indexes are given as arguments.
       The index is a tuple with the current stage index as first element
       and the total number of stages for this partition as second
-    * when three - the state, the stage indexes and a tuple with window-
+    * when 3 - the state, the stage indexes and a tuple with window-
       trigger parameters are given as argument. The tuple contains the
       window type, the window identifier and the trigger name. By default,
       the window is `:global`, which implies the `:global` identifier with
@@ -1101,13 +1160,19 @@ defmodule Flow do
                      (term, term -> term) |
                      (term, term, {Flow.Window.type, Flow.Window.id, Flow.Window.trigger} -> term)) :: t
   def map_state(flow, mapper) when is_function(mapper, 3) do
-    add_operation(flow, {:map_state, mapper})
+    do_map_state(flow, mapper)
   end
   def map_state(flow, mapper) when is_function(mapper, 2) do
-    add_operation(flow, {:map_state, fn acc, index, _ -> mapper.(acc, index) end})
+    do_map_state(flow, fn acc, index, _ -> mapper.(acc, index) end)
   end
   def map_state(flow, mapper) when is_function(mapper, 1) do
-    add_operation(flow, {:map_state, fn acc, _, _ -> mapper.(acc) end})
+    do_map_state(flow, fn acc, _, _ -> mapper.(acc) end)
+  end
+  defp do_map_state(flow, mapper) do
+    unless has_reduce?(flow) do
+      raise ArgumentError, "map_state/2 must be called after a reduce/3 operation"
+    end
+    add_operation(flow, {:map_state, mapper})
   end
 
   @doc """
@@ -1137,13 +1202,19 @@ defmodule Flow do
                       (term, term -> term) |
                       (term, term, {Flow.Window.type, Flow.Window.id, Flow.Window.trigger} -> term)) :: t
   def each_state(flow, mapper) when is_function(mapper, 3) do
-    add_operation(flow, {:map_state, fn acc, index, trigger -> mapper.(acc, index, trigger); acc end})
+    do_each_state(flow, fn acc, index, trigger -> mapper.(acc, index, trigger); acc end)
   end
   def each_state(flow, mapper) when is_function(mapper, 2) do
-    add_operation(flow, {:map_state, fn acc, index, _ -> mapper.(acc, index); acc end})
+    do_each_state(flow, fn acc, index, _ -> mapper.(acc, index); acc end)
   end
   def each_state(flow, mapper) when is_function(mapper, 1) do
-    add_operation(flow, {:map_state, fn acc, _, _ -> mapper.(acc); acc end})
+    do_each_state(flow, fn acc, _, _ -> mapper.(acc); acc end)
+  end
+  defp do_each_state(flow, mapper) do
+    unless has_reduce?(flow) do
+      raise ArgumentError, "each_state/2 must be called after a reduce/3 operation"
+    end
+    add_operation(flow, {:map_state, mapper})
   end
 
   defp add_operation(%Flow{operations: operations} = flow, operation) do
@@ -1151,6 +1222,10 @@ defmodule Flow do
   end
   defp add_operation(flow, _producers) do
     raise ArgumentError, "expected a flow as argument, got: #{inspect flow}"
+  end
+
+  defp has_reduce?(%{operations: operations}) do
+    Enum.any?(operations, &match?({:reduce,_, _}, &1))
   end
 
   defimpl Enumerable do
