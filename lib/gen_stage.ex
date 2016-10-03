@@ -357,14 +357,20 @@ defmodule GenStage do
   it assumes events have been fully processed by `c:handle_event/3`.
 
   Such default behaviour makes producer_consumer and consumer
-  unfeasable for doing asynchronous work. Fortunately, GenStage
-  comes with an option that allows developers to manually control
-  how demand is sent upstream, avoiding the default behaviour where
-  demand is sent after `c:handle_events/3`. Such can be done by
-  implementing the `c:handle_subscribe/4` callback and returning
-  `{:manual, state}` instead of the default `{:automatic, state}`.
-  Once the producer mode is set to `:manual`, developers must use
-  `GenStage.ask/3` to send demand upstream when necessary.
+  unfeasable for doing asynchronous work. However, given GenStage
+  was designed to run with multiple consumers, it is not a problem
+  to perform synchronous or blocking actions inside `handle_events/3`
+  as you can then start multiple consumers in order to max both CPU
+  and IO usage as necessary.
+
+  On the other hand, if you must perform some work asynchronously,
+  GenStage comes with an option that manually controls how demand
+  is sent upstream, avoiding the default behaviour where demand is
+  sent after `c:handle_events/3`. Such can be done by implementing
+  the `c:handle_subscribe/4` callback and returning `{:manual, state}`
+  instead of the default `{:automatic, state}`. Once the producer mode
+  is set to `:manual`, developers must use `GenStage.ask/3` to send
+  demand upstream when necessary.
 
   For example, the `DynamicSupervisor` module processes events
   asynchronously by starting child process and such is done by
