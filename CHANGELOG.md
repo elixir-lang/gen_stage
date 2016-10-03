@@ -1,11 +1,12 @@
 # Changelog
 
-## v0.6.0-dev
+## v0.6.0 (2016-10-04)
 
 ### Enhancements
 
- * Include examples of broadcasters and rate limiters in the documentation
- * Allow custom named, non-integer, partitions
+  * Introduce `Flow.departition/5`
+  * Include examples of broadcasters and rate limiters in the documentation
+  * Allow custom named, non-integer, partitions
 
 ### Bug fixes
 
