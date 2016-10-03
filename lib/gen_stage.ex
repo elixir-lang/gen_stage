@@ -208,7 +208,7 @@ defmodule GenStage do
   buffer available in GenStage, dispatching events as they arrive, as explained
   in the previous section:
 
-      defmodule NaiveBroadcaster do
+      defmodule Broadcaster do
         use GenStage
 
         @doc "Starts the broadcaster."
@@ -235,8 +235,10 @@ defmodule GenStage do
       end
 
   By always sending events as soon as they arrive, if there is any demand,
-  we will serve the existing demand, otherwise the event will be queue in
-  GenStage's internal buffer.
+  we will serve the existing demand, otherwise the event will be queued in
+  GenStage's internal buffer. In case events are being queued and not being
+  consumed, a log message will be emitted when we exceed the `:buffer_size`
+  configuration.
 
   While the implementation above is enough to solve the constraints above,
   a more robust implementation would have tighter control over the events
@@ -252,7 +254,7 @@ defmodule GenStage do
   that has sent the event to the broadcaster and finally broadcast the
   event downstream.
 
-      defmodule Broadcaster do
+      defmodule QueueBroadcaster do
         use GenStage
 
         @doc "Starts the broadcaster."
