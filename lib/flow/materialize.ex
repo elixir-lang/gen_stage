@@ -70,7 +70,8 @@ defmodule Flow.Materialize do
 
   ## Producers
 
-  defp start_producers({:join, kind, left, right, left_key, right_key, join}, ops, start_link, window, options) do
+  defp start_producers({:join, kind, left, right, left_key, right_key, join},
+                       ops, start_link, window, options) do
     partitions = Keyword.fetch!(options, :stages)
     {left_producers, left_consumers} = start_join(:left, left, left_key, partitions, start_link)
     {right_producers, right_consumers} = start_join(:right, right, right_key, partitions, start_link)
@@ -85,6 +86,18 @@ defmodule Flow.Materialize do
     {left_producers ++ right_producers,
      left_consumers ++ right_consumers,
      {type, join_ops(kind, join, acc, fun, trigger), ops},
+     window}
+  end
+  defp start_producers({:departition, flow, acc_fun, merge_fun, done_fun},
+                       ops, start_link, window, options) do
+    {producers, consumers} = materialize(flow, start_link, :producer_consumer, options)
+    {type, {acc, fun, trigger}, ops} = ensure_ops(ops)
+
+    stages = Keyword.fetch!(flow.options, :stages)
+    partitions = Enum.to_list(0..stages-1)
+
+    {producers, consumers,
+     {type, departition_ops(acc, fun, trigger, partitions, acc_fun, merge_fun, done_fun), ops},
      window}
   end
   defp start_producers({:flows, flows}, ops, start_link, window, options) do
@@ -153,6 +166,53 @@ defmodule Flow.Materialize do
   defp ensure_ops(ops),
     do: ops
 
+  ## Departition
+
+  defp departition_ops(acc, fun, trigger, partitions, acc_fun, merge_fun, done_fun) do
+    acc = fn -> {acc.(), %{}} end
+
+    events = fn ref, events, {acc, windows}, index ->
+      {events, windows} = dispatch_departition(events, windows, partitions, acc_fun, merge_fun, done_fun)
+      {events, acc} = fun.(ref, :lists.reverse(events), acc, index)
+      {events, {acc, windows}}
+    end
+
+    trigger = fn {acc, windows}, index, op, name ->
+      {events, acc} = trigger.(acc, index, op, name)
+      {events, {acc, windows}}
+    end
+
+    {acc, events, trigger}
+  end
+
+  defp dispatch_departition(events, windows, partitions, acc_fun, merge_fun, done_fun) do
+    :lists.foldl(fn {state, partition, {_, window, name}}, {events, windows} ->
+      {partitions, acc} = get_window_data(windows, window, partitions, acc_fun)
+      partitions = remove_partition_on_done(name, partitions, partition)
+      acc = merge_fun.(state, acc)
+      case partitions do
+        [] ->
+          {[done_fun.(acc) | events], Map.delete(windows, window)}
+        _  ->
+          {events, Map.put(windows, window, {partitions, acc})}
+      end
+    end, {[], windows}, events)
+  end
+
+  defp remove_partition_on_done(:done, partitions, partition) do
+    List.delete(partitions, partition)
+  end
+  defp remove_partition_on_done(_, partitions, _) do
+    partitions
+  end
+
+  defp get_window_data(windows, window, partitions, acc_fun) do
+    case windows do
+      %{^window => value} -> value
+      %{} -> {partitions, acc_fun.()}
+    end
+  end
+
   ## Joins
 
   defp start_join(side, flow, key_fun, stages, start_link) do
@@ -171,7 +231,6 @@ defmodule Flow.Materialize do
   end
 
   defp join_ops(kind, join, acc, fun, trigger) do
-    ref = make_ref()
     acc = fn -> {%{}, %{}, acc.()} end
 
     events = fn ref, events, {left, right, acc}, index ->
@@ -179,6 +238,8 @@ defmodule Flow.Materialize do
       {events, acc} = fun.(ref, events, acc, index)
       {events, {left, right, acc}}
     end
+
+    ref = make_ref()
 
     trigger = fn
       {left, right, acc}, index, op, {_, _, :done} = name ->

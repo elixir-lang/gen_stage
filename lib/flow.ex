@@ -860,12 +860,12 @@ defmodule Flow do
   end
 
   @doc """
-  Unifies multiple partitions into one single stage.
+  Reduces multiple partitions into a single stage.
 
-  Once `Flow.departition/2` is called, computations no longer
+  Once `departition/5` is called, computations no longer
   happen concurrently until the data is once again partitioned.
 
-  `departition/2` is typically called as the last step in a flow
+  `departition/5` is typically invoked as the last step in a flow
   to merge the state from all previous partitions per window.
 
   It requires the a flow and three functions as arguments as
@@ -879,22 +879,55 @@ defmodule Flow do
 
   A set of options may also be given to customize with `:min_demand`
   and `:max_demand`.
+
+  ## Examples
+
+  For example, imagine we are counting words over a document. Each
+  partition ends up with a map of words as keys and count as values.
+  In the examples in the module documentation, we streamed those
+  results to a single client using `Enum.to_list/1`. However, we
+  could use `departition/1` to reduce the data over multiple stages
+  returning one single map with all results:
+
+      File.stream!("path/to/some/file")
+      |> Flow.from_enumerable()
+      |> Flow.map(&String.split/1)
+      |> Flow.partition()
+      |> Flow.reduce(fn -> %{} end, fn event, acc -> Map.update(acc, event, 1, & &1 + 1) end)
+      |> Flow.departition(&Map.new/0, &Map.merge/2, &(&1))
+      |> Enum.to_list
+
+  The departition function expects the initial accumulator, a function
+  that merges the data, and a final function invoked when the computation
+  is done.
+
+  Departition also works with windows and triggers. A new accumulator
+  is created per window and the merge function is invoked with the state
+  every time a trigger is emitted in any of the partitions. This can be
+  useful to compute the final state as computations happen instead of one
+  time at the end. For example, we could change the flow above so each
+  partition emits their whole intermediary state every 1000 items, merging
+  it into the departition more frequenty:
+
+      File.stream!("path/to/some/file")
+      |> Flow.from_enumerable()
+      |> Flow.map(&String.split/1)
+      |> Flow.partition(window: Flow.Window.global |> Flow.Window.trigger_every(1000, :reset))
+      |> Flow.reduce(fn -> %{} end, fn event, acc -> Map.update(acc, event, 1, & &1 + 1) end)
+      |> Flow.departition(&Map.new/0, &Map.merge(&1, &2, fn _, v1, v2 -> v1 + v2 end), &(&1))
+      |> Enum.to_list
+
+  Each approach is going to have different performance characteristics
+  and it is important to measure to verify which one will be more efficient
+  to the problem at hand.
   """
   def departition(%Flow{} = flow, acc_fun, merge_fun, done_fun, options \\ [])
-      when is_function(acc_fun, 0) and is_function(done_fun, 1) and
-           (is_function(merge_fun, 2) or is_function(merge_fun, 3)) do
+      when is_function(acc_fun, 0) and is_function(done_fun, 1) and is_function(merge_fun, 2) do
     unless has_reduce?(flow) do
       raise ArgumentError, "departition/5 must be called after a reduce/3 operation"
     end
 
-    merge_fun =
-      if is_function(merge_fun, 2) do
-        fn item, acc, _ -> merge_fun.(item, acc) end
-      else
-        merge_fun
-      end
-
-    flow = map_state(flow, fn state, partition, trigger ->
+    flow = map_state(flow, fn state, {partition, _}, trigger ->
       [{state, partition, trigger}]
     end)
 
