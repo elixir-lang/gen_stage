@@ -877,8 +877,8 @@ defmodule Flow do
       a given partition and the accumulator and merges them together.
     * the done function - a function that receives the final accumulator.
 
-  A set of options may also be given to customize with `:min_demand`
-  and `:max_demand`.
+  A set of options may also be given to customize with the `:window`,
+  `:min_demand` and `:max_demand`.
 
   ## Examples
 
@@ -931,13 +931,14 @@ defmodule Flow do
       [{state, partition, trigger}]
     end)
 
-    options =
+    {window, options} =
       options
       |> Keyword.put(:dispatcher, GenStage.DemandDispatcher)
       |> Keyword.put(:stages, 1)
+      |> Keyword.pop(:window, Flow.Window.global)
 
     %Flow{producers: {:departition, flow, acc_fun, merge_fun, done_fun},
-          options: options, window: Flow.Window.global}
+          options: options, window: window}
   end
 
   @doc """

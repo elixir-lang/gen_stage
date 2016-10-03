@@ -491,6 +491,49 @@ defmodule FlowTest do
     end
   end
 
+  describe "departition/2" do
+    test "joins partitioned data" do
+      assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+             |> Flow.partition(stages: 4)
+             |> Flow.reduce(fn -> 0 end, &+/2)
+             |> Flow.departition(fn -> [] end, &[&1 | &2], &Enum.sort/1)
+             |> Enum.at(0) == [7, 10, 16, 22]
+    end
+
+    test "joins partitioned data with triggers" do
+      assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+             |> Flow.partition(stages: 4, window: Flow.Window.global |> Flow.Window.trigger_every(2, :keep))
+             |> Flow.reduce(fn -> 0 end, &+/2)
+             |> Flow.departition(fn -> [] end, &[&1 | &2], &Enum.sort/1)
+             |> Enum.at(0) ==  [6, 7, 7, 8, 10, 16, 22, 22]
+
+      assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+             |> Flow.partition(stages: 4, window: Flow.Window.global |> Flow.Window.trigger_every(2, :reset))
+             |> Flow.reduce(fn -> 0 end, &+/2)
+             |> Flow.departition(fn -> [] end, &[&1 | &2], &Enum.sort/1)
+             |> Enum.at(0) == [0, 0, 6, 7, 8, 8, 10, 16]
+    end
+
+    test "joins partitioned data with map operations" do
+      assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+             |> Flow.partition(stages: 4)
+             |> Flow.reduce(fn -> 0 end, &+/2)
+             |> Flow.departition(fn -> [] end, &[&1 | &2], & &1)
+             |> Flow.map(&Enum.sort/1)
+             |> Enum.at(0) == [7, 10, 16, 22]
+    end
+
+    test "joins partitioned data with reduce operations" do
+      assert Flow.from_enumerables([[1, 2, 3], [4, 5, 6], 7..10])
+             |> Flow.partition(stages: 4, window: Flow.Window.global |> Flow.Window.trigger_every(2, :reset))
+             |> Flow.reduce(fn -> 0 end, &+/2)
+             |> Flow.departition(fn -> [] end, &[&1 | &2], &Enum.sort/1)
+             |> Flow.reduce(fn -> 0 end, & Enum.sum(&1) + &2)
+             |> Flow.emit(:state)
+             |> Enum.at(0) == 55
+    end
+  end
+
   defp merged_flows(options) do
     flow1 =
       Stream.take_every(1..100, 2)
