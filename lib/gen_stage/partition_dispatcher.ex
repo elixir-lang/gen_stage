@@ -37,7 +37,10 @@ defmodule GenStage.PartitionDispatcher do
     partitions = Keyword.get(opts, :partitions) ||
              raise ArgumentError, "the enumerable of :partitions is required when using the partition dispatcher"
 
-    partitions = for i <- partitions, do: {i, @init}, into: %{}
+    partitions = for i <- partitions, into: %{} do
+      Process.put(i, [])
+      {i, @init}
+    end
     range = map_size(partitions)
     hash = Keyword.get(opts, :hash, &hash(&1, range))
     {:ok, {make_ref(), hash, 0, 0, partitions, %{}}}
@@ -157,20 +160,19 @@ defmodule GenStage.PartitionDispatcher do
     {deliver_now, deliver_later, waiting} =
       split_events(events, waiting, [])
 
-    size = map_size(partitions)
-    countdown size, nil, fn i, nil -> Process.put(i, []) end
-
     for event <- deliver_now do
       {event, partition} = hash.(event)
       Process.put(partition, [event | Process.get(partition)])
     end
 
-    partitions = countdown size, partitions, &dispatch_per_partition/2
+    partitions =
+      partitions
+      |> :maps.to_list
+      |> dispatch_per_partition
+      |> :maps.from_list
+
     {:ok, deliver_later, {tag, hash, waiting, pending, partitions, references}}
   end
-
-  defp countdown(0, acc, _), do: acc
-  defp countdown(count, acc, fun), do: countdown(count - 1, fun.(count - 1, acc), fun)
 
   defp split_events(events, 0, acc),
     do: {:lists.reverse(acc), events, 0}
@@ -179,13 +181,12 @@ defmodule GenStage.PartitionDispatcher do
   defp split_events([event | events], counter, acc),
     do: split_events(events, counter - 1, [event | acc])
 
-  defp dispatch_per_partition(partition, partitions) do
-    case Process.delete(partition) do
+  defp dispatch_per_partition([{partition, {pid, ref, demand_or_queue} = value} | rest]) do
+    case Process.put(partition, []) do
       [] ->
-        partitions
+        [{partition, value} | dispatch_per_partition(rest)]
       events ->
         events = :lists.reverse(events)
-        {pid, ref, demand_or_queue} = Map.fetch!(partitions, partition)
 
         {events, demand_or_queue} =
           case demand_or_queue do
@@ -196,8 +197,11 @@ defmodule GenStage.PartitionDispatcher do
           end
 
         maybe_send(events, pid, ref)
-        Map.put(partitions, partition, {pid, ref, demand_or_queue})
+        [{partition, {pid, ref, demand_or_queue}} | dispatch_per_partition(rest)]
     end
+  end
+  defp dispatch_per_partition([]) do
+    []
   end
 
   defp split_into_queue(events, 0, acc),

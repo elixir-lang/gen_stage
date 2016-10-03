@@ -368,7 +368,7 @@ defmodule GenStage do
 
   For example, the `DynamicSupervisor` module processes events
   asynchronously by starting child process and such is done by
-  manully sending demand to producers. The `DynamicSupervisor`
+  manually sending demand to producers. The `DynamicSupervisor`
   can be used to keep distribute work to a limited amount of
   processes, behaving similar to a pool where a new process is
   started per event. The minimum amount of concurrent children per
