@@ -2,6 +2,15 @@
 
 ## v0.6.0-dev
 
+### Enhancements
+
+ * Include examples of broadcasters and rate limiters in the documentation
+ * Allow custom named, non-integer, partitions
+
+### Bug fixes
+
+  * Ensure dynamic supervisor respects `min_demand` and does not send demand to soon
+
 ### Backwards incompatible changes
 
   * Remove `Flow.new/0`, `Flow.new/1` and `Flow.new/2` in favor of passing options to `from_enumerable/2` and `from_stage/2`

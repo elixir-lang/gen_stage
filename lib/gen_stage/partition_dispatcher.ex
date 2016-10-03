@@ -12,21 +12,28 @@ defmodule GenStage.PartitionDispatcher do
   The partition dispatcher accepts the following options
   on initialization:
 
-    * `:partitions` - an eumerable that sets the names of the partitions
-      we will dispatch to.
+    * `:partitions` - the number of partitions to dispatch to. It may be
+      an integer with a total number of partitions, where each partition
+      is named from 0 up to `integer - 1`. For example, `partitions: 4`
+      will contains 4 partitions named 0, 1, 2 and 3.
+
+      It may also be an enumerable that specifies the name of every partition.
+      For instance, `partitions: [:odd, :even]` will build two partitions,
+      named `:odd` and `:even`.
 
     * `:hash` - the hashing algorithm, which receives the event and returns
-      the event and partition in a 2 element tuple. The default uses
-      `&:erlang.phash2(&1, Enum.count(partitions))` on the event to select
-      the partition.
+      a tuple with two elements, containing the event and the partition.
+      The partition must be one of the partitions specified in `:partitions`
+      above. The default uses `&:erlang.phash2(&1, Enum.count(partitions))`
+      on the event to select the partition.
 
   ## Subscribe options
 
   When subscribing to a `GenStage` with a partition dispatcher the following
   option is required:
 
-    * `:partition` - the name of the partition, must be included in the
-      `:partitions` enumerable set on initialization of the dispatcher.
+    * `:partition` - the name of the partition. The partition must be one of
+      the partitions specified in `:partitions` above.
   """
 
   @behaviour GenStage.Dispatcher
@@ -34,15 +41,24 @@ defmodule GenStage.PartitionDispatcher do
 
   @doc false
   def init(opts) do
-    partitions = Keyword.get(opts, :partitions) ||
-             raise ArgumentError, "the enumerable of :partitions is required when using the partition dispatcher"
+    partitions =
+      case Keyword.get(opts, :partitions) do
+        nil ->
+          raise ArgumentError, "the enumerable of :partitions is required when using the partition dispatcher"
+        partitions when is_integer(partitions) ->
+          0..partitions
+        partitions ->
+          partitions
+      end
 
-    partitions = for i <- partitions, into: %{} do
-      Process.put(i, [])
-      {i, @init}
-    end
-    range = map_size(partitions)
-    hash = Keyword.get(opts, :hash, &hash(&1, range))
+    partitions =
+      for i <- partitions, into: %{} do
+        Process.put(i, [])
+        {i, @init}
+      end
+
+    size = map_size(partitions)
+    hash = Keyword.get(opts, :hash, &hash(&1, size))
     {:ok, {make_ref(), hash, 0, 0, partitions, %{}}}
   end
 
