@@ -463,7 +463,7 @@ defmodule DynamicSupervisor do
     max = Keyword.get(opts, :max_demand, 1000)
     min = Keyword.get(opts, :min_demand, div(max, 2))
     GenStage.ask(from, max)
-    {:manual, put_in(state.producers[ref], {from, 0, max, min, max})}
+    {:manual, put_in(state.producers[ref], {from, 0, 0, min, max})}
   end
 
   @doc false
@@ -513,27 +513,26 @@ defmodule DynamicSupervisor do
   defp maybe_ask(ref, pid, events, down, children, state) do
     %{producers: producers} = state
     case producers do
-      %{^ref => {to, count, demand, min, max}} ->
-        new_count = count + events - down
-        demand = check_excess(ref, pid, demand - events)
-        ask = (max - new_count) - demand
-        _ = if ask > 0, do: GenStage.ask(to, ask)
-        new_demand = demand + ask
-        new_entry = {to, new_count, new_demand, min, max}
-        producers = Map.put(producers, ref, new_entry)
+      %{^ref => {to, count, pending, min, max}} ->
+        if count + events > max do
+          :error_logger.error_msg('DynamicSupervisor has received ~p events in excess from: ~p~n',
+                                  [count + events - max, {pid, ref}])
+        end
+
+        pending =
+          case pending + down do
+            ask when ask >= min ->
+              GenStage.ask(to, ask)
+              0
+            ask ->
+              ask
+          end
+
+        count = count + events - down
+        producers = Map.put(producers, ref, {to, count, pending, min, max})
         %{state | children: children, producers: producers}
       %{} ->
         %{state | children: children}
-    end
-  end
-
-  defp check_excess(ref, producer_id, remaining) do
-    if remaining < 0 do
-      :error_logger.error_msg('DynamicSupervisor has received ~p events in excess from: ~p~n',
-                              [abs(remaining), {producer_id, ref}])
-      0
-    else
-      remaining
     end
   end
 

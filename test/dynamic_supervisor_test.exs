@@ -600,7 +600,7 @@ defmodule DynamicSupervisorTest do
     end
 
     @tag :capture_log
-    test "supevisor exits when producer is dead and subscription is permanent" do
+    test "supervisor exits when producer is dead and subscription is permanent" do
       Process.flag(:trap_exit, true)
       {:ok, producer} = Producer.start_link()
       GenStage.stop(producer)
@@ -763,7 +763,7 @@ defmodule DynamicSupervisorTest do
       assert [] = DynamicSupervisor.which_children(sup)
     end
 
-    test "ask for more events when count shrinks below or equal to min" do
+    test "ask for more events when count reaches min_demand (high)" do
       _ = Process.flag(:trap_exit, true)
       {:ok, producer} = Producer.start_link()
       {:ok, sup} = Consumer.start_link()
@@ -791,6 +791,29 @@ defmodule DynamicSupervisorTest do
 
       Producer.sync_queue(producer, [:ok2])
       refute_received {:child_started, _child6}
+    end
+
+    test "ask for more events when count reaches min_demand (low)" do
+      {:ok, producer} = Task.start_link(fn ->
+        receive do
+          {:"$gen_producer", _, {:subscribe, _}} ->
+            receive do
+              {:"$gen_producer", {pid, ref}, {:ask, 3}} ->
+                send(pid, {:"$gen_consumer", {pid, ref}, [:ok2, :ok2]})
+                receive do
+                  {:"$gen_producer", _, {:ask, _}} ->
+                    raise "oops"
+                end
+            end
+        end
+      end)
+
+      {:ok, sup} = Consumer.start_link()
+      opts = [to: producer, cancel: :temporary, max_demand: 3, min_demand: 0]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+      assert_receive {:child_started, _child1}
+      assert_receive {:child_started, _child2}
+      refute_received {:child_started, _child3}
     end
   end
 
