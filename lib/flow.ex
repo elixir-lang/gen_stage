@@ -243,13 +243,13 @@ defmodule Flow do
   producers can also send such notifications by calling
   `GenStage.async_notification/2` from themselves:
 
-      # In case all the data is done
+      # In the case all the data is done
       GenStage.async_notification(self(), {:producer, :done})
 
-      # In case the producer halted due to an external factor
+      # In the case the producer halted due to an external factor
       GenStage.async_notification(self(), {:producer, :halt})
 
-  However, When working with an unbounded stream of data, there is
+  However, when working with an unbounded stream of data, there is
   no such thing as data completion. So when can we consider a reduce
   function to be "completed"?
 
@@ -421,7 +421,7 @@ defmodule Flow do
   ## Building
 
   @doc """
-  Starts a flow with the given enumerable as producer.
+  Starts a flow with the given enumerable as the producer.
 
   Calling this function is equivalent to:
 
@@ -449,7 +449,7 @@ defmodule Flow do
 
   These options configure the stages connected to producers before partitioning.
 
-    * `:window` - a window to run the next stages on, see `Flow.Window`
+    * `:window` - a window to run the next stages in, see `Flow.Window`
     * `:stages` - the number of stages
     * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
     * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
@@ -502,7 +502,7 @@ defmodule Flow do
 
   These options configure the stages connected to producers before partitioning.
 
-    * `:window` - a window to run the next stages on, see `Flow.Window`
+    * `:window` - a window to run the next stages in, see `Flow.Window`
     * `:stages` - the number of stages
     * `:buffer_keep` - how the buffer should behave, see `c:GenStage.init/1`
     * `:buffer_size` - how many events to buffer, see `c:GenStage.init/1`
@@ -521,10 +521,10 @@ defmodule Flow do
   events by emitting a notication using `GenStage.async_notification/2`
   from themselves:
 
-      # In case all the data is done
+      # In the case all the data is done
       GenStage.async_notification(self(), {:producer, :done})
 
-      # In case the producer halted due to an external factor
+      # In the case the producer halted due to an external factor
       GenStage.async_notification(self(), {:producer, :halt})
 
   Your producer may also keep track of all consumers and automatically
@@ -837,8 +837,8 @@ defmodule Flow do
       that receives a single argument: the event to partition on. However, to
       facilitate customization, `:hash` also allows common values, such
       `{:elem, 0}`, to specify the hash should be calculated on the first
-      element of a tuple. See more information on the "Hash shortcuts" section
-      below. The default value hashing function `&:erlang.phash2(&1, stages)`.
+      element of a tuple. (See the "Hash shortcuts" section below.) 
+      The default value hashing function `&:erlang.phash2(&1, stages)`.
     * `:dispatcher` - by default, `partition/2` uses `GenStage.PartitionDispatcher`
       with the given hash function but any other dispatcher can be given
     * `:min_demand` - the minimum demand for this subscription
@@ -868,7 +868,7 @@ defmodule Flow do
   `departition/5` is typically invoked as the last step in a flow
   to merge the state from all previous partitions per window.
 
-  It requires the a flow and three functions as arguments as
+  It requires a flow and three functions as arguments as
   described:
 
     * the accumulator function - a zero-arity function that returns
@@ -882,7 +882,7 @@ defmodule Flow do
 
   ## Examples
 
-  For example, imagine we are counting words over a document. Each
+  For example, imagine we are counting words in a document. Each
   partition ends up with a map of words as keys and count as values.
   In the examples in the module documentation, we streamed those
   results to a single client using `Enum.to_list/1`. However, we
