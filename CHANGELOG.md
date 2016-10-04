@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.1 (2016-10-05)
+
+### Bug fixes
+
+  * Properly count the most recent entry for each fixed window
+
 ## v0.6.0 (2016-10-04)
 
 ### Enhancements
