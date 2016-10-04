@@ -6,6 +6,16 @@
 
   * Remove `:milliseconds`, `:seconds`, `:minutes` and `:hours` for units in favor of `:millisecond`, `:second`, `:minute` and `:hour`
 
+### Bug fixes
+
+  * Properly emit the beginning of the window time on triggers for fixed windows
+
+## v0.6.1 (2016-10-05)
+
+### Bug fixes
+
+  * Properly count the most recent entry for each fixed window
+
 ## v0.6.0 (2016-10-04)
 
 ### Enhancements
