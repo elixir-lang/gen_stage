@@ -204,7 +204,7 @@ defmodule GenStage do
     1. what if events arrive and there are no consumers?
     2. what if consumers send demand and there are not enough events?
 
-  One way to implement such broadcaster is to simply rely on the internal
+  One way to implement such a broadcaster is to simply rely on the internal
   buffer available in GenStage, dispatching events as they arrive, as explained
   in the previous section:
 
@@ -337,26 +337,26 @@ defmodule GenStage do
 
   At this point, all consumers must have sent their demand which we were
   not able to fulfill. Now by calling `sync_notify`, the event shall be
-  broadcast to all consumers at once as we have buffered the demand in
+  broadcasted to all consumers at once as we have buffered the demand in
   the producer:
 
       Broadcaster.sync_notify(:hello_world)
 
   If we had called `Broadcaster.sync_notify(:hello_world)` before any
   consumer was available, the event would also be buffered in our own
-  queue and served only demand arrived.
+  queue and served only when demand is received.
 
   By having control over the demand and queue, the `Broadcaster` has
   full control on how to behave when there are no consumers, when the
-  queue grows too large and so forth.
+  queue grows too large, and so forth.
 
   ## Asynchronous work and `handle_subscribe`
 
   Both producer_consumer and consumer have been designed to do their
   work in the `c:handle_events/3` callback. This means that, after
   `c:handle_events/3` is invoked, both producer_consumer and consumer
-  will immediatally send demand upstream and ask for more items, as
-  it assumes events have been fully processed by `c:handle_event/3`.
+  will immediately send demand upstream and ask for more items, as
+  it assumes events have been fully processed by `c:handle_events/3`.
 
   Such default behaviour makes producer_consumer and consumer
   unfeasable for doing asynchronous work. However, given GenStage
@@ -377,7 +377,7 @@ defmodule GenStage do
   For example, the `DynamicSupervisor` module processes events
   asynchronously by starting child process and such is done by
   manually sending demand to producers. The `DynamicSupervisor`
-  can be used to keep distribute work to a limited amount of
+  can be used to distribute work to a limited amount of
   processes, behaving similar to a pool where a new process is
   started per event. The minimum amount of concurrent children per
   producer is specified by `min_demand` and the `maximum` is given
@@ -388,7 +388,7 @@ defmodule GenStage do
   only useful for asynchronous work but also for setting up other
   mechanisms for back-pressure. As an example, let's implement a
   consumer that is allowed to process a limited number of events
-  per time interval. Those are often called rate limitters:
+  per time interval. Those are often called rate limiters:
 
       defmodule RateLimiter do
         use GenStage

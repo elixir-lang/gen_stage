@@ -15,7 +15,7 @@ defmodule GenStage.PartitionDispatcher do
     * `:partitions` - the number of partitions to dispatch to. It may be
       an integer with a total number of partitions, where each partition
       is named from 0 up to `integer - 1`. For example, `partitions: 4`
-      will contains 4 partitions named 0, 1, 2 and 3.
+      will contain 4 partitions named 0, 1, 2 and 3.
 
       It may also be an enumerable that specifies the name of every partition.
       For instance, `partitions: [:odd, :even]` will build two partitions,

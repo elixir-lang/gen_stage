@@ -178,8 +178,8 @@ defmodule DynamicSupervisor do
   and `GenStage.async_subscribe/2`.
 
   Once subscribed, the supervisor will ask the producer for `max_demand` events
-  and start child processes as events arrive. As child process terminate, the
-  supervisor will accumulate demand and request for more events once `min_demand`
+  and start child processes as events arrive. As child processes terminate, the
+  supervisor will accumulate demand and request more events once `min_demand`
   is reached. This allows the `DynamicSupervisor` to work similar to a pool,
   except a child process is started per event. The minimum amount of concurrent
   children per producer is specified by `min_demand` and the `maximum` is given
@@ -236,7 +236,7 @@ defmodule DynamicSupervisor do
       in seconds. Defaults to 5 seconds.
 
     * `:max_dynamic` - the maximum number of children started under the
-      supervisor via `start_child/2`. Default to infinity children.
+      supervisor via `start_child/2`. Defaults to infinity children.
 
     * `:subscribe_to` - a list of producers to subscribe to. Each element
       represents the producer or a tuple with the producer and the subscription

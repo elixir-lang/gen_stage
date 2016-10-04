@@ -6,11 +6,11 @@
 
   * Introduce `Flow.departition/5`
   * Include examples of broadcasters and rate limiters in the documentation
-  * Allow custom named, non-integer, partitions
+  * Allow custom-named, non-integer partitions
 
 ### Bug fixes
 
-  * Ensure dynamic supervisor respects `min_demand` and does not send demand to soon
+  * Ensure dynamic supervisor respects `min_demand` and does not send demand too soon
 
 ### Backwards incompatible changes
 
