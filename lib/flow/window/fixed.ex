@@ -88,10 +88,16 @@ defmodule Flow.Window.Fixed do
     end
   end
 
+  defp recent_window(window, nil, windows, reducer_acc) do
+    case windows do
+      %{^window => acc} -> {:ok, acc, window}
+      %{} -> {:ok, reducer_acc.(), window}
+    end
+  end
   defp recent_window(window, recent, windows, reducer_acc) do
     case windows do
       %{^window => acc} -> {:ok, acc, max(window, recent)}
-      %{} when is_nil(recent) or window >= recent -> {:ok, reducer_acc.(), window}
+      %{} when window >= recent -> {:ok, reducer_acc.(), window}
       %{} -> :error
     end
   end

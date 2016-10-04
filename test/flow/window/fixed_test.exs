@@ -8,6 +8,15 @@ defmodule Flow.Window.FixedTest do
   end
 
   describe "single window" do
+    test "with multiple mappers and reducers" do
+      assert Flow.from_enumerable(1..100, stages: 4, max_demand: 5)
+             |> Flow.map(&(&1))
+             |> Flow.partition(window: single_window(), stages: 4)
+             |> Flow.reduce(fn -> 0 end, & &1 + &2)
+             |> Flow.emit(:state)
+             |> Enum.sum() == 5050
+    end
+
     test "trigger keep with large demand" do
       assert Flow.from_enumerable(1..100)
              |> Flow.partition(window: single_window() |> Flow.Window.trigger_every(10), stages: 1)
