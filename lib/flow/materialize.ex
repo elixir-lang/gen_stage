@@ -192,7 +192,7 @@ defmodule Flow.Materialize do
       acc = merge_fun.(state, acc)
       case partitions do
         [] ->
-          {[done_fun.(acc) | events], Map.delete(windows, window)}
+          {[done_fun.(acc, window) | events], Map.delete(windows, window)}
         _  ->
           {events, Map.put(windows, window, {partitions, acc})}
       end

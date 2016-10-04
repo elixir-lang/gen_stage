@@ -837,7 +837,7 @@ defmodule Flow do
       that receives a single argument: the event to partition on. However, to
       facilitate customization, `:hash` also allows common values, such
       `{:elem, 0}`, to specify the hash should be calculated on the first
-      element of a tuple. (See the "Hash shortcuts" section below.) 
+      element of a tuple. See the "Hash shortcuts" section below.
       The default value hashing function `&:erlang.phash2(&1, stages)`.
     * `:dispatcher` - by default, `partition/2` uses `GenStage.PartitionDispatcher`
       with the given hash function but any other dispatcher can be given
@@ -922,10 +922,18 @@ defmodule Flow do
   to the problem at hand.
   """
   def departition(%Flow{} = flow, acc_fun, merge_fun, done_fun, options \\ [])
-      when is_function(acc_fun, 0) and is_function(done_fun, 1) and is_function(merge_fun, 2) do
+      when is_function(acc_fun, 0) and is_function(merge_fun, 2) and
+           (is_function(done_fun, 1) or is_function(done_fun, 2)) do
     unless has_reduce?(flow) do
       raise ArgumentError, "departition/5 must be called after a reduce/3 operation"
     end
+
+    done_fun =
+      if is_function(done_fun, 1) do
+        fn acc, _ -> done_fun.(acc) end
+      else
+        done_fun
+      end
 
     flow = map_state(flow, fn state, {partition, _}, trigger ->
       [{state, partition, trigger}]
