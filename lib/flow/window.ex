@@ -88,10 +88,16 @@ defmodule Flow.Window do
   the distinction between event time and processing time. In particular,
   triggers created with the `trigger_periodically/4` function are
   intrinsically innacurate and therefore should not be used to split the
-  data. Periodic triggers are established per partition, which means
-  partitions will emit the triggers at different times. However, it is
-  exactly this lack of precision which makes them efficient for checkpointing
-  data.
+  data. For example, if you are measuring the frequency that events arrive,
+  using the event time will always yield the same result, while processing
+  time will be vulnerable to fluctuations if, for instance, an external
+  factor causes events to processed slower or faster than usual.
+
+  Futhermore, periodic triggers are established per partition and are
+  message-based, which means partitions will emit the triggers at different
+  times and possibly with delays based on the partition message queue size.
+  However, it is exactly this lack of precision which makes them efficient
+  for checkpointing data.
 
   Flow provides other window types exactly to address the issues with
   processing time. Windows use the event time which is based on the data
