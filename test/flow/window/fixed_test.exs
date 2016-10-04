@@ -4,7 +4,7 @@ defmodule Flow.Window.FixedTest do
   use ExUnit.Case, async: true
 
   defp single_window do
-    Flow.Window.fixed(1, :seconds, fn _ -> 0 end)
+    Flow.Window.fixed(1, :second, fn _ -> 0 end)
   end
 
   describe "single window" do
@@ -71,7 +71,7 @@ defmodule Flow.Window.FixedTest do
 
     test "trigger based on intervals" do
       assert Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)), max_demand: 5, stages: 2)
-             |> Flow.partition(window: single_window() |> Flow.Window.trigger_periodically(100, :milliseconds),
+             |> Flow.partition(window: single_window() |> Flow.Window.trigger_periodically(100, :millisecond),
                                stages: 1, max_demand: 10)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(& &1 * 2)
@@ -93,7 +93,7 @@ defmodule Flow.Window.FixedTest do
   end
 
   defp double_ordered_window do
-    Flow.Window.fixed(1, :seconds, fn
+    Flow.Window.fixed(1, :second, fn
       x when x <= 50 -> 0
       x when x <= 100 -> 1_000
     end)
@@ -153,17 +153,17 @@ defmodule Flow.Window.FixedTest do
 
     test "triggers for all windows" do
       assert Flow.from_enumerable(Stream.concat(1..100, Stream.timer(:infinity)), max_demand: 5, stages: 1)
-             |> Flow.partition(window: double_ordered_window() |> Flow.Window.trigger_periodically(100, :milliseconds),
+             |> Flow.partition(window: double_ordered_window() |> Flow.Window.trigger_periodically(100, :millisecond),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
              |> Enum.take(2) == [{1275, 0, :done},
-                                 {3775, 1000, {:periodically, 100, :milliseconds}}]
+                                 {3775, 1000, {:periodically, 100, :millisecond}}]
     end
   end
 
   defp double_unordered_window_without_lateness do
-    Flow.Window.fixed(1, :seconds, fn
+    Flow.Window.fixed(1, :second, fn
       x when x <= 40 -> 0
       x when x <= 80 -> 2_000
       x when x <= 100 -> 0 # Those events will be lost
@@ -226,13 +226,13 @@ defmodule Flow.Window.FixedTest do
 
     test "triggers for all windows" do
       assert Flow.from_enumerable(Stream.concat(1..100, Stream.timer(:infinity)), max_demand: 5, stages: 1)
-             |> Flow.partition(window: double_unordered_window_without_lateness() |> Flow.Window.trigger_periodically(100, :milliseconds),
+             |> Flow.partition(window: double_unordered_window_without_lateness() |> Flow.Window.trigger_periodically(100, :millisecond),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
              |> Enum.take(3) == [{820, 0, :done},
                                  {0, 1000, :done},
-                                 {2420, 2000, {:periodically, 100, :milliseconds}}]
+                                 {2420, 2000, {:periodically, 100, :millisecond}}]
     end
   end
 
@@ -301,11 +301,11 @@ defmodule Flow.Window.FixedTest do
   end
 
   defp double_unordered_window_with_lateness do
-    Flow.Window.fixed(1, :seconds, fn
+    Flow.Window.fixed(1, :second, fn
       x when x <= 40 -> 0
       x when x <= 80 -> 2_000
       x when x <= 100 -> 0 # Those events won't be lost due to lateness
-    end) |> Flow.Window.allowed_lateness(1, :hours)
+    end) |> Flow.Window.allowed_lateness(1, :hour)
   end
 
   # With one stage, termination happens when one stage is done.

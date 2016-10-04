@@ -53,7 +53,7 @@ defmodule FlowTest do
 
     test "on window without computation" do
       assert_raise ArgumentError, ~r"a window was set but no computation is happening on this partition", fn ->
-        Flow.from_enumerable([1, 2, 3], window: Flow.Window.fixed(1, :seconds, & &1))
+        Flow.from_enumerable([1, 2, 3], window: Flow.Window.fixed(1, :second, & &1))
         |> Enum.to_list
       end
     end
@@ -202,7 +202,7 @@ defmodule FlowTest do
 
     test "allows custom windowding" do
       window =
-        Flow.Window.fixed(1, :seconds, fn
+        Flow.Window.fixed(1, :second, fn
           x when x <= 50 -> 0
           x when x <= 100 -> 1_000
         end)
@@ -478,7 +478,7 @@ defmodule FlowTest do
 
     test "allows custom windowding" do
       window =
-        Flow.Window.fixed(1, :seconds, fn
+        Flow.Window.fixed(1, :second, fn
           x when x <= 50 -> 0
           x when x <= 100 -> 1_000
         end)
@@ -573,7 +573,7 @@ defmodule FlowTest do
 
     test "allows custom windowding" do
       window =
-        Flow.Window.fixed(1, :seconds, fn
+        Flow.Window.fixed(1, :second, fn
           x when x <= 100 -> 0
           x when x <= 200 -> 1_000
         end)
@@ -681,7 +681,7 @@ defmodule FlowTest do
     end
 
     test "outer joins two flows with windows" do
-      window = Flow.Window.fixed(10, :milliseconds, & &1) |> Flow.Window.trigger_every(2)
+      window = Flow.Window.fixed(10, :millisecond, & &1) |> Flow.Window.trigger_every(2)
       # Notice how 9 and 12 do not form a pair for being in different windows.
       assert Flow.window_join(:full_outer,
                               Flow.from_enumerable([0, 1, 2, 3, 9, 10, 11]),

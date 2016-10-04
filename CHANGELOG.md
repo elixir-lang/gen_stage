@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.0-dev
+
+### Backwards incompatible changes
+
+  * Remove `:milliseconds`, `:seconds`, `:minutes` and `:hours` for units in favor of `:millisecond`, `:second`, `:minute` and `:hour`
+
 ## v0.6.0 (2016-10-04)
 
 ### Enhancements

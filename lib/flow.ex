@@ -623,7 +623,7 @@ defmodule Flow do
       iex> posts = [%{id: 1, title: "hello", timestamp: 0}, %{id: 2, title: "world", timestamp: 1000}]
       iex> comments = [{1, "excellent", 0}, {1, "outstanding", 1000},
       ...>             {2, "great follow up", 1000}, {3, "unknown", 1000}]
-      iex> window = Flow.Window.fixed(1, :seconds, fn
+      iex> window = Flow.Window.fixed(1, :second, fn
       ...>   {_, _, timestamp} -> timestamp
       ...>   %{timestamp: timestamp} -> timestamp
       ...> end)

@@ -110,7 +110,7 @@ defmodule Flow.Window do
   the duration of the window and a function that retrieves the event time
   from each event:
 
-      Flow.Window.fixed(1, :hours, fn {word, timestamp} -> timestamp end)
+      Flow.Window.fixed(1, :hour, fn {word, timestamp} -> timestamp end)
 
   Let's see example that will use the window above to count the frequency
   of words based on windows that are 1 hour long. The timestamps used by
@@ -120,7 +120,7 @@ defmodule Flow.Window do
       iex> data = [{"elixir", 0}, {"elixir", 1_000}, {"erlang", 60_000},
       ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
       ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}]
-      iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
+      iex> window = Flow.Window.fixed(1, :hour, fn {_word, timestamp} -> timestamp end)
       iex> flow = Flow.from_enumerable(data, max_demand: 5, stages: 1)
       iex> flow = Flow.partition(flow, window: window, stages: 1)
       iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
@@ -151,7 +151,7 @@ defmodule Flow.Window do
       iex> data = [{"elixir", 1_000}, {"erlang", 60_000},
       ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
       ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}, {"elixir", 0}]
-      iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
+      iex> window = Flow.Window.fixed(1, :hour, fn {_word, timestamp} -> timestamp end)
       iex> flow = Flow.from_enumerable(data) |> Flow.partition(window: window, stages: 1, max_demand: 5)
       iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
       ...>   Map.update(acc, word, 1, & &1 + 1)
@@ -173,8 +173,8 @@ defmodule Flow.Window do
       iex> data = [{"elixir", 1_000}, {"erlang", 60_000},
       ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
       ...>         {"erlang", 5_000_000}, {"erlang", 6_000_000}, {"elixir", 0}]
-      iex> window = Flow.Window.fixed(1, :hours, fn {_word, timestamp} -> timestamp end)
-      iex> window = Flow.Window.allowed_lateness(window, 5, :minutes)
+      iex> window = Flow.Window.fixed(1, :hour, fn {_word, timestamp} -> timestamp end)
+      iex> window = Flow.Window.allowed_lateness(window, 5, :minute)
       iex> flow = Flow.from_enumerable(data) |> Flow.partition(window: window, stages: 1, max_demand: 5)
       iex> flow = Flow.reduce(flow, fn -> %{} end, fn {word, _}, acc ->
       ...>   Map.update(acc, word, 1, & &1 + 1)
@@ -342,8 +342,8 @@ defmodule Flow.Window do
   Such trigger will apply to every window that has changed since the last
   periodic trigger.
 
-  `count` must be a positive integer and `unit` is one of `:milliseconds`,
-  `:seconds`, `:minutes`, `:hours`. Notice such times are an estimate and
+  `count` must be a positive integer and `unit` is one of `:millisecond`,
+  `:second`, `:minute`, `:hour`. Notice such times are an estimate and
   intrinsically inaccurate as they are based on the processing time.
 
   The `keep_or_reset` argument must be one of `:keep` or `:reset`. If
@@ -371,11 +371,11 @@ defmodule Flow.Window do
     %{window | periodically: periodically}
   end
 
-  defp to_ms(count, :milliseconds), do: count
-  defp to_ms(count, :seconds), do: count * 1000
-  defp to_ms(count, :minutes), do: count * 1000 * 60
-  defp to_ms(count, :hours), do: count * 1000 * 60 * 60
-  defp to_ms(_count, unit), do: raise ArgumentError, "unknown unit #{inspect unit}"
+  defp to_ms(count, :millisecond), do: count
+  defp to_ms(count, :second), do: count * 1000
+  defp to_ms(count, :minute), do: count * 1000 * 60
+  defp to_ms(count, :hour), do: count * 1000 * 60 * 60
+  defp to_ms(_count, unit), do: raise ArgumentError, "unknown unit #{inspect unit} (expected :millisecond, :second, :minute or :hour)"
 
   defp add_trigger(%{trigger: nil} = window, trigger) do
     %{window | trigger: trigger}

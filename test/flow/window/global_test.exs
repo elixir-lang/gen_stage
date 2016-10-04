@@ -67,7 +67,7 @@ defmodule Flow.Window.GlobalTest do
 
   test "trigger based on intervals" do
     assert Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)), max_demand: 5)
-           |> Flow.partition(window: Flow.Window.global |> Flow.Window.trigger_periodically(100, :milliseconds),
+           |> Flow.partition(window: Flow.Window.global |> Flow.Window.trigger_periodically(100, :millisecond),
                              stages: 1, max_demand: 10)
            |> Flow.reduce(fn -> 0 end, & &1 + &2)
            |> Flow.map_state(& &1 * 2)
