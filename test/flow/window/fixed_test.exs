@@ -117,12 +117,12 @@ defmodule Flow.Window.FixedTest do
                                    {300, 0, {:every, 12}},
                                    {666, 0, {:every, 12}},
                                    {1176, 0, {:every, 12}},
-                                   {678, 1, {:every, 12}},
-                                   {1500, 1, {:every, 12}},
-                                   {2466, 1, {:every, 12}},
-                                   {3576, 1, {:every, 12}},
+                                   {678, 1000, {:every, 12}},
+                                   {1500, 1000, {:every, 12}},
+                                   {2466, 1000, {:every, 12}},
+                                   {3576, 1000, {:every, 12}},
                                    {1275, 0, :done},
-                                   {3775, 1, :done}]
+                                   {3775, 1000, :done}]
     end
 
     test "reduces per window with small demand" do
@@ -144,11 +144,11 @@ defmodule Flow.Window.FixedTest do
                                    {666, 0, {:every, 12}},
                                    {1176, 0, {:every, 12}},
                                    {1275, 0, :done},
-                                   {678, 1, {:every, 12}},
-                                   {1500, 1, {:every, 12}},
-                                   {2466, 1, {:every, 12}},
-                                   {3576, 1, {:every, 12}},
-                                   {3775, 1, :done}]
+                                   {678, 1000, {:every, 12}},
+                                   {1500, 1000, {:every, 12}},
+                                   {2466, 1000, {:every, 12}},
+                                   {3576, 1000, {:every, 12}},
+                                   {3775, 1000, :done}]
     end
 
     test "triggers for all windows" do
@@ -158,7 +158,7 @@ defmodule Flow.Window.FixedTest do
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
              |> Enum.take(2) == [{1275, 0, :done},
-                                 {3775, 1, {:periodically, 100, :milliseconds}}]
+                                 {3775, 1000, {:periodically, 100, :milliseconds}}]
     end
   end
 
@@ -188,14 +188,14 @@ defmodule Flow.Window.FixedTest do
              |> Enum.to_list() == [{78, 0, {:every, 12}},
                                    {300, 0, {:every, 12}},
                                    {666, 0, {:every, 12}},
-                                   {558, 2, {:every, 12}},
-                                   {1260, 2, {:every, 12}},
-                                   {2106, 2, {:every, 12}},
+                                   {558, 2000, {:every, 12}},
+                                   {1260, 2000, {:every, 12}},
+                                   {2106, 2000, {:every, 12}},
                                    {1496, 0, {:every, 12}},
                                    {2630, 0, {:every, 12}},
                                    {2630, 0, :done},
-                                   {0, 1, :done},
-                                   {2420, 2, :done}]
+                                   {0, 1000, :done},
+                                   {2420, 2000, :done}]
     end
 
     test "reduces per window with small demand" do
@@ -217,11 +217,11 @@ defmodule Flow.Window.FixedTest do
                                    {300, 0, {:every, 12}},
                                    {666, 0, {:every, 12}},
                                    {820, 0, :done},
-                                   {0, 1, :done},
-                                   {558, 2, {:every, 12}},
-                                   {1260, 2, {:every, 12}},
-                                   {2106, 2, {:every, 12}},
-                                   {2420, 2, :done}]
+                                   {0, 1000, :done},
+                                   {558, 2000, {:every, 12}},
+                                   {1260, 2000, {:every, 12}},
+                                   {2106, 2000, {:every, 12}},
+                                   {2420, 2000, :done}]
     end
 
     test "triggers for all windows" do
@@ -231,8 +231,8 @@ defmodule Flow.Window.FixedTest do
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.map_state(fn state, _, {:fixed, fixed, trigger} -> [{state, fixed, trigger}] end)
              |> Enum.take(3) == [{820, 0, :done},
-                                 {0, 1, :done},
-                                 {2420, 2, {:periodically, 100, :milliseconds}}]
+                                 {0, 1000, :done},
+                                 {2420, 2000, {:periodically, 100, :milliseconds}}]
     end
   end
 
@@ -255,14 +255,14 @@ defmodule Flow.Window.FixedTest do
              |> Enum.to_list() == [{78, 0, {:every, 12}},
                                    {300, 0, {:every, 12}},
                                    {666, 0, {:every, 12}},
-                                   {558, 2, {:every, 12}},
-                                   {1260, 2, {:every, 12}},
-                                   {2106, 2, {:every, 12}},
+                                   {558, 2000, {:every, 12}},
+                                   {1260, 2000, {:every, 12}},
+                                   {2106, 2000, {:every, 12}},
                                    {1496, 0, {:every, 12}},
                                    {2630, 0, {:every, 12}},
                                    {2630, 0, :done},
-                                   {0, 1, :done},
-                                   {2420, 2, :done}]
+                                   {0, 1000, :done},
+                                   {2420, 2000, :done}]
     end
 
     test "reduces per window with small demand" do
@@ -289,14 +289,14 @@ defmodule Flow.Window.FixedTest do
              |> Enum.to_list() == [{78, 0, {:every, 12}},
                                    {300, 0, {:every, 12}},
                                    {666, 0, {:every, 12}},
-                                   {558, 2, {:every, 12}},
-                                   {1260, 2, {:every, 12}},
-                                   {2106, 2, {:every, 12}},
+                                   {558, 2000, {:every, 12}},
+                                   {1260, 2000, {:every, 12}},
+                                   {2106, 2000, {:every, 12}},
                                    {1496, 0, {:every, 12}},
                                    {2630, 0, {:every, 12}},
                                    {2630, 0, :done},
-                                   {0, 1, :done},
-                                   {2420, 2, :done}]
+                                   {0, 1000, :done},
+                                   {2420, 2000, :done}]
     end
   end
 
@@ -326,16 +326,16 @@ defmodule Flow.Window.FixedTest do
              |> Enum.to_list() == [{78, 0, {:every, 12}},
                                    {300, 0, {:every, 12}},
                                    {666, 0, {:every, 12}},
-                                   {558, 2, {:every, 12}},
-                                   {1260, 2, {:every, 12}},
-                                   {2106, 2, {:every, 12}},
+                                   {558, 2000, {:every, 12}},
+                                   {1260, 2000, {:every, 12}},
+                                   {2106, 2000, {:every, 12}},
                                    {1496, 0, {:every, 12}},
                                    {2630, 0, {:every, 12}},
                                    {2630, 0, :watermark},
-                                   {0, 1, :watermark},
+                                   {0, 1000, :watermark},
                                    {2630, 0, :done},
-                                   {0, 1, :done},
-                                   {2420, 2, :done}]
+                                   {0, 1000, :done},
+                                   {2420, 2000, :done}]
     end
 
     test "reduces per window with small demand" do
@@ -357,15 +357,15 @@ defmodule Flow.Window.FixedTest do
                                    {300, 0, {:every, 12}},
                                    {666, 0, {:every, 12}},
                                    {820, 0, :watermark},
-                                   {0, 1, :watermark},
-                                   {558, 2, {:every, 12}},
-                                   {1260, 2, {:every, 12}},
-                                   {2106, 2, {:every, 12}},
+                                   {0, 1000, :watermark},
+                                   {558, 2000, {:every, 12}},
+                                   {1260, 2000, {:every, 12}},
+                                   {2106, 2000, {:every, 12}},
                                    {1496, 0, {:every, 12}},
                                    {2630, 0, {:every, 12}},
                                    {2630, 0, :done},
-                                   {0, 1, :done},
-                                   {2420, 2, :done}]
+                                   {0, 1000, :done},
+                                   {2420, 2000, :done}]
     end
   end
 end
