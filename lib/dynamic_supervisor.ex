@@ -240,7 +240,7 @@ defmodule DynamicSupervisor do
 
     * `:subscribe_to` - a list of producers to subscribe to. Each element
       represents the producer or a tuple with the producer and the subscription
-      options
+      options. e.g. `[Producer]` or `[{Producer, max_demand: 10, min_demand: 20}]`
   """
   @callback init(args :: term) ::
     {:ok, [Supervisor.Spec.spec], options :: keyword()} | :ignore
