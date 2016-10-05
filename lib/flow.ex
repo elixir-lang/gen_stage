@@ -15,7 +15,8 @@ defmodule Flow do
   improvements when working with larger collections. However,
   for certain cases, such as IO-bound flows, a smaller batch size
   can be configured through the `:min_demand` and `:max_demand`
-  options supported by `new/2` or `partition/3`.
+  options supported by `from_enumerable/2`, `from_stages/2` 
+  and `partition/3`.
 
   Flow also provides the concepts of "windows" and "triggers",
   which allow developers to split the data into arbitrary
@@ -347,13 +348,12 @@ defmodule Flow do
 
   ### Configuration (demand and the number of stages)
 
-  Both `new/2` and `partition/3` allow a set of options to configure
-  how flows work. In particular, we recommend that developers play with
-  the `:min_demand` and `:max_demand` options, which control the amount
-  of data sent between stages. The difference between `max_demand` and
-  `min_demand` works as the batch size when the producer is full. If the
-  producer has fewer events than requested by consumers, it usually sends the
-  remaining events available.
+  `from_enumerable/2`, `from_stages/2` and `partition/3` allow a set of 
+  options to configure how flows work. In particular, we recommend that 
+  developers play with the `:min_demand` and `:max_demand` options, which 
+  control the amount of data sent between stages. The difference between 
+  `max_demand` and `min_demand` works as the batch size when the producer 
+  is full. If the producer has fewer events than requested by consumers, 
 
   If stages perform IO, it may also be worth increasing
   the number of stages. The default value is `System.schedulers_online/0`,
@@ -575,7 +575,7 @@ defmodule Flow do
       at the end with `nil` for the right and left value respectively
 
   The joined partitions can be configured via `options` with the
-  same values as shown on `new/1`.
+  same values as shown on `from_enumerable/2` or `from_stages/2`.
 
   ## Examples
 
