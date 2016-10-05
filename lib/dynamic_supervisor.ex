@@ -95,9 +95,9 @@ defmodule DynamicSupervisor do
 
   Remember, the agent process for the previous stack is gone. The
   supervisor started a new stack but it has a new PID. For now,
-  let's use `DynamicSupervisor.children/1` to fetch the new PID:
+  let's use `DynamicSupervisor.which_children/1` to fetch the new PID:
 
-      [stack] = DynamicSupervisor.children(sup)
+      [stack] = DynamicSupervisor.which_children(sup)
       Stack.pop(stack) #=> :hello
 
   In practice though, it is unlikely we would use `children/1`.
@@ -240,7 +240,7 @@ defmodule DynamicSupervisor do
 
     * `:subscribe_to` - a list of producers to subscribe to. Each element
       represents the producer or a tuple with the producer and the subscription
-      options
+      options. e.g. `[Producer]` or `[{Producer, max_demand: 10, min_demand: 20}]`
   """
   @callback init(args :: term) ::
     {:ok, [Supervisor.Spec.spec], options :: keyword()} | :ignore

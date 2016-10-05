@@ -48,7 +48,7 @@ defmodule Consumer do
       worker(Printer, [], restart: :temporary)
     ]
 
-    {:ok, children, strategy: :one_for_one, subscribe_to: [Counter]}
+    {:ok, children, strategy: :one_for_one, subscribe_to: [{Counter, max_demand: 50}]}
   end
 end
 
