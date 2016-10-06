@@ -354,6 +354,7 @@ defmodule Flow do
   control the amount of data sent between stages. The difference between 
   `max_demand` and `min_demand` works as the batch size when the producer 
   is full. If the producer has fewer events than requested by consumers, 
+  it usually sends the remaining events available.
 
   If stages perform IO, it may also be worth increasing
   the number of stages. The default value is `System.schedulers_online/0`,
