@@ -379,6 +379,7 @@ defmodule Flow do
       streams
       |> Flow.from_enumerables()
       |> Flow.flat_map(&String.split(&1, " "))
+      |> Flow.partition()
       |> Flow.reduce(fn -> %{} end, fn word, acc ->
         Map.update(acc, word, 1, & &1 + 1)
       end)
