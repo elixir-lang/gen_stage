@@ -89,6 +89,7 @@ defmodule Flow.Materialize do
   end
   defp start_producers({:departition, flow, acc_fun, merge_fun, done_fun},
                        ops, start_link, window, options) do
+    flow = flow.window.__struct__.departition(flow)
     {producers, consumers} = materialize(flow, start_link, :producer_consumer, options)
     {type, {acc, fun, trigger}, ops} = ensure_ops(ops)
 

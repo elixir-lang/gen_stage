@@ -6,6 +6,10 @@ defmodule Flow.Window.Fixed do
   @enforce_keys [:by, :duration]
   defstruct [:by, :duration, :trigger, lateness: 0, periodically: []]
 
+  def departition(flow) do
+    flow
+  end
+
   def materialize(%{by: by, duration: duration, lateness: lateness},
                   reducer_acc, reducer_fun, reducer_trigger, _options) do
     ref = make_ref()

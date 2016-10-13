@@ -6,40 +6,40 @@ defmodule Flow.Window.Count do
   @enforce_keys [:count]
   defstruct [:count, :trigger, periodically: []]
 
+  def departition(flow) do
+    flow
+  end
+
   def materialize(%{count: max}, reducer_acc, reducer_fun, reducer_trigger, _options) do
     acc =
       fn -> {0, max, reducer_acc.()} end
 
     fun =
       fn ref, events, {window, count, acc}, index ->
-        traverse(events, window, count, [], acc,
+        dispatch(events, window, count, [], acc,
                  ref, index, max, reducer_acc, reducer_fun, reducer_trigger)
       end
 
     trigger =
-      fn
-        {window, _count, acc}, index, op, :done ->
-          {emit, acc} = reducer_trigger.(acc, index, op, {:count, window, :done})
-          {emit, {window + 1, max, acc}}
-        {window, count, acc}, index, op, name ->
-          {emit, acc} = reducer_trigger.(acc, index, op, {:count, window, name})
-          {emit, {window, count, acc}}
+      fn {window, count, acc}, index, op, name ->
+        {emit, acc} = reducer_trigger.(acc, index, op, {:count, window, name})
+        {emit, {window, count, acc}}
       end
 
     {acc, fun, trigger}
   end
 
-  defp traverse([], window, count, emit, acc, _ref, _index, _max, _reducer_acc, _reducer_fun, _reducer_trigger) do
+  defp dispatch([], window, count, emit, acc, _ref, _index, _max, _reducer_acc, _reducer_fun, _reducer_trigger) do
     {emit, {window, count, acc}}
   end
-  defp traverse(events, window, count, emit, acc, ref, index, max, reducer_acc, reducer_fun, reducer_trigger) do
+  defp dispatch(events, window, count, emit, acc, ref, index, max, reducer_acc, reducer_fun, reducer_trigger) do
     {count, events, rest} =
       collect(events, count, [])
     {reducer_emit, acc} =
       maybe_dispatch(events, acc, ref, index, window, reducer_fun)
     {trigger_emit, acc, window, count} =
       maybe_trigger(window, count, acc, index, max, reducer_acc, reducer_trigger)
-    traverse(rest, window, count, emit ++ reducer_emit ++ trigger_emit, acc,
+    dispatch(rest, window, count, emit ++ reducer_emit ++ trigger_emit, acc,
              ref, index, max, reducer_acc, reducer_fun, reducer_trigger)
   end
 

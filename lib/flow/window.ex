@@ -17,12 +17,19 @@ defmodule Flow.Window do
       split in any way. The window finishes when all producers notify
       there is no more data
 
-    * Fixed windows - splits the incoming events into periodic, non-
+    * Fixed windows - splits incoming events into periodic, non-
       overlaping windows. In other words, a given event belongs to a
       single window. If data arrives late, a configured lateness can
       be specified.
 
-    * Count windows - splits the incoming events based on a count.
+    * Count windows - splits incoming events based on a count.
+      Similar to fixed windows, a given event belongs to a a single
+      window.
+
+    * Session windows - splits incoming events into unique windows
+      which is grouped until there is a configured gap between event
+      times. Sessions are useful for data that is irregularly
+      distributed with respect to time.
 
   We discuss all types and include examples below. In the first section,
   "Global windows", we build the basic intuition about windows and triggers
@@ -220,6 +227,44 @@ defmodule Flow.Window do
   window per event count while a trigger belongs to a window. This behaviour
   may affect functions such as `Flow.departition/4`, which calls the `merge`
   callback per trigger but the `done` callback per window.
+
+  ## Session windows
+
+  Session windows are useful for data that is irregularly distributed with
+  respect to time. For example, GPS data contains moments of user activity
+  with long periods of user inactivity. Sessions allows us to group these
+  events together until there is a time gap between them.
+
+  Session windows by definition belong to a single key. Therefore the :key
+  option must be given to the partition alongside the window option. For
+  instance, in case of GPS data, the key would be the `device_id` or the
+  `user_id`.
+
+  To build on this example, imagine we want to calculate the distance
+  travelled by a user on certain trips based on GPS data. Let's assume the
+  movement happens on a one-dimensional line for simplicity. Our server
+  will receive streaming data from different users in the shape of:
+
+      {user_id, position, time_in_seconds}
+
+  Our code is going to calculate the location per user per trip based on
+  time inactivity:
+
+      iex> data = [{1, 32, 0}, {1, 35, 60}, {1, 40, 120},       # user 1 - trip 1
+      ...>         {2, 45, 60}, {2, 43, 70}, {2, 47, 200},      # user 2 - trip 1
+      ...>         {1, 40, 3600}, {1, 43, 3700}, {1, 50, 4000}] # user 1 - trip 2
+      iex> key = fn {user_id, _position, _time} -> user_id end  # Partition per user
+      iex> window = Flow.Window.session(20, :minute, fn {_user_id, _position, time} -> time * 1000 end)
+      iex> flow = Flow.from_enumerable(data) |> Flow.partition(key: key, window: window)
+      iex> flow = Flow.reduce(flow, fn -> :empty end, fn
+      ...>   {_, pos, _}, :empty -> {pos, 0} # initial point and distance
+      ...>   {_, pos, _}, {last, distance} -> {pos, abs(pos - last) + distance}
+      ...> end)
+      iex> flow = Flow.map_state(flow, fn {_, distance}, _partition, {:session, {user_id, start, last}, :done} ->
+      ...>   {user_id, distance, div(last - start, 1000)} # user_id travelled total in last - start seconds
+      ...> end)
+      iex> flow |> Flow.emit(:state) |> Enum.to_list()
+      [{2, 6, 140}, {1, 8, 120}, {1, 10, 400}]
   """
 
   @type t :: %{required(:trigger) => {fun(), fun()} | nil,
@@ -257,6 +302,8 @@ defmodule Flow.Window do
   Returns a global window.
 
   Global window triggers have the shape of `{:global, :global, trigger_name}`.
+
+  See the section on "Global windows" in the module documentation for examples.
   """
   @spec global :: t
   def global do
@@ -270,6 +317,8 @@ defmodule Flow.Window do
 
   Count window triggers have the shape of `{:count, window, trigger_name}`,
   where `window` is an incrementing integer identifying the window.
+
+  See the section on "Count windows" in the module documentation for examples.
   """
   @spec count(pos_integer) :: t
   def count(count) when is_integer(count) and count > 0 do
@@ -291,10 +340,31 @@ defmodule Flow.Window do
   first emit a `{:fixed, window, :watermark}` trigger when the window
   terminates and emit `{:fixed, window, :done}` only after the
   `allowed_lateness/3` duration has passed.
+
+  See the section on "Fixed windows" in the module documentation for examples.
   """
   @spec fixed(pos_integer, System.time_unit, (t -> pos_integer)) :: t
   def fixed(count, unit, by) when is_integer(count) and count > 0 and is_function(by, 1) do
     %Flow.Window.Fixed{duration: to_ms(count, unit), by: by}
+  end
+
+  @doc """
+  Returns a session window that works on gaps given by `count` `unit` and
+  the event time is calculated by the given function `by`.
+
+  `count` is a positive integer and `unit` is one of `:millisecond`,
+  `:second`, `:minute`, `:hour`.
+
+  Session window triggers have the shape of
+  `{:session, {key, first_time, last_time}, trigger_name}`, where `key`
+  is the window key, the `first_time` in the session and the `last_time`
+  on the session thus far.
+
+  See the section on "Session windows" in the module documentation for examples.
+  """
+  @spec session(pos_integer, System.time_unit, (t -> pos_integer)) :: t
+  def session(count, unit, by) when is_integer(count) and count > 0 and is_function(by, 1) do
+    %Flow.Window.Session{gap: to_ms(count, unit), by: by}
   end
 
   @doc """

@@ -103,8 +103,8 @@ defmodule Flow.Window.FixedTest do
 
   defp double_ordered_window do
     Flow.Window.fixed(1, :second, fn
-      x when x <= 50 -> 0
-      x when x <= 100 -> 1_000
+      x when x <= 50 -> 0 + x
+      x when x <= 100 -> 1_000 + x
     end)
   end
 
