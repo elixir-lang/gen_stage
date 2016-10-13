@@ -4,7 +4,7 @@ defmodule Flow.Window.Fixed do
   @moduledoc false
 
   @enforce_keys [:by, :duration]
-  defstruct [:by, :duration, :trigger, lateness: 0, periodically: []]
+  defstruct [:by, :duration, :trigger, lateness: {0, :keep}, periodically: []]
 
   def departition(flow) do
     flow
@@ -138,7 +138,7 @@ defmodule Flow.Window.Fixed do
     emit_trigger_messages(old + 1, new, windows, index, lateness, emit ++ new_emit)
   end
 
-  defp lateness_fun(lateness, duration, ref, reducer_acc, reducer_trigger) do
+  defp lateness_fun({lateness, op}, duration, ref, reducer_acc, reducer_trigger) do
     fn window, windows, index ->
       acc = Map.get_lazy(windows, window, reducer_acc)
 
@@ -148,7 +148,7 @@ defmodule Flow.Window.Fixed do
           {emit, Map.delete(windows, window)}
         _ ->
           Process.send_after(self(), {:trigger, :keep, {ref, window}}, lateness)
-          {emit, window_acc} = reducer_trigger.(acc, index, :keep, {:fixed, window * duration, :watermark})
+          {emit, window_acc} = reducer_trigger.(acc, index, op, {:fixed, window * duration, :watermark})
           {emit, Map.put(windows, window, window_acc)}
       end
     end

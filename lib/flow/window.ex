@@ -117,9 +117,9 @@ defmodule Flow.Window do
 
   ## Fixed windows
 
-  Non-global windows allow us to group the data based on the event times.
-  Regardless if the data is bounded or not, fixed windows allows us to
-  gather time-based insight about the data.
+  Fixed windows typically groups the data based on the event times.
+  Regardless if the data is bounded or not, fixed windows gives us
+  time-based insight about the data.
 
   Fixed windows are created via the `fixed/3` function which specified
   the duration of the window and a function that retrieves the event time
@@ -180,10 +180,10 @@ defmodule Flow.Window do
   flows we actually expect data to arrive late, especially when talking
   about concurrent data processing.
 
-  Luckily fixed windows include the concept of lateness, which is a
+  Luckily event-time windows include the concept of lateness, which is a
   processing time base period we would wait to receive late events.
   Let's change the example above once more but now change the window
-  to include the allowed_lateness parameter:
+  to also call `allowed_lateness/4`:
 
       iex> data = [{"elixir", 1_000}, {"erlang", 60_000},
       ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
@@ -336,10 +336,10 @@ defmodule Flow.Window do
   where `window` is an integer the represents the beginning timestamp for
   the current window.
 
-  If `allowed_lateness/3` is used with fixed windows, the window will
+  If `allowed_lateness/4` is used with fixed windows, the window will
   first emit a `{:fixed, window, :watermark}` trigger when the window
   terminates and emit `{:fixed, window, :done}` only after the
-  `allowed_lateness/3` duration has passed.
+  `allowed_lateness/4` duration has passed.
 
   See the section on "Fixed windows" in the module documentation for examples.
   """
@@ -371,15 +371,24 @@ defmodule Flow.Window do
   Sets a duration, in processing time, of how long we will
   wait for late events for a given window.
 
+  If allowed lateness is configured, once the window is finished,
+  it won't trigger a `:done` event but instead emit a `:watermark`.
+  The `keep_or_reset` option can configure if the state should be
+  kept or reset when the watermark is triggered. The window will
+  be done only when the allowed lateness time expires, effectively
+  emitting the `:done` trigger.
+
   `count` is a positive number. The `unit` may be a time unit
   (`:second`, :millisecond`, `:second`, `:minute` and `:hour`).
   """
-  @spec allowed_lateness(t, pos_integer, System.time_unit) :: t
-  def allowed_lateness(%{lateness: _} = window, count, unit) do
-    %{window | lateness: to_ms(count, unit)}
+  @spec allowed_lateness(t, pos_integer, System.time_unit, :keep | :reset) :: t
+  def allowed_lateness(window, count, unit, keep_or_reset \\ :keep)
+
+  def allowed_lateness(%{lateness: _} = window, count, unit, keep_or_reset) do
+    %{window | lateness: {to_ms(count, unit), keep_or_reset}}
   end
-  def allowed_lateness(window, _, _) do
-    raise ArgumentError, "allowed_lateness/3 not supported for window type #{inspect window}"
+  def allowed_lateness(window, _, _, _) do
+    raise ArgumentError, "allowed_lateness/4 not supported for window type #{inspect window}"
   end
 
   @doc """

@@ -309,22 +309,30 @@ defmodule Flow.Window.FixedTest do
     end
   end
 
-  defp double_unordered_window_with_lateness do
+  defp double_unordered_window_with_lateness(keep_or_reset \\ :keep) do
     Flow.Window.fixed(1, :second, fn
       x when x <= 40 -> 0
       x when x <= 80 -> 2_000
       x when x <= 100 -> 0 # Those events won't be lost due to lateness
-    end) |> Flow.Window.allowed_lateness(1, :hour)
+    end) |> Flow.Window.allowed_lateness(1, :hour, keep_or_reset)
   end
 
   # With one stage, termination happens when one stage is done.
   describe "double unordered windows with lateness with one stage" do
-    test "reduces per window with large demand" do
+    test "reduces per window with large demand and keep buffer" do
       assert Flow.from_enumerable(1..100, stages: 1)
-             |> Flow.partition(window: double_unordered_window_with_lateness(), stages: 1)
+             |> Flow.partition(window: double_unordered_window_with_lateness(:keep), stages: 1)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [2630, 0, 2630, 0, 2420]
+    end
+
+  test "reduces per window with large demand and reset buffer" do
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_with_lateness(:reset), stages: 1)
+             |> Flow.reduce(fn -> 0 end, & &1 + &2)
+             |> Flow.emit(:state)
+             |> Enum.to_list() ==  [2630, 0, 0, 0, 2420]
     end
 
     test "triggers per window with large demand" do
@@ -347,13 +355,22 @@ defmodule Flow.Window.FixedTest do
                                    {2420, 2000, :done}]
     end
 
-    test "reduces per window with small demand" do
+    test "reduces per window with small demand and keep buffer" do
       assert Flow.from_enumerable(1..100, stages: 1)
              |> Flow.partition(window: double_unordered_window_with_lateness(),
                                stages: 1, max_demand: 5, min_demand: 0)
              |> Flow.reduce(fn -> 0 end, & &1 + &2)
              |> Flow.emit(:state)
              |> Enum.to_list() == [820, 0, 2630, 0, 2420]
+    end
+
+    test "reduces per window with small demand and reset buffer" do
+      assert Flow.from_enumerable(1..100, stages: 1)
+             |> Flow.partition(window: double_unordered_window_with_lateness(:reset),
+                               stages: 1, max_demand: 5, min_demand: 0)
+             |> Flow.reduce(fn -> 0 end, & &1 + &2)
+             |> Flow.emit(:state)
+             |> Enum.to_list() == [820, 0, 1810, 0, 2420]
     end
 
     test "triggers per window with small demand" do
