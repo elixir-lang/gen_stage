@@ -16,7 +16,7 @@ defmodule Flow.Window.Fixed do
     #
     # 1. We start processing all events, grouping all events that belong
     #    to the same window and then reducing them. One of the outcomes
-    #    of this function is the most recent window for this given producer.
+    #    of this function is the most recent window for a given producer.
     #
     # 2. Next we store the most recent timestamp for the producer and get
     #    both mininum and maximum seen windows.
@@ -140,7 +140,7 @@ defmodule Flow.Window.Fixed do
 
       case lateness do
         0 ->
-          {emit, window_acc} = reducer_trigger.(acc, index, :keep, {:fixed, window * duration, :done})
+          {emit, _} = reducer_trigger.(acc, index, :keep, {:fixed, window * duration, :done})
           {emit, Map.delete(windows, window)}
         _ ->
           Process.send_after(self(), {:trigger, :keep, {ref, window}}, lateness)

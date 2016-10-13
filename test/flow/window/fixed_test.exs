@@ -90,14 +90,14 @@ defmodule Flow.Window.FixedTest do
 
     test "trigger based on timers" do
       assert Flow.from_enumerable(Stream.concat(1..10, Stream.timer(:infinity)), max_demand: 5, stages: 2)
-             |> Flow.partition(stages: 1, max_demand: 10)
+             |> Flow.partition(stages: 1, max_demand: 10, window: single_window())
              |> Flow.reduce(fn ->
                   Process.send_after(self(), {:trigger, :reset, :sample}, 200)
                   0
                 end, & &1 + &2)
              |> Flow.map_state(&{&1 * 2, &2, &3})
              |> Flow.emit(:state)
-             |> Enum.take(1) == [{110, {0, 1}, {:global, :global, :sample}}]
+             |> Enum.take(1) == [{110, {0, 1}, {:fixed, 0, :sample}}]
     end
   end
 

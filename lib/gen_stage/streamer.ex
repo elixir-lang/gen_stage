@@ -41,10 +41,10 @@ defmodule GenStage.Streamer do
   def handle_demand(demand, {consumers, continuation}) when demand > 0 do
     case continuation.({:cont, {[], demand}}) do
       {:suspended, {list, 0}, continuation} ->
-        {:noreply, Enum.reverse(list), {consumers, continuation}}
+        {:noreply, :lists.reverse(list), {consumers, continuation}}
       {status, {list, _}} ->
         GenStage.async_notify(self(), {:producer, status})
-        {:noreply, Enum.reverse(list), {consumers, status}}
+        {:noreply, :lists.reverse(list), {consumers, status}}
     end
   end
 end
