@@ -3,6 +3,7 @@ alias Experimental.Flow
 defmodule Flow.Window.Fixed do
   @moduledoc false
 
+  @enforce_keys [:by, :duration]
   defstruct [:by, :duration, :trigger, lateness: 0, periodically: []]
 
   def materialize(%{by: by, duration: duration, lateness: lateness},

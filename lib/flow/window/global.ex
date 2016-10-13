@@ -3,6 +3,7 @@ alias Experimental.Flow
 defmodule Flow.Window.Global do
   @moduledoc false
 
+  @enforce_keys []
   defstruct [:trigger, periodically: []]
 
   def materialize(_window, reducer_acc, reducer_fun, reducer_trigger) do

@@ -243,17 +243,35 @@ defmodule Flow.Window do
   end
 
   @doc """
+  Returns a count-based window of every `count` elements.
+
+  `count` must be a positive integer.
+  """
+  @spec count(pos_integer) :: t
+  def count(count) when is_integer(count) and count > 0 do
+    %Flow.Window.Count{count: count}
+  end
+
+  @doc """
   Returns a fixed window of duration `count` `unit` where the
   event time is calculated by the given function `by`.
+
+  `count` is a positive integer and `unit` is one of `:millisecond`,
+  `:second`, `:minute`, `:hour`.
   """
-  def fixed(count, unit, by) when is_function(by, 1) do
+  @spec fixed(pos_integer, System.time_unit, (t -> pos_integer)) :: t
+  def fixed(count, unit, by) when is_integer(count) and count > 0 and is_function(by, 1) do
     %Flow.Window.Fixed{duration: to_ms(count, unit), by: by}
   end
 
   @doc """
   Sets a duration, in processing time, of how long we will
   wait for late events for a given window.
+
+  `count` is a positive number. The `unit` may be a time unit
+  (`:second`, :millisecond`, `:second`, `:minute` and `:hour`).
   """
+  @spec allowed_lateness(t, pos_integer, System.time_unit) :: t
   def allowed_lateness(%{lateness: _} = window, count, unit) do
     %{window | lateness: to_ms(count, unit)}
   end
@@ -327,8 +345,9 @@ defmodule Flow.Window do
       [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
 
   """
+  @spec trigger_every(t, pos_integer, :keep | :reset) :: t
   def trigger_every(window, count, keep_or_reset \\ :keep)
-      when count > 0 and keep_or_reset in @trigger_operation do
+      when is_integer(count) and count > 0 and keep_or_reset in @trigger_operation do
     name = {:every, count}
 
     trigger(window, fn -> count end, fn events, acc ->
@@ -348,9 +367,11 @@ defmodule Flow.Window do
   Such trigger will apply to every window that has changed since the last
   periodic trigger.
 
-  `count` must be a positive integer and `unit` is one of `:millisecond`,
-  `:second`, `:minute`, `:hour`. Notice such times are an estimate and
-  intrinsically inaccurate as they are based on the processing time.
+  `count` is a positive integer and `unit` is one of `:millisecond`,
+  `:second`, `:minute`, `:hour`. Remember periodic triggers are established
+  per partition and are message-based, which means partitions will emit the
+  triggers at different times and possibly with delays based on the partition
+  message queue size.
 
   The `keep_or_reset` argument must be one of `:keep` or `:reset`. If
   `:keep`, the state accumulate so far on `reduce/3` will be kept, otherwise
@@ -371,8 +392,10 @@ defmodule Flow.Window do
   Similar to periodic triggers, message-based triggers will also be
   invoked to all windows that have changed since the last trigger.
   """
+  @spec trigger_periodically(t, pos_integer, System.time_unit, :keep | :reset) :: t
   def trigger_periodically(%{periodically: periodically} = window,
-                           count, unit, keep_or_reset \\ :keep) do
+                           count, unit, keep_or_reset \\ :keep)
+      when is_integer(count) and count > 0 do
     periodically = [{to_ms(count, unit), keep_or_reset, {:periodically, count, unit}} | periodically]
     %{window | periodically: periodically}
   end
