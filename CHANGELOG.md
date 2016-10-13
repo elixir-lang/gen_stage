@@ -13,7 +13,7 @@
 
 ### Bug fixes
 
-  * Ensure uneven partitions emits all windowws on `Flow.departition/4`
+  * Ensure uneven partitions emits all windows on `Flow.departition/4`
   * Properly emit the beginning of the window time on triggers for fixed windows
 
 ## v0.6.1 (2016-10-05)

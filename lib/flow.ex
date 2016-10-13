@@ -839,7 +839,7 @@ defmodule Flow do
       that receives a single argument: the event and must return its key.
       To facilitate customization, `:key` also allows common values, such as
       `{:elem, integer}` and `{:key, atom}, to calculate the hash based on a
-      tuple or a map field. See the "Keu shortcuts" section below.
+      tuple or a map field. See the "Key shortcuts" section below.
     * `:hash` - the hashing function. By default a hashing function is built
       on the key but a custom one may be specified as described in
       `GenStage.PartitionDispatcher`
