@@ -461,7 +461,7 @@ defmodule FlowTest do
 
     test "allows element based partitioning" do
       assert Flow.from_enumerables([[{1, 1}, {2, 2}, {3, 3}], [{1, 4}, {2, 5}, {3, 6}]])
-             |> Flow.partition(hash: {:elem, 0}, stages: 2)
+             |> Flow.partition(key: {:elem, 0}, stages: 2)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(fn acc -> [acc |> Enum.map(&elem(&1, 1)) |> Enum.sort()] end)
              |> Enum.sort() == [[1, 2, 4, 5], [3, 6]]
@@ -470,7 +470,7 @@ defmodule FlowTest do
     test "allows key based partitioning" do
       assert Flow.from_enumerables([[%{key: 1, value: 1}, %{key: 2, value: 2}, %{key: 3, value: 3}],
                                     [%{key: 1, value: 4}, %{key: 2, value: 5}, %{key: 3, value: 6}]])
-             |> Flow.partition(hash: {:key, :key}, stages: 2)
+             |> Flow.partition(key: {:key, :key}, stages: 2)
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(fn acc -> [acc |> Enum.map(& &1.value) |> Enum.sort()] end)
              |> Enum.sort() == [[1, 2, 4, 5], [3, 6]]

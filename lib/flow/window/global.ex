@@ -6,7 +6,7 @@ defmodule Flow.Window.Global do
   @enforce_keys []
   defstruct [:trigger, periodically: []]
 
-  def materialize(_window, reducer_acc, reducer_fun, reducer_trigger) do
+  def materialize(_window, reducer_acc, reducer_fun, reducer_trigger, _options) do
     acc = reducer_acc
 
     fun =

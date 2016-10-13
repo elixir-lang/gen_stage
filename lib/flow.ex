@@ -835,18 +835,20 @@ defmodule Flow do
     * `:window` - a `Flow.Window` struct which controls how the
        reducing function behaves, see `Flow.Window` for more information.
     * `:stages` - the number of partitions (reducer stages)
-    * `:hash` - the hash to use when partitioning. It is a function
-      that receives a single argument: the event to partition on and
-      returns the event and its partition. To facilitate customization,
-      `:hash` also allows common values, such as `{:elem, integer}` and
-      `{:key, atom}, to calculate the hash based on a tuple or a map field.
-      See the "Hash shortcuts" section below.
+    * `:key` - the key to use when partitioning. It is a function
+      that receives a single argument: the event and must return its key.
+      To facilitate customization, `:key` also allows common values, such as
+      `{:elem, integer}` and `{:key, atom}, to calculate the hash based on a
+      tuple or a map field. See the "Keu shortcuts" section below.
+    * `:hash` - the hashing function. By default a hashing function is built
+      on the key but a custom one may be specified as described in
+      `GenStage.PartitionDispatcher`
     * `:dispatcher` - by default, `partition/2` uses `GenStage.PartitionDispatcher`
       with the given hash function but any other dispatcher can be given
     * `:min_demand` - the minimum demand for this subscription
     * `:max_demand` - the maximum demand for this subscription
 
-  ## Hash shortcuts
+  ## Key shortcuts
 
   The following shortcuts can be given to the `:hash` option:
 
@@ -973,11 +975,6 @@ defmodule Flow do
 
   def merge([%Flow{} | _] = flows, options) when is_list(options) do
     {options, stages} = stages(options)
-    options =
-      case Keyword.fetch(options, :hash) do
-        {:ok, hash} -> Keyword.put(options, :hash, hash(hash, stages))
-        :error -> options
-      end
     {window, options} = Keyword.pop(options, :window, Flow.Window.global)
     %Flow{producers: {:flows, flows}, options: options, window: window}
   end
@@ -993,29 +990,6 @@ defmodule Flow do
         stages = System.schedulers_online()
         {[stages: stages] ++ options, stages}
     end
-  end
-
-  defp hash(fun, _) when is_function(fun, 1) do
-    fun
-  end
-  defp hash({:elem, pos}, stages) when pos >= 0 do
-    pos = pos + 1
-    &{&1, :erlang.phash2(:erlang.element(pos, &1), stages)}
-  end
-  defp hash({:key, key}, stages) do
-    &{&1, :erlang.phash2(Map.fetch!(&1, key), stages)}
-  end
-  defp hash(other, _) do
-    raise ArgumentError, """
-    expected :hash to be one of:
-
-      * a function expecting a single argument and returning
-        the event and the partition in a tuple
-      * {:elem, pos} when pos >= 0
-      * {:key, key}
-
-    instead got: #{inspect other}
-    """
   end
 
   @doc """

@@ -8,7 +8,8 @@
 
 ### Backwards incompatible changes
 
-  * Remove `:milliseconds`, `:seconds`, `:minutes` and `:hours` for units in favor of `:millisecond`, `:second`, `:minute` and `:hour`
+  * Remove `:milliseconds`, `:seconds`, `:minutes` and `:hours` for units in favor of `:millisecond`, `:second`, `:minute` and `:hour`. You will get an error in case you are using the previous values.
+  * Specifying shortcuts to `:hash` has been removed in favor of the `:key` option. You will get an error in case you are using the previous values.
 
 ### Bug fixes
 

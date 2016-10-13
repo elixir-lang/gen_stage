@@ -5,7 +5,6 @@ defmodule Flow.Materialize do
 
   @compile :inline_list_funcs
   @map_reducer_opts [:buffer_keep, :buffer_size, :dispatcher]
-  @dispatcher_opts [:hash]
 
   def materialize(%{producers: nil}, _, _, _) do
     raise ArgumentError, "cannot execute a flow without producers, " <>
@@ -53,7 +52,7 @@ defmodule Flow.Materialize do
     producers
   end
   defp start_stages({_mr, compiled_ops, _ops}, window, producers, start_link, type, opts) do
-    {acc, reducer, trigger} = window_ops(window, compiled_ops)
+    {acc, reducer, trigger} = window_ops(window, compiled_ops, opts)
     {stages, opts} = Keyword.pop(opts, :stages)
     {init_opts, subscribe_opts} = Keyword.split(opts, @map_reducer_opts)
 
@@ -157,8 +156,42 @@ defmodule Flow.Materialize do
 
   defp partition(options) do
     stages = Keyword.fetch!(options, :stages)
-    dispatcher_opts = [partitions: 0..stages-1] ++ Keyword.take(options, @dispatcher_opts)
+    hash = options[:hash] || hash_by_key(options[:key], stages)
+    dispatcher_opts = [partitions: 0..stages-1, hash: hash(hash)]
     [dispatcher: {GenStage.PartitionDispatcher, dispatcher_opts}]
+  end
+
+  defp hash(fun) when is_function(fun, 1) do
+    fun
+  end
+  defp hash(other) do
+    raise ArgumentError, "expected :hash to be a function that receives an event and " <>
+                         "returns a tuple with the event and its partition, got: #{inspect other}"
+  end
+
+  defp hash_by_key(nil, stages) do
+    &{&1, :erlang.phash2(&1, stages)}
+  end
+  defp hash_by_key({:elem, pos}, stages) when pos >= 0 do
+    pos = pos + 1
+    &{&1, :erlang.phash2(:erlang.element(pos, &1), stages)}
+  end
+  defp hash_by_key({:key, key}, stages) do
+    &{&1, :erlang.phash2(Map.fetch!(&1, key), stages)}
+  end
+  defp hash_by_key(fun, stages) when is_function(fun, 1) do
+    &{&1, :erlang.phash2(fun.(&1), stages)}
+  end
+  defp hash_by_key(other, _) do
+    raise ArgumentError, """
+    expected :key to be one of:
+
+      * a function expecting an event and returning a key
+      * {:elem, pos} when pos >= 0
+      * {:key, key}
+
+    instead got: #{inspect other}
+    """
   end
 
   defp ensure_ops(:none),
@@ -312,11 +345,11 @@ defmodule Flow.Materialize do
   ## Windows
 
   defp window_ops(%{trigger: trigger, periodically: periodically} = window,
-                  {reducer_acc, reducer_fun, reducer_trigger}) do
+                  {reducer_acc, reducer_fun, reducer_trigger}, options) do
     {window_acc, window_fun, window_trigger} =
       window_trigger(trigger, reducer_acc, reducer_fun, reducer_trigger)
     {type_acc, type_fun, type_trigger} =
-      window.__struct__.materialize(window, window_acc, window_fun, window_trigger)
+      window.__struct__.materialize(window, window_acc, window_fun, window_trigger, options)
     {window_periodically(type_acc, periodically), type_fun, type_trigger}
   end
 

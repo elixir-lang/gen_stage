@@ -6,7 +6,7 @@ defmodule Flow.Window.Count do
   @enforce_keys [:count]
   defstruct [:count, :trigger, periodically: []]
 
-  def materialize(%{count: max}, reducer_acc, reducer_fun, reducer_trigger) do
+  def materialize(%{count: max}, reducer_acc, reducer_fun, reducer_trigger, _options) do
     acc =
       fn -> {0, max, reducer_acc.()} end
 

@@ -7,7 +7,7 @@ defmodule Flow.Window.Fixed do
   defstruct [:by, :duration, :trigger, lateness: 0, periodically: []]
 
   def materialize(%{by: by, duration: duration, lateness: lateness},
-                  reducer_acc, reducer_fun, reducer_trigger) do
+                  reducer_acc, reducer_fun, reducer_trigger, _options) do
     ref = make_ref()
     acc = fn -> {nil, %{}} end
     lateness_fun = lateness_fun(lateness, duration, ref, reducer_acc, reducer_trigger)
