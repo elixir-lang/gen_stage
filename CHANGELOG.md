@@ -2,12 +2,17 @@
 
 ## v0.7.0-dev
 
+### Enhancements
+
+  * Introduce count-based windows and session-based windows
+
 ### Backwards incompatible changes
 
   * Remove `:milliseconds`, `:seconds`, `:minutes` and `:hours` for units in favor of `:millisecond`, `:second`, `:minute` and `:hour`
 
 ### Bug fixes
 
+  * Ensure uneven partitions emits all windowws on `Flow.departition/4`
   * Properly emit the beginning of the window time on triggers for fixed windows
 
 ## v0.6.1 (2016-10-05)
