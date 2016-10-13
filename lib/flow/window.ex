@@ -263,8 +263,8 @@ defmodule Flow.Window do
       iex> flow = Flow.map_state(flow, fn {_, distance}, _partition, {:session, {user_id, start, last}, :done} ->
       ...>   {user_id, distance, div(last - start, 1000)} # user_id travelled total in last - start seconds
       ...> end)
-      iex> flow |> Flow.emit(:state) |> Enum.to_list()
-      [{2, 6, 140}, {1, 8, 120}, {1, 10, 400}]
+      iex> flow |> Flow.emit(:state) |> Enum.sort()
+      [{1, 8, 120}, {1, 10, 400}, {2, 6, 140}]
   """
 
   @type t :: %{required(:trigger) => {fun(), fun()} | nil,

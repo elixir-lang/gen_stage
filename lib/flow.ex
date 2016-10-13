@@ -470,7 +470,7 @@ defmodule Flow do
   def from_enumerables(enumerables, options \\ [])
 
   def from_enumerables([_ | _] = enumerables, options) do
-    {options, _} = stages(options)
+    options = stages(options)
     {window, options} = Keyword.pop(options, :window, Flow.Window.global)
     %Flow{producers: {:enumerables, enumerables}, options: options, window: window}
   end
@@ -536,7 +536,7 @@ defmodule Flow do
   def from_stages(stages, options \\ [])
 
   def from_stages([_ | _] = stages, options) do
-    {options, _} = stages(options)
+    options = stages(options)
     {window, options} = Keyword.pop(options, :window, Flow.Window.global)
     %Flow{producers: {:stages, stages}, options: options, window: window}
   end
@@ -648,7 +648,7 @@ defmodule Flow do
                   left_key, right_key, join, options \\ [])
       when is_function(left_key, 1) and is_function(right_key, 1) and
            is_function(join, 2) and mode in @joins do
-    {options, _} = stages(options)
+    options = stages(options)
     %Flow{producers: {:join, mode, left, right, left_key, right_key, join},
           options: options, window: window}
   end
@@ -974,7 +974,7 @@ defmodule Flow do
   def merge(flows, options \\ [])
 
   def merge([%Flow{} | _] = flows, options) when is_list(options) do
-    {options, stages} = stages(options)
+    options = stages(options)
     {window, options} = Keyword.pop(options, :window, Flow.Window.global)
     %Flow{producers: {:flows, flows}, options: options, window: window}
   end
@@ -984,11 +984,11 @@ defmodule Flow do
 
   defp stages(options) do
     case Keyword.fetch(options, :stages) do
-      {:ok, stages} ->
-        {options, stages}
+      {:ok, _} ->
+        options
       :error ->
         stages = System.schedulers_online()
-        {[stages: stages] ++ options, stages}
+        [stages: stages] ++ options
     end
   end
 
