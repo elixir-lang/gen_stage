@@ -66,7 +66,7 @@ defmodule Flow.MapReducer do
     {[], acc, [], true}
   end
   defp maybe_done(%{done: done, done?: false, trigger: trigger, consumers: consumers},
-                    index, acc, ref) do
+                  index, acc, ref) do
     case List.delete(done, ref) do
       [] when done != [] ->
         {events, acc} = trigger.(acc, index, :keep, :done)

@@ -15,7 +15,7 @@ defmodule Flow do
   improvements when working with larger collections. However,
   for certain cases, such as IO-bound flows, a smaller batch size
   can be configured through the `:min_demand` and `:max_demand`
-  options supported by `from_enumerable/2`, `from_stages/2` 
+  options supported by `from_enumerable/2`, `from_stages/2`
   and `partition/3`.
 
   Flow also provides the concepts of "windows" and "triggers",
@@ -348,12 +348,12 @@ defmodule Flow do
 
   ### Configuration (demand and the number of stages)
 
-  `from_enumerable/2`, `from_stages/2` and `partition/3` allow a set of 
-  options to configure how flows work. In particular, we recommend that 
-  developers play with the `:min_demand` and `:max_demand` options, which 
-  control the amount of data sent between stages. The difference between 
-  `max_demand` and `min_demand` works as the batch size when the producer 
-  is full. If the producer has fewer events than requested by consumers, 
+  `from_enumerable/2`, `from_stages/2` and `partition/3` allow a set of
+  options to configure how flows work. In particular, we recommend that
+  developers play with the `:min_demand` and `:max_demand` options, which
+  control the amount of data sent between stages. The difference between
+  `max_demand` and `min_demand` works as the batch size when the producer
+  is full. If the producer has fewer events than requested by consumers,
   it usually sends the remaining events available.
 
   If stages perform IO, it may also be worth increasing
@@ -836,11 +836,11 @@ defmodule Flow do
        reducing function behaves, see `Flow.Window` for more information.
     * `:stages` - the number of partitions (reducer stages)
     * `:hash` - the hash to use when partitioning. It is a function
-      that receives a single argument: the event to partition on. However, to
-      facilitate customization, `:hash` also allows common values, such
-      `{:elem, 0}`, to specify the hash should be calculated on the first
-      element of a tuple. See the "Hash shortcuts" section below.
-      The default value hashing function `&:erlang.phash2(&1, stages)`.
+      that receives a single argument: the event to partition on and
+      returns the event and its partition. To facilitate customization,
+      `:hash` also allows common values, such as `{:elem, integer}` and
+      `{:key, atom}, to calculate the hash based on a tuple or a map field.
+      See the "Hash shortcuts" section below.
     * `:dispatcher` - by default, `partition/2` uses `GenStage.PartitionDispatcher`
       with the given hash function but any other dispatcher can be given
     * `:min_demand` - the minimum demand for this subscription

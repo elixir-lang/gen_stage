@@ -508,6 +508,14 @@ defmodule FlowTest do
              |> Enum.at(0) == {:global, [7, 10, 16, 22]}
     end
 
+    test "joins uneven partitioned data" do
+      assert Flow.from_enumerable(1..10)
+             |> Flow.partition(stages: 2, window: Flow.Window.count(3), hash: fn 0 -> {0, 0}; x -> {x, 1} end)
+             |> Flow.reduce(fn -> 0 end, &+/2)
+             |> Flow.departition(fn -> [] end, &[&1 | &2], &Enum.sort/1)
+             |> Enum.to_list() ==  [[0, 6], [15], [24], [10]]
+    end
+
     test "joins partitioned data with triggers" do
       assert Flow.from_enumerable(1..10)
              |> Flow.partition(stages: 4, window: Flow.Window.global |> Flow.Window.trigger_every(2, :keep))

@@ -168,18 +168,27 @@ defmodule Flow.Materialize do
 
   ## Departition
 
-  defp departition_ops(acc, fun, trigger, partitions, acc_fun, merge_fun, done_fun) do
-    acc = fn -> {acc.(), %{}} end
+  defp departition_ops(reducer_acc, reducer_fun, reducer_trigger, partitions, acc_fun, merge_fun, done_fun) do
+    acc = fn -> {reducer_acc.(), %{}} end
 
     events = fn ref, events, {acc, windows}, index ->
       {events, windows} = dispatch_departition(events, windows, partitions, acc_fun, merge_fun, done_fun)
-      {events, acc} = fun.(ref, :lists.reverse(events), acc, index)
+      {events, acc} = reducer_fun.(ref, :lists.reverse(events), acc, index)
       {events, {acc, windows}}
     end
 
-    trigger = fn {acc, windows}, index, op, name ->
-      {events, acc} = trigger.(acc, index, op, name)
-      {events, {acc, windows}}
+    trigger = fn
+      {acc, windows}, index, op, {_, _, :done} = name ->
+        done =
+          for {window, {_partitions, acc}} <- :lists.sort(:maps.to_list(windows)) do
+            done_fun.(acc, window)
+          end
+        {events, _} = reducer_trigger.(acc, index, op, name)
+        {done ++ events, {reducer_acc.(), %{}}}
+
+      {acc, windows}, index, op, name ->
+        {events, acc} = reducer_trigger.(acc, index, op, name)
+        {events, {acc, windows}}
     end
 
     {acc, events, trigger}
