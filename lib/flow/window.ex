@@ -22,6 +22,8 @@ defmodule Flow.Window do
       single window. If data arrives late, a configured lateness can
       be specified.
 
+    * Count windows - splits the incoming events based on a count.
+
   We discuss all types and include examples below. In the first section,
   "Global windows", we build the basic intuition about windows and triggers
   and explore more complex types afterwards.
@@ -201,6 +203,23 @@ defmodule Flow.Window do
   The trigger parameter will include the type of window, the current
   window and what caused the window to be emitted (`:watermark` or
   `:done`).
+
+  ## Count windows
+
+  Count windows are simpler versions of fixed windows where windows are split
+  apart by event count. Since it is not timed-based, it does not provide the
+  concept of lateness.
+
+      iex> window = Flow.Window.count(10)
+      iex> flow = Flow.from_enumerable(1..100) |> Flow.partition(window: window, stages: 1)
+      iex> flow |> Flow.reduce(fn -> 0 end, & &1 + &2) |> Flow.emit(:state) |> Enum.to_list()
+      [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
+
+  Count windows are also similar to global windows that use `trigger_every/2`
+  to emit events periodically. The difference is that count windows emit a
+  window per event count while a trigger belongs to a window. This behaviour
+  may affect functions such as `Flow.departition/4`, which calls the `merge`
+  callback per trigger but the `done` callback per window.
   """
 
   @type t :: %{required(:trigger) => {fun(), fun()} | nil,
@@ -236,6 +255,8 @@ defmodule Flow.Window do
 
   @doc """
   Returns a global window.
+
+  Global window triggers have the shape of `{:global, :global, trigger_name}`.
   """
   @spec global :: t
   def global do
@@ -246,6 +267,9 @@ defmodule Flow.Window do
   Returns a count-based window of every `count` elements.
 
   `count` must be a positive integer.
+
+  Count window triggers have the shape of `{:count, window, trigger_name}`,
+  where `window` is an incrementing integer identifying the window.
   """
   @spec count(pos_integer) :: t
   def count(count) when is_integer(count) and count > 0 do
@@ -258,6 +282,15 @@ defmodule Flow.Window do
 
   `count` is a positive integer and `unit` is one of `:millisecond`,
   `:second`, `:minute`, `:hour`.
+
+  Fixed window triggers have the shape of `{:fixed, window, trigger_name}`,
+  where `window` is an integer the represents the beginning timestamp for
+  the current window.
+
+  If `allowed_lateness/3` is used with fixed windows, the window will
+  first emit a `{:fixed, window, :watermark}` trigger when the window
+  terminates and emit `{:fixed, window, :done}` only after the
+  `allowed_lateness/3` duration has passed.
   """
   @spec fixed(pos_integer, System.time_unit, (t -> pos_integer)) :: t
   def fixed(count, unit, by) when is_integer(count) and count > 0 and is_function(by, 1) do

@@ -862,7 +862,7 @@ defmodule Flow do
   end
 
   @doc """
-  Reduces multiple partitions into a single stage.
+  Reduces windows over multiple partitions into a single stage.
 
   Once `departition/5` is called, computations no longer
   happen concurrently until the data is once again partitioned.
@@ -1165,23 +1165,41 @@ defmodule Flow do
   the state accumulated by `reduce/3`. `map_state/2` is invoked
   per window on every stage whenever there is a trigger: this
   gives us an understanding of the window data while leveraging
-  the parallelism between states.
+  the parallelism between stages.
 
-  The `mapper` function may have arity 1, 2 or 3:
+  ## The mapper function
 
-    * when 1 - the state is given as argument
-    * when 2 - the state and the stage indexes are given as arguments.
-      The index is a tuple with the current stage index as first element
-      and the total number of stages for this partition as second
-    * when 3 - the state, the stage indexes and a tuple with window-
-      trigger parameters are given as argument. The tuple contains the
-      window type, the window identifier and the trigger name. By default,
-      the window is `:global`, which implies the `:global` identifier with
-      a default trigger of `:done`, emitted when there is no more data to
-      process.
+  The `mapper` function may have arity 1, 2 or 3.
 
-  The value returned by this function is passed forward to the upcoming
-  flow functions.
+  The first argument is the state.
+
+  The second argument is optional and contains the partition index.
+  The partition index is a two-element tuple identifying the current
+  partition and the total number of partitions as second element. For
+  example, for a partition with 4 stages, the partition index will be
+  the values `{0, 4}`, `{1, 4}`, `{2, 4}` and `{3, 4}`.
+
+  The third argument is optional and contains the window-trigger information.
+  This information is a three-element tuple containing the window name,
+  the window identifier and the trigger name. For example, a global window
+  created with `Flow.Window.global/0` will emit on termination:
+
+      {:global, :global, :done}
+
+  A `Flow.Window.global/0` window with a count trigger created with
+  `Flow.Window.trigger_every/2` will also emit:
+
+      {:global, :global, {:every, 20}}
+
+  A `Flow.Window.fixed/3` window will emit on done:
+
+      {:fixed, window, :done}
+
+  Where `window` is an integer identifying the timestamp for the window
+  being triggered.
+
+  The value returned by the `mapper` function is passed forward to the
+  upcoming flow functions.
 
   ## Examples
 
