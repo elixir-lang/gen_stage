@@ -18,16 +18,16 @@ defmodule Flow.Window do
       there is no more data
 
     * Fixed windows - splits incoming events into periodic, non-
-      overlaping windows based on event times. In other words, a given
+      overlapping windows based on event times. In other words, a given
       event belongs to a single window. If data arrives late, a configured
       lateness can be specified.
 
-    * Periodic windows - splits incomng events into periodic, non-
-      overlaping windows based on processing times. Similar to fixed
-      windows, a given event belongs to a a single window.
+    * Periodic windows - splits incoming events into periodic, non-
+      overlapping windows based on processing times. Similar to fixed
+      windows, a given event belongs to a single window.
 
     * Count windows - splits incoming events based on a count.
-      Similar to fixed windows, a given event belongs to a a single
+      Similar to fixed windows, a given event belongs to a single
       window.
 
     * Session windows - splits incoming events into unique windows
@@ -43,7 +43,7 @@ defmodule Flow.Window do
 
   ## Global windows
 
-  By default, all events belongs to the global window. The global window
+  By default, all events belong to the global window. The global window
   is automatically attached to a partition if no window is specified.
   The flow below:
 
@@ -104,13 +104,13 @@ defmodule Flow.Window do
   Before we move to other window types, it is important to discuss
   the distinction between event time and processing time. In particular,
   triggers created with the `trigger_periodically/4` function are
-  intrinsically innacurate and therefore should not be used to split the
+  intrinsically inaccurate and therefore should not be used to split the
   data. For example, if you are measuring the frequency that events arrive,
   using the event time will always yield the same result, while processing
   time will be vulnerable to fluctuations if, for instance, an external
   factor causes events to processed slower or faster than usual.
 
-  Futhermore, periodic triggers are established per partition and are
+  Furthermore, periodic triggers are established per partition and are
   message-based, which means partitions will emit the triggers at different
   times and possibly with delays based on the partition message queue size.
   However, it is exactly this lack of precision which makes them efficient
@@ -137,7 +137,7 @@ defmodule Flow.Window do
 
   Let's see an example that will use the window above to count the frequency
   of words based on windows that are 1 hour long. The timestamps used by
-  Flow are integers in milliseconds. For now we will also set the concurrency
+  Flow are integers in milliseconds. For now, we will also set the concurrency
   down 1 and max demand down to 5 as it is simpler to reason about the results:
 
       iex> data = [{"elixir", 0}, {"elixir", 1_000}, {"erlang", 60_000},
@@ -225,7 +225,7 @@ defmodule Flow.Window do
 
   Periodic windows are similar to fixed windows except triggers are
   emitted based on processing time instead of event time. Remember that
-  relying on periodic windows or triggers is intrinsically innacurate and
+  relying on periodic windows or triggers is intrinsically inaccurate and
   should not be used to split the data, only as a checkpointing device.
 
   Periodic windows are also similar to global windows that use
@@ -263,7 +263,7 @@ defmodule Flow.Window do
   with long periods of user inactivity. Sessions allows us to group these
   events together until there is a time gap between them.
 
-  Session windows by definition belong to a single key. Therefore the :key
+  Session windows by definition belong to a single key. Therefore, the :key
   option must be given to the partition alongside the window option. For
   instance, in case of GPS data, the key would be the `device_id` or the
   `user_id`.
@@ -311,7 +311,7 @@ defmodule Flow.Window do
   @type by :: (term -> non_neg_integer)
 
   @typedoc """
-  The window indentifier.
+  The window identifier.
 
   It is `:global` for `:global` windows. An integer for fixed
   windows and a custom value for session windows.
