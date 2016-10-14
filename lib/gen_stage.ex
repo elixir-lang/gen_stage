@@ -312,7 +312,7 @@ defmodule GenStage do
         def init(:ok) do
           # Starts a permanent subscription to the broadcaster
           # which will automatically start requesting items.
-          {:consumer, :ok, subscribe_to: [Broadcaster]}
+          {:consumer, :ok, subscribe_to: [QueueBroadcaster]}
         end
 
         def handle_events(events, _from, state) do
@@ -327,7 +327,7 @@ defmodule GenStage do
   as multiple consumers:
 
       # Start the producer
-      Broadcaster.start_link()
+      QueueBroadcaster.start_link()
 
       # Start multiple consumers
       Printer.start_link()
@@ -340,9 +340,9 @@ defmodule GenStage do
   broadcasted to all consumers at once as we have buffered the demand in
   the producer:
 
-      Broadcaster.sync_notify(:hello_world)
+      QueueBroadcaster.sync_notify(:hello_world)
 
-  If we had called `Broadcaster.sync_notify(:hello_world)` before any
+  If we had called `QueueBroadcaster.sync_notify(:hello_world)` before any
   consumer was available, the event would also be buffered in our own
   queue and served only when demand is received.
 
