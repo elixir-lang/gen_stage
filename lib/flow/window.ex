@@ -18,9 +18,13 @@ defmodule Flow.Window do
       there is no more data
 
     * Fixed windows - splits incoming events into periodic, non-
-      overlaping windows. In other words, a given event belongs to a
-      single window. If data arrives late, a configured lateness can
-      be specified.
+      overlaping windows based on event times. In other words, a given
+      event belongs to a single window. If data arrives late, a configured
+      lateness can be specified.
+
+    * Periodic windows - splits incomng events into periodic, non-
+      overlaping windows based on processing times. Similar to fixed
+      windows, a given event belongs to a a single window.
 
     * Count windows - splits incoming events based on a count.
       Similar to fixed windows, a given event belongs to a a single
@@ -33,7 +37,9 @@ defmodule Flow.Window do
 
   We discuss all types and include examples below. In the first section,
   "Global windows", we build the basic intuition about windows and triggers
-  and explore more complex types afterwards.
+  as well as discuss the distinction between "Event time and processing time".
+  Then we explore "Fixed windows" and the concept of lateness before moving
+  on to other window types afterwards.
 
   ## Global windows
 
@@ -93,6 +99,8 @@ defmodule Flow.Window do
   accumulator is the default and used to checkpoint the values while still
   working towards an end result.
 
+  ### Event time and processing time
+
   Before we move to other window types, it is important to discuss
   the distinction between event time and processing time. In particular,
   triggers created with the `trigger_periodically/4` function are
@@ -108,18 +116,18 @@ defmodule Flow.Window do
   However, it is exactly this lack of precision which makes them efficient
   for checkpointing data.
 
-  Flow provides other window types exactly to address the issues with
-  processing time. Windows use the event time which is based on the data
-  itself. When working with event time, we can assign the data into proper
-  windows even when late or out of order. Such windows can be used to gather
-  time-based insight from the data (for example, the most popular hashtags
-  in the last 10 minutes) as well as for checkpointing data.
+  Flow provides other window types, such as fixed windows, exactly to address
+  the issues with processing time. Such windows use the event time which is
+  based on the data itself. When working with event time, we can assign the
+  data into proper windows even when late or out of order. Such windows can
+  be used to gather time-based insight from the data (for example, the most
+  popular hashtags in the last 10 minutes) as well as for checkpointing data.
 
   ## Fixed windows
 
-  Fixed windows typically groups the data based on the event times.
-  Regardless if the data is bounded or not, fixed windows gives us
-  time-based insight about the data.
+  Fixed windows groups the data based on the event times. Regardless if
+  the data is bounded or not, fixed windows gives us time-based insight
+  about the data.
 
   Fixed windows are created via the `fixed/3` function which specified
   the duration of the window and a function that retrieves the event time
@@ -127,7 +135,7 @@ defmodule Flow.Window do
 
       Flow.Window.fixed(1, :hour, fn {word, timestamp} -> timestamp end)
 
-  Let's see example that will use the window above to count the frequency
+  Let's see an example that will use the window above to count the frequency
   of words based on windows that are 1 hour long. The timestamps used by
   Flow are integers in milliseconds. For now we will also set the concurrency
   down 1 and max demand down to 5 as it is simpler to reason about the results:
@@ -156,12 +164,12 @@ defmodule Flow.Window do
   ### Data ordering, watermarks and lateness
 
   When working with event time, Flow assumes by default that events are time
-  ordered. This means that, when we move from one window to another, for
-  example when we received the entry `{"elixir", 4_000_000}` in the example
-  above, we assume the previous window has completed. We call this the
-  **watermark trigger**. Let's change the events above to be out of order.
-  We will get the first event, put it last, and see which results will be
-  emitted:
+  ordered. This means that, when we move from one window to another, like
+  when we received the entry `{"elixir", 4_000_000}` in the example above,
+  we assume the previous window has been completed.
+
+  Let's change the events above to be out of order and move the first event
+  to the end of the dataset and see what happens:
 
       iex> data = [{"elixir", 1_000}, {"erlang", 60_000},
       ...>         {"concurrency", 3_200_000}, {"elixir", 4_000_000},
@@ -177,10 +185,10 @@ defmodule Flow.Window do
 
   Notice that now the first map did not count the "elixir" word twice.
   Since the event arrived late, it was marked as lost. However, in many
-  flows we actually expect data to arrive late, especially when talking
-  about concurrent data processing.
+  flows we actually expect data to arrive late or out of order, especially
+  when talking about concurrent data processing.
 
-  Luckily event-time windows include the concept of lateness, which is a
+  Luckily event time windows include the concept of lateness, which is a
   processing time base period we would wait to receive late events.
   Let's change the example above once more but now change the window
   to also call `allowed_lateness/4`:
@@ -200,9 +208,11 @@ defmodule Flow.Window do
        %{"elixir" => 1, "erlang" => 2}]
 
   Now that we allow late events, we can see the first window emitted
-  twice: once at watermark and another when the collection is effectively
-  done. If desired, we can use `Flow.map_state/2` to get more information
-  about each particular window. Replace the last line above by the following:
+  twice. Instead of the window being marked as done when 1 hour passes,
+  we say it emits a **watermark trigger**. The window will be effectively
+  done only after the allowed lateness period. If desired, we can use
+  `Flow.map_state/2` to get more information about each particular window
+  and their trigger. Replace the last line above by the following:
 
       flow = flow |> Flow.map_state(fn state, _index, trigger -> {state, trigger} end)
       flow = flow |> Flow.emit(:state) |> Enum.to_list()
@@ -210,6 +220,22 @@ defmodule Flow.Window do
   The trigger parameter will include the type of window, the current
   window and what caused the window to be emitted (`:watermark` or
   `:done`).
+
+  ## Periodic windows
+
+  Periodic windows are similar to fixed windows except triggers are
+  emitted based on processing time instead of event time. Remember that
+  relying on periodic windows or triggers is intrinsically innacurate and
+  should not be used to split the data, only as a checkpointing device.
+
+  Periodic windows are also similar to global windows that use
+  `trigger_periodically/2` to emit events periodically. The difference is
+  that periodic windows emit a window in a given interval while a trigger
+  emits a window. This behaviour may affect functions such as `Flow.departition/4`,
+  which calls the `merge` callback per trigger but the `done` callback per
+  window. Unless you are relying on functions such as `Flow.departition/4`,
+  there is no distinction between periodic windows and global windows with
+  periodic triggers.
 
   ## Count windows
 
@@ -223,10 +249,12 @@ defmodule Flow.Window do
       [55, 155, 255, 355, 455, 555, 655, 755, 855, 955, 0]
 
   Count windows are also similar to global windows that use `trigger_every/2`
-  to emit events periodically. The difference is that count windows emit a
+  to emit events per count. The difference is that count windows emit a
   window per event count while a trigger belongs to a window. This behaviour
   may affect functions such as `Flow.departition/4`, which calls the `merge`
-  callback per trigger but the `done` callback per window.
+  callback per trigger but the `done` callback per window.  Unless you are
+  relying on functions such as `Flow.departition/4`, there is no distinction
+  between count windows and global windows with count triggers.
 
   ## Session windows
 
@@ -271,7 +299,7 @@ defmodule Flow.Window do
                required(:periodically) => []}
 
   @typedoc "The supported window types."
-  @type type :: :global | :fixed | any()
+  @type type :: :global | :fixed | :session | :periodic | :count | any()
 
   @typedoc """
   A function that retrieves the field to window by.
@@ -326,6 +354,25 @@ defmodule Flow.Window do
   end
 
   @doc """
+  Returns a periodic-based window on every `count` `unit`.
+
+  `count` is a positive integer and `unit` is one of `:millisecond`,
+  `:second`, `:minute`, `:hour`. Remember periodic triggers are established
+  per partition and are message-based, which means partitions will emit the
+  triggers at different times and possibly with delays based on the partition
+  message queue size.
+
+  Periodic window triggers have the shape of `{:periodic, window, trigger_name}`,
+  where `window` is an incrementing integer identifying the window.
+
+  See the section on "Periodic windows" in the module documentation for examples.
+  """
+  @spec periodic(pos_integer, System.time_unit) :: t
+  def periodic(count, unit) when is_integer(count) and count > 0 do
+    %Flow.Window.Periodic{duration: to_ms(count, unit)}
+  end
+
+  @doc """
   Returns a fixed window of duration `count` `unit` where the
   event time is calculated by the given function `by`.
 
@@ -333,8 +380,8 @@ defmodule Flow.Window do
   `:second`, `:minute`, `:hour`.
 
   Fixed window triggers have the shape of `{:fixed, window, trigger_name}`,
-  where `window` is an integer the represents the beginning timestamp for
-  the current window.
+  where `window` is an integer that represents the beginning timestamp
+  for the current window.
 
   If `allowed_lateness/4` is used with fixed windows, the window will
   first emit a `{:fixed, window, :watermark}` trigger when the window
