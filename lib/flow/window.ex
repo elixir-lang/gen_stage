@@ -231,7 +231,7 @@ defmodule Flow.Window do
   Periodic windows are also similar to global windows that use
   `trigger_periodically/2` to emit events periodically. The difference is
   that periodic windows emit a window in a given interval while a trigger
-  emits a window. This behaviour may affect functions such as `Flow.departition/4`,
+  emits a trigger. This behaviour may affect functions such as `Flow.departition/4`,
   which calls the `merge` callback per trigger but the `done` callback per
   window. Unless you are relying on functions such as `Flow.departition/4`,
   there is no distinction between periodic windows and global windows with
