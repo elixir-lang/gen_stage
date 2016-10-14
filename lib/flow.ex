@@ -83,12 +83,12 @@ defmodule Flow do
   process which invoked `Enum.to_list/1`.
 
   While we gain concurrency by using Flow, many of the benefits
-  of Flow are in partioning the data. We will discuss
-  the need for data partioning next.
+  of Flow are in partitioning the data. We will discuss
+  the need for data partitioning next.
 
   ## Partitioning
 
-  To understand the need to partion the data, let's change the
+  To understand the need to partition the data, let's change the
   example above and remove the partition call:
 
       alias Experimental.Flow
@@ -138,7 +138,7 @@ defmodule Flow do
   to perform yet another pass on the data merging the duplicated
   words across stages.
 
-  Partioning solves this by introducing a new set of stages and
+  Partitioning solves this by introducing a new set of stages and
   making sure the same word is always mapped to the same stage
   with the help of a hash function. Let's introduce the call to
   `partition/1` back:
@@ -193,7 +193,7 @@ defmodule Flow do
   that we don't need to merge the data later on, because a given
   word is guaranteed to have only been routed to one stage.
 
-  Partioning the data is a very useful technique. For example,
+  Partitioning the data is a very useful technique. For example,
   if we wanted to count the number of unique elements in a dataset,
   we could perform such a count in each partition and then sum
   their results, as the partitioning guarantees the data in
@@ -208,7 +208,7 @@ defmodule Flow do
 
   The MapReduce programming model forces us to break our computations
   in two stages: map and reduce. The map stage is often quite easy to
-  parallellize because events are processed individually and in isolation.
+  parallelize because events are processed individually and in isolation.
   The reduce stages need to group the data either partially or completely.
 
   In the example above, the stages executing `flat_map/2` are the
@@ -238,7 +238,7 @@ defmodule Flow do
 
   ## Data completion, windows and triggers
 
-  By default, Flow uses GenStage's notification system to notify
+  By default, Flow uses `GenStage`'s notification system to notify
   stages when a producer has emitted all events. This is done
   automatically by Flow when using `from_enumerable/2`. Custom
   producers can also send such notifications by calling
@@ -369,7 +369,7 @@ defmodule Flow do
   end up being the bottleneck of our whole computation.
 
   In the file stream case above, instead of having one single
-  large file, it is preferrable to break the file into smaller
+  large file, it is preferable to break the file into smaller
   ones:
 
       streams = for file <- File.ls!("dir/with/files") do
@@ -520,7 +520,7 @@ defmodule Flow do
   ## Termination
 
   Producer stages can signal the flow that it has emitted all
-  events by emitting a notication using `GenStage.async_notification/2`
+  events by emitting a notification using `GenStage.async_notification/2`
   from themselves:
 
       # In the case all the data is done
@@ -911,7 +911,7 @@ defmodule Flow do
   useful to compute the final state as computations happen instead of one
   time at the end. For example, we could change the flow above so each
   partition emits their whole intermediary state every 1000 items, merging
-  it into the departition more frequenty:
+  it into the departition more frequently:
 
       File.stream!("path/to/some/file")
       |> Flow.from_enumerable()
@@ -1001,7 +1001,7 @@ defmodule Flow do
   configured to reset the accumulator, the `acc_fun` function will
   be invoked once again.
 
-  Reducing will accumulate data until the a trigger is emitted
+  Reducing will accumulate data until a trigger is emitted
   or until a window completes. When that happens, the returned
   accumulator will be the new state of the stage and all functions
   after reduce will be invoked.

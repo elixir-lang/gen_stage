@@ -165,7 +165,7 @@ defmodule GenStage do
   that are not yet available. In such cases, it is necessary for producers
   to buffer events until a consumer is available or buffer the consumer
   demand until events arrive, respectively. As we will see next, buffering
-  events can be done automatically by GenStage, while buffering the demand
+  events can be done automatically by `GenStage`, while buffering the demand
   is a case that must be explicitly considered by developers implementing
   producers.
 
@@ -205,7 +205,7 @@ defmodule GenStage do
     2. what if consumers send demand and there are not enough events?
 
   One way to implement such a broadcaster is to simply rely on the internal
-  buffer available in GenStage, dispatching events as they arrive, as explained
+  buffer available in `GenStage`, dispatching events as they arrive, as explained
   in the previous section:
 
       defmodule Broadcaster do
@@ -236,13 +236,13 @@ defmodule GenStage do
 
   By always sending events as soon as they arrive, if there is any demand,
   we will serve the existing demand, otherwise the event will be queued in
-  GenStage's internal buffer. In case events are being queued and not being
+  `GenStage`'s internal buffer. In case events are being queued and not being
   consumed, a log message will be emitted when we exceed the `:buffer_size`
   configuration.
 
   While the implementation above is enough to solve the constraints above,
   a more robust implementation would have tighter control over the events
-  and demand by tracking this data locally, leaving the GenStage internal
+  and demand by tracking this data locally, leaving the `GenStage` internal
   buffer only for cases where consumers crash without consuming all data.
 
   To handle such cases, we will make the broadcaster state a tuple with
@@ -359,14 +359,14 @@ defmodule GenStage do
   it assumes events have been fully processed by `c:handle_events/3`.
 
   Such default behaviour makes producer_consumer and consumer
-  unfeasable for doing asynchronous work. However, given GenStage
+  unfeasible for doing asynchronous work. However, given `GenStage`
   was designed to run with multiple consumers, it is not a problem
   to perform synchronous or blocking actions inside `handle_events/3`
   as you can then start multiple consumers in order to max both CPU
   and IO usage as necessary.
 
   On the other hand, if you must perform some work asynchronously,
-  GenStage comes with an option that manually controls how demand
+  `GenStage` comes with an option that manually controls how demand
   is sent upstream, avoiding the default behaviour where demand is
   sent after `c:handle_events/3`. Such can be done by implementing
   the `c:handle_subscribe/4` callback and returning `{:manual, state}`
@@ -899,7 +899,7 @@ defmodule GenStage do
   has returned.
 
   Note that a `GenStage` started with `start_link/3` is linked to the
-  parent process and will exit in case of crashes from the parent. The GenStage
+  parent process and will exit in case of crashes from the parent. The `GenStage`
   will also exit due to the `:normal` reasons in case it is configured to trap
   exits in the `init/1` callback.
 
@@ -1038,7 +1038,7 @@ defmodule GenStage do
 
   This call returns `:ok` regardless if the subscription
   effectively happened or not. It is typically called from
-  a stage own's `init/1` callback.
+  a stage own `init/1` callback.
 
   ## Options
 
@@ -1153,7 +1153,7 @@ defmodule GenStage do
   @doc """
   Replies to a client.
 
-  This function can be used to explicitely send a reply to a client that
+  This function can be used to explicitly send a reply to a client that
   called `call/3` when the reply cannot be specified in the return value
   of `handle_call/3`.
 
@@ -1161,8 +1161,8 @@ defmodule GenStage do
   `handle_call/3` callbacks. `reply` is an arbitrary term which will be given
   back to the client as the return value of the call.
 
-  Note that `reply/2` can be called from any process, not just the GenServer
-  that originally received the call (as long as that GenServer communicated the
+  Note that `reply/2` can be called from any process, not just the `GenServer`
+  that originally received the call (as long as that `GenServer` communicated the
   `from` argument somehow).
 
   This function always returns `:ok`.
