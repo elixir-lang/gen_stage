@@ -123,7 +123,7 @@ defmodule Flow.Window do
   be used to gather time-based insight from the data (for example, the most
   popular hashtags in the last 10 minutes) as well as for checkpointing data.
 
-  ## Fixed windows
+  ## Fixed windows (event time)
 
   Fixed windows groups the data based on the event times. Regardless if
   the data is bounded or not, fixed windows gives us time-based insight
@@ -221,7 +221,7 @@ defmodule Flow.Window do
   window and what caused the window to be emitted (`:watermark` or
   `:done`).
 
-  ## Periodic windows
+  ## Periodic windows (processing time)
 
   Periodic windows are similar to fixed windows except triggers are
   emitted based on processing time instead of event time. Remember that
@@ -237,7 +237,7 @@ defmodule Flow.Window do
   there is no distinction between periodic windows and global windows with
   periodic triggers.
 
-  ## Count windows
+  ## Count windows (event count)
 
   Count windows are simpler versions of fixed windows where windows are split
   apart by event count. Since it is not timed-based, it does not provide the
@@ -256,7 +256,7 @@ defmodule Flow.Window do
   relying on functions such as `Flow.departition/4`, there is no distinction
   between count windows and global windows with count triggers.
 
-  ## Session windows
+  ## Session windows (event time)
 
   Session windows are useful for data that is irregularly distributed with
   respect to time. For example, GPS data contains moments of user activity
