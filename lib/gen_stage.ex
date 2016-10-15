@@ -69,6 +69,10 @@ defmodule GenStage do
       defmodule A do
         use GenStage
 
+        def start_link(number) do
+          GenStage.start_link(A, number)
+        end
+
         def init(counter) do
           {:producer, counter}
         end
@@ -91,6 +95,10 @@ defmodule GenStage do
       defmodule B do
         use GenStage
 
+        def start_link(number) do
+          GenStage.start_link(B, number)
+        end
+
         def init(number) do
           {:producer_consumer, number}
         end
@@ -106,6 +114,10 @@ defmodule GenStage do
 
       defmodule C do
         use GenStage
+
+        def start_link() do
+          GenStage.start_link(C, :ok)
+        end
 
         def init(:ok) do
           {:consumer, :the_state_does_not_matter}
@@ -125,9 +137,9 @@ defmodule GenStage do
 
   Now we can start and connect them:
 
-      {:ok, a} = GenStage.start_link(A, 0)   # starting from zero
-      {:ok, b} = GenStage.start_link(B, 2)   # multiply by 2
-      {:ok, c} = GenStage.start_link(C, :ok) # state does not matter
+      {:ok, a} = A.start_link(0)  # starting from zero
+      {:ok, b} = B.start_link(2)  # multiply by 2
+      {:ok, c} = C.start_link()   # state does not matter
 
       GenStage.sync_subscribe(c, to: b)
       GenStage.sync_subscribe(b, to: a)
@@ -157,6 +169,80 @@ defmodule GenStage do
   emitting batches of 50 items which will take approximately
   50 seconds to be consumed by C, which will then request another
   batch of 50 items.
+
+  ## `init` and `subscribe_to`
+
+  In the example above, we have started the processes A, B and C
+  independently and subscribed them later on. But most often it is
+  simpler to subscribe a consumer to its producer on its `c:init/1`
+  callback. This way, if the consumer crashes, restarting the consumer
+  will automatically re-invoke its `c:init/1` callback and resubscribe
+  it to the supervisor.
+
+  This approach, however, is only possible when using named processes.
+  For example, assuming the process `A` and `B` are started as follows:
+
+      # Let's call the stage in module A as A
+      GenStage.start_link(A, 0, name: A)
+      # Let's call the stage in module B as B
+      GenStage.start_link(B, 2, name: B)
+      # No need to name consumers as they won't be subscribed to
+      GenStage.start_link(C, :ok) 
+
+  We can now change the `c:init/1` callback for C to the following:
+
+      def init(:ok) do
+        {:consumer, :the_state_does_not_matter, subscribe_to: [B]}
+      end
+
+  Or:
+
+      def init(:ok) do
+        {:consumer, :the_state_does_not_matter, subscribe_to: [{B, options}]}
+      end
+
+  And we will no longer need to call `sync_subscribe/2`.
+
+  Another advantage of this approach is that it makes it straight-forward
+  to leverage concurrency by simply starting multiple consumers that subscribe
+  to its producer (or producer_consumer). This can be done in the example above
+  by simply calling start link multiple times:
+
+      # Start 4 consumers
+      GenStage.start_link(C, :ok) 
+      GenStage.start_link(C, :ok) 
+      GenStage.start_link(C, :ok) 
+      GenStage.start_link(C, :ok) 
+
+  In a supervision tree, this is often done by starting multiple workers:
+
+      children = [
+        worker(A, [0]),
+        worker(B, [2]),
+        worker(C, []),
+        worker(C, []),
+        worker(C, []),
+        worker(C, [])
+      ]
+
+      Supervisor.start_link(children, strategy: :one_for_one)
+
+  In fact, multiple consumers is often the easiest and simplest way to
+  leverage concurrency in a GenStage pipeline, specially if events can
+  be processed out of order. For example, imagine a scenario where you
+  have a stream of incoming events and you need to access a number of
+  external services per event. Instead of building complex stages that
+  routes events through those services, one simple mechanism to leverage
+  concurrency is to start a producer and N consumers and invoke the external
+  services directly for each event in each consumer. N is typically the
+  number of cores (as returned by `System.schedulers_online/0`) but can
+  likely be increased if the consumers are mostly waiting on IO.
+
+  Another alternative to the scenario above, is to use a `DynamicSupervisor`
+  for consuming the events instead of N consumers. The `DynamicSupervisor`
+  will start a separate supervised process per event in a way you have at
+  most `max_demand` children and the average amount of children is
+  `(max_demand - min_demand) / 2`.
 
   ## Buffering
 
