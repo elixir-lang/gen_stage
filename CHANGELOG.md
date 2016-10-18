@@ -1,10 +1,11 @@
 # Changelog
 
-## v0.7.0-dev
+## v0.7.0
 
 ### Enhancements
 
-  * Introduce count-based windows and session-based windows
+  * Introduce count-based windows, process-time windows and session-based windows on Flow
+  * Support resetting or keeping buffer on Flow watermarks
 
 ### Backwards incompatible changes
 
