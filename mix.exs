@@ -27,6 +27,7 @@ defmodule GenStage.Mixfile do
 
   defp package do
     %{licenses: ["Apache 2"],
+      maintainers: ["José Valim", "James Fish"],
       links: %{"GitHub" => "https://github.com/elixir-lang/gen_stage"}}
   end
 end
