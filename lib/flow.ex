@@ -317,7 +317,7 @@ defmodule Flow do
 
       File.stream!("path/to/some/file", read_ahead: 100_000) # READ_AHEAD
       |> Flow.from_enumerable()
-      |> Enum.flat_map(&String.split(&1, empty_space)) # BINARY
+      |> Flow.flat_map(&String.split(&1, empty_space)) # BINARY
       |> Flow.partition()
       |> Flow.reduce(fn -> :ets.new(:words, []) end, fn word, ets -> # ETS
         :ets.update_counter(ets, word, {2, 1}, {word, 0})
