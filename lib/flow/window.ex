@@ -39,7 +39,7 @@ defmodule Flow.Window do
   "Global windows", we build the basic intuition about windows and triggers
   as well as discuss the distinction between "Event time and processing time".
   Then we explore "Fixed windows" and the concept of lateness before moving
-  on to other window types afterwards.
+  on to other window types.
 
   ## Global windows
 
@@ -125,8 +125,8 @@ defmodule Flow.Window do
 
   ## Fixed windows (event time)
 
-  Fixed windows groups the data based on the event times. Regardless if
-  the data is bounded or not, fixed windows gives us time-based insight
+  Fixed windows group the data based on the event times. Regardless if
+  the data is bounded or not, fixed windows give us time-based insight
   about the data.
 
   Fixed windows are created via the `fixed/3` function which specified
@@ -188,7 +188,7 @@ defmodule Flow.Window do
   flows we actually expect data to arrive late or out of order, especially
   when talking about concurrent data processing.
 
-  Luckily event time windows include the concept of lateness, which is a
+  Luckily, event time windows include the concept of lateness, which is a
   processing time base period we would wait to receive late events.
   Let's change the example above once more but now change the window
   to also call `allowed_lateness/4`:
@@ -212,7 +212,7 @@ defmodule Flow.Window do
   we say it emits a **watermark trigger**. The window will be effectively
   done only after the allowed lateness period. If desired, we can use
   `Flow.map_state/2` to get more information about each particular window
-  and their trigger. Replace the last line above by the following:
+  and its trigger. Replace the last line above by the following:
 
       flow = flow |> Flow.map_state(fn state, _index, trigger -> {state, trigger} end)
       flow = flow |> Flow.emit(:state) |> Enum.to_list()

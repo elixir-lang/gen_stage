@@ -9,12 +9,12 @@
 
 ### Backwards incompatible changes
 
-  * Remove `:milliseconds`, `:seconds`, `:minutes` and `:hours` for units in favor of `:millisecond`, `:second`, `:minute` and `:hour`. You will get an error in case you are using the previous values.
-  * Specifying shortcuts to `:hash` has been removed in favor of the `:key` option. You will get an error in case you are using the previous values.
+  * Remove `:milliseconds`, `:seconds`, `:minutes` and `:hours` for units in favor of `:millisecond`, `:second`, `:minute` and `:hour`. You will get an error if you use the previous values.
+  * Specifying shortcuts to `:hash` has been removed in favor of the `:key` option. You will get an error if you use the previous values.
 
 ### Bug fixes
 
-  * Ensure uneven partitions emits all windows on `Flow.departition/4`
+  * Ensure uneven partitions emit all windows on `Flow.departition/4`
   * Properly emit the beginning of the window time on triggers for fixed windows
 
 ## v0.6.1 (2016-10-05)

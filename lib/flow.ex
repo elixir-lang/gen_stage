@@ -1149,13 +1149,13 @@ defmodule Flow do
 
   The second argument is optional and contains the partition index.
   The partition index is a two-element tuple identifying the current
-  partition and the total number of partitions as second element. For
+  partition and the total number of partitions as the second element. For
   example, for a partition with 4 stages, the partition index will be
   the values `{0, 4}`, `{1, 4}`, `{2, 4}` and `{3, 4}`.
 
   The third argument is optional and contains the window-trigger information.
   This information is a three-element tuple containing the window name,
-  the window identifier and the trigger name. For example, a global window
+  the window identifier, and the trigger name. For example, a global window
   created with `Flow.Window.global/0` will emit on termination:
 
       {:global, :global, :done}
