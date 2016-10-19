@@ -187,7 +187,7 @@ defmodule GenStage do
       # Let's call the stage in module B as B
       GenStage.start_link(B, 2, name: B)
       # No need to name consumers as they won't be subscribed to
-      GenStage.start_link(C, :ok) 
+      GenStage.start_link(C, :ok)
 
   We can now change the `c:init/1` callback for C to the following:
 
@@ -209,10 +209,10 @@ defmodule GenStage do
   by simply calling start link multiple times:
 
       # Start 4 consumers
-      GenStage.start_link(C, :ok) 
-      GenStage.start_link(C, :ok) 
-      GenStage.start_link(C, :ok) 
-      GenStage.start_link(C, :ok) 
+      GenStage.start_link(C, :ok)
+      GenStage.start_link(C, :ok)
+      GenStage.start_link(C, :ok)
+      GenStage.start_link(C, :ok)
 
   In a supervision tree, this is often done by starting multiple workers:
 
@@ -228,11 +228,11 @@ defmodule GenStage do
       Supervisor.start_link(children, strategy: :one_for_one)
 
   In fact, multiple consumers is often the easiest and simplest way to
-  leverage concurrency in a GenStage pipeline, specially if events can
+  leverage concurrency in a GenStage pipeline, especially if events can
   be processed out of order. For example, imagine a scenario where you
   have a stream of incoming events and you need to access a number of
   external services per event. Instead of building complex stages that
-  routes events through those services, one simple mechanism to leverage
+  route events through those services, one simple mechanism to leverage
   concurrency is to start a producer and N consumers and invoke the external
   services directly for each event in each consumer. N is typically the
   number of cores (as returned by `System.schedulers_online/0`) but can
@@ -1124,7 +1124,7 @@ defmodule GenStage do
 
   This call returns `:ok` regardless if the subscription
   effectively happened or not. It is typically called from
-  a stage own `init/1` callback.
+  a stage's `init/1` callback.
 
   ## Options
 
