@@ -1644,9 +1644,8 @@ defmodule GenStage do
   end
 
   defp init_producer_consumer(mod, opts, state) do
-    {producers, opts} = Keyword.pop(opts, :subscribe_to, [])
-
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- validate_dispatcher(opts),
+         {:ok, subscribe_to, opts} <- validate_list(opts, :subscribe_to, []),
          {:ok, buffer_size, opts} <- validate_integer(opts, :buffer_size, :infinity, 0, :infinity, true),
          {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
          :ok <- validate_no_opts(opts) do
@@ -1654,20 +1653,29 @@ defmodule GenStage do
                         buffer: {:queue.new, 0, init_wheel(buffer_size)},
                         buffer_config: {buffer_size, buffer_keep},
                         dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}
-      consumer_init_subscribe(producers, stage)
+      consumer_init_subscribe(subscribe_to, stage)
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
   end
 
   defp init_consumer(mod, opts, state) do
-    {producers, opts} = Keyword.pop(opts, :subscribe_to, [])
-
-    with :ok <- validate_no_opts(opts) do
+    with {:ok, subscribe_to, opts} <- validate_list(opts, :subscribe_to, []),
+         :ok <- validate_no_opts(opts) do
       stage = %GenStage{mod: mod, state: state, type: :consumer}
-      consumer_init_subscribe(producers, stage)
+      consumer_init_subscribe(subscribe_to, stage)
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
+    end
+  end
+
+  defp validate_list(opts, key, default) do
+    {value, opts} = Keyword.pop(opts, key, default)
+
+    if is_list(value) do
+      {:ok, value, opts}
+    else
+      {:error, "expected #{inspect key} to be a list, got: #{inspect value}"}
     end
   end
 
