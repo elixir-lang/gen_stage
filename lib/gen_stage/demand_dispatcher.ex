@@ -53,33 +53,32 @@ defmodule GenStage.DemandDispatcher do
   end
 
   @doc false
-  def dispatch(events, {demands, pending, max}) do
-    {events, demands} = dispatch_demand(events, demands)
+  def dispatch(events, length, {demands, pending, max}) do
+    {events, demands} = dispatch_demand(events, length, demands)
     {:ok, events, {demands, pending, max}}
   end
 
-  defp dispatch_demand([], demands) do
+  defp dispatch_demand([], _length, demands) do
     {[], demands}
   end
-
-  defp dispatch_demand(events, [{0, _, _} | _] = demands) do
+  defp dispatch_demand(events, _length, [{0, _, _} | _] = demands) do
     {events, demands}
   end
-
-  defp dispatch_demand(events, [{counter, pid, ref} | demands]) do
-    {deliver_now, deliver_later, counter} =
-      split_events(events, counter, [])
+  defp dispatch_demand(events, length, [{counter, pid, ref} | demands]) do
+    {deliver_now, deliver_later, length, counter} =
+      split_events(events, length, counter)
     Process.send(pid, {:"$gen_consumer", {self(), ref}, deliver_now}, [:noconnect])
     demands = add_demand(counter, pid, ref, demands)
-    dispatch_demand(deliver_later, demands)
+    dispatch_demand(deliver_later, length, demands)
   end
 
-  defp split_events(events, 0, acc),
-    do: {:lists.reverse(acc), events, 0}
-  defp split_events([], counter, acc),
-    do: {:lists.reverse(acc), [], counter}
-  defp split_events([event | events], counter, acc),
-    do: split_events(events, counter - 1, [event | acc])
+  defp split_events(events, length, counter) when length <= counter do
+    {events, [], 0, counter - length}
+  end
+  defp split_events(events, length, counter) do
+    {now, later} = Enum.split(events, counter)
+    {now, later, length - counter, 0}
+  end
 
   defp add_demand(counter, pid, ref, [{c, _, _} | _] = demands) when counter > c,
     do: [{counter, pid, ref} | demands]

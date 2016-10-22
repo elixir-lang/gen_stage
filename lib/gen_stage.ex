@@ -1727,10 +1727,10 @@ defmodule GenStage do
   def handle_call(msg, from, %{mod: mod, state: state} = stage) do
     case mod.handle_call(msg, from, state) do
       {:reply, reply, events, state} when is_list(events) ->
-        stage = dispatch_events(events, stage)
+        stage = dispatch_events(events, length(events), stage)
         {:reply, reply, %{stage | state: state}}
       {:reply, reply, events, state, :hibernate} when is_list(events) ->
-        stage = dispatch_events(events, stage)
+        stage = dispatch_events(events, length(events), stage)
         {:reply, reply, %{stage | state: state}, :hibernate}
       {:stop, reason, reply, state} ->
         {:stop, reason, reply, %{stage | state: state}}
@@ -1951,10 +1951,10 @@ defmodule GenStage do
   defp handle_noreply_callback(return, stage) do
     case return do
       {:noreply, events, state} when is_list(events) ->
-        stage = dispatch_events(events, stage)
+        stage = dispatch_events(events, length(events), stage)
         {:noreply, %{stage | state: state}}
       {:noreply, events, state, :hibernate} when is_list(events) ->
-        stage = dispatch_events(events, stage)
+        stage = dispatch_events(events, length(events), stage)
         {:noreply, %{stage | state: state}, :hibernate}
       {:stop, reason, state} ->
         {:stop, reason, %{stage | state: state}}
@@ -2048,19 +2048,19 @@ defmodule GenStage do
     end
   end
 
-  defp dispatch_events([], stage) do
+  defp dispatch_events([], _length, stage) do
     stage
   end
-  defp dispatch_events(events, %{type: :consumer} = stage) do
+  defp dispatch_events(events, _length, %{type: :consumer} = stage) do
     :error_logger.error_msg('GenStage consumer ~p cannot dispatch events (an empty list must be returned): ~p~n', [name(), events])
     stage
   end
-  defp dispatch_events(events, %{consumers: consumers} = stage) when map_size(consumers) == 0 do
+  defp dispatch_events(events, _length, %{consumers: consumers} = stage) when map_size(consumers) == 0 do
     buffer_events(events, stage)
   end
-  defp dispatch_events(events, stage) do
+  defp dispatch_events(events, length, stage) do
     %{dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} = stage
-    {:ok, events, dispatcher_state} = dispatcher_mod.dispatch(events, dispatcher_state)
+    {:ok, events, dispatcher_state} = dispatcher_mod.dispatch(events, length, dispatcher_state)
     buffer_events(events, %{stage | dispatcher_state: dispatcher_state})
   end
 
@@ -2070,17 +2070,17 @@ defmodule GenStage do
   end
 
   defp take_from_buffer(counter, %{buffer: {queue, buffer, notifications}} = stage) do
-    {queue, events, counter, buffer, notification, notifications} =
+    {queue, events, new_counter, buffer, notification, notifications} =
       take_from_buffer(queue, [], counter, buffer, notifications)
     # Update the buffer because dispatch events may
     # trigger more events to be buffered.
     stage = %{stage | buffer: {queue, buffer, notifications}}
-    stage = dispatch_events(events, stage)
+    stage = dispatch_events(events, counter - new_counter, stage)
     case notification do
       {:ok, msg} ->
-        take_from_buffer(counter, dispatch_notification(msg, stage))
+        take_from_buffer(new_counter, dispatch_notification(msg, stage))
       :error ->
-        take_from_buffer(counter, stage)
+        take_from_buffer(new_counter, stage)
     end
   end
 
@@ -2283,11 +2283,11 @@ defmodule GenStage do
   defp consumer_dispatch([{batch, ask} | batches], from, mod, state, stage, count, _hibernate?) do
     case mod.handle_events(batch, from, state) do
       {:noreply, events, state} when is_list(events) ->
-        stage = dispatch_events(events, stage)
+        stage = dispatch_events(events, length(events), stage)
         ask(from, ask, [:noconnect])
         consumer_dispatch(batches, from, mod, state, stage, count + length(events), false)
       {:noreply, events, state, :hibernate} when is_list(events) ->
-        stage = dispatch_events(events, stage)
+        stage = dispatch_events(events, length(events), stage)
         ask(from, ask, [:noconnect])
         consumer_dispatch(batches, from, mod, state, stage, count + length(events), true)
       {:stop, reason, state} ->

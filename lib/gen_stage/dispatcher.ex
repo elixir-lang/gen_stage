@@ -74,7 +74,7 @@ defmodule GenStage.Dispatcher do
       Process.send(consumer, {:"$gen_consumer, {self(), consumer_ref}, events}, [:noconnect])
 
   """
-  @callback dispatch(events :: nonempty_list(term), state :: term) ::
+  @callback dispatch(events :: nonempty_list(term), length :: pos_integer, state :: term) ::
     {:ok, leftover_events :: [term], new_state} when new_state: term
 
   @doc """

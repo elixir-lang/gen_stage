@@ -172,7 +172,7 @@ defmodule GenStage.PartitionDispatcher do
     do: Process.send(pid, {:"$gen_consumer", {self(), ref}, :lists.reverse(events)}, [:noconnect])
 
   @doc false
-  def dispatch(events, {tag, hash, waiting, pending, partitions, references}) do
+  def dispatch(events, _length, {tag, hash, waiting, pending, partitions, references}) do
     {deliver_now, deliver_later, waiting} =
       split_events(events, waiting, [])
 

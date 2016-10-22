@@ -46,13 +46,13 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   @doc false
-  def dispatch(events, {demands, 0}) do
+  def dispatch(events, _length, {demands, 0}) do
     {:ok, events, {demands, 0}}
   end
 
-  def dispatch(events, {demands, waiting}) do
+  def dispatch(events, length, {demands, waiting}) do
     {deliver_now, deliver_later, waiting} =
-      split_events(events, waiting, [])
+      split_events(events, length, waiting)
 
     Enum.each(demands, fn {_, pid, ref} ->
       Process.send(pid, {:"$gen_consumer", {self(), ref}, deliver_now}, [:noconnect])
@@ -66,12 +66,13 @@ defmodule GenStage.BroadcastDispatcher do
   defp get_min([{acc, _, _} | demands]),
     do: demands |> Enum.reduce(acc, fn {val, _, _}, acc -> min(val, acc) end) |> max(0)
 
-  defp split_events(events, 0, acc),
-    do: {:lists.reverse(acc), events, 0}
-  defp split_events([], counter, acc),
-    do: {:lists.reverse(acc), [], counter}
-  defp split_events([event | events], counter, acc),
-    do: split_events(events, counter - 1, [event | acc])
+  defp split_events(events, length, counter) when length <= counter do
+    {events, [], counter - length}
+  end
+  defp split_events(events, _length, counter) do
+    {now, later} = Enum.split(events, counter)
+    {now, later, 0}
+  end
 
   defp adjust_demand(0, demands),
     do: demands

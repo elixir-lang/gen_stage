@@ -37,14 +37,14 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, 0, disp} = D.subscribe([partition: 0], {pid, ref}, disp)
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
-    {:ok, [], disp} = D.dispatch([1], disp)
+    {:ok, [], disp} = D.dispatch([1], 1, disp)
     assert {_, _, 2, 0, _, _} = disp
     assert_received {:"$gen_consumer", {_, ^ref}, [1]}
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
     assert {_, _, 5, 0, _, _} = disp
 
-    {:ok, [9, 11], disp} = D.dispatch([2, 5, 6, 7, 8, 9, 11], disp)
+    {:ok, [9, 11], disp} = D.dispatch([2, 5, 6, 7, 8, 9, 11], 7, disp)
     assert {_, _, 0, 0, _, _} = disp
     assert_received {:"$gen_consumer", {_, ^ref}, [2, 5, 6, 7, 8]}
   end
@@ -59,14 +59,14 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, 0, disp} = D.subscribe([partition: :odd], {pid, ref}, disp)
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
-    {:ok, [], disp} = D.dispatch([1], disp)
+    {:ok, [], disp} = D.dispatch([1], 1, disp)
     assert {_, _, 2, 0, _, _} = disp
     assert_received {:"$gen_consumer", {_, ^ref}, [1]}
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
     assert {_, _, 5, 0, _, _} = disp
 
-    {:ok, [15, 17], disp} = D.dispatch([5, 7, 9, 11, 13, 15, 17], disp)
+    {:ok, [15, 17], disp} = D.dispatch([5, 7, 9, 11, 13, 15, 17], 7, disp)
     assert {_, _, 0, 0, _, _} = disp
     assert_received {:"$gen_consumer", {_, ^ref}, [5, 7, 9, 11, 13]}
   end
@@ -80,11 +80,11 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, 0, disp} = D.subscribe([partition: 1], {pid, ref}, disp)
 
     {:ok, 5, disp} = D.ask(5, {pid, ref}, disp)
-    {:ok, [], disp} = D.dispatch([1, 2, 5, 6, 7], disp)
+    {:ok, [], disp} = D.dispatch([1, 2, 5, 6, 7], 5, disp)
     assert {_, _, 0, 0, _, _} = disp
     refute_received {:"$gen_consumer", {_, ^ref}, _}
 
-    {:ok, [8, 9], disp} = D.dispatch([8, 9], disp)
+    {:ok, [8, 9], disp} = D.dispatch([8, 9], 2, disp)
     assert {_, _, 0, 0, _, _} = disp
 
     # Use another subscription to get events back
@@ -95,7 +95,7 @@ defmodule GenStage.PartitionDispatcherTest do
     assert {_, _, 5, 0, _, _} = disp
     assert_received {:"$gen_consumer", {_, ^ref}, [1, 2, 5, 6, 7]}
 
-    {:ok, [], disp} = D.dispatch([1, 2], disp)
+    {:ok, [], disp} = D.dispatch([1, 2], 2, disp)
     assert {_, _, 3, 0, _, _} = disp
   end
 
@@ -115,8 +115,8 @@ defmodule GenStage.PartitionDispatcherTest do
     assert {_, _, 10, 0, _, _} = disp
 
     # Send all events to the same partition, half of them will be buffered
-    {:ok, [], disp} = D.dispatch([1, 2], disp)
-    {:ok, [], disp} = D.dispatch([5, 6, 7, 1, 2, 5, 6, 7], disp)
+    {:ok, [], disp} = D.dispatch([1, 2], 2, disp)
+    {:ok, [], disp} = D.dispatch([5, 6, 7, 1, 2, 5, 6, 7], 8, disp)
     assert {_, _, 0, 0, _, _} = disp
     assert_received {:"$gen_consumer", {_, ^ref0}, [1, 2]}
     assert_received {:"$gen_consumer", {_, ^ref0}, [5, 6, 7]}
@@ -138,7 +138,7 @@ defmodule GenStage.PartitionDispatcherTest do
     pid0 = self()
     ref0 = make_ref()
     {:ok, 0, disp} = D.subscribe([partition: 0], {pid0, ref0}, disp)
-    {:ok, [], disp} = D.dispatch([1, 2, 5, 6, 7], disp)
+    {:ok, [], disp} = D.dispatch([1, 2, 5, 6, 7], 5, disp)
     assert {_, _, 0, 0, _, _} = disp
     refute_received {:"$gen_consumer", {_, ^ref0}, _}
 
@@ -199,7 +199,7 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, 0, disp}  = D.subscribe([partition: 0], {pid0, ref0}, disp)
     {:ok, 0, disp}  = D.subscribe([partition: 1], {pid0, ref1}, disp)
     {:ok, 3, disp}  = D.ask(3, {pid1, ref1}, disp)
-    {:ok, [], disp} = D.dispatch([1, 2, 5], disp)
+    {:ok, [], disp} = D.dispatch([1, 2, 5], 3, disp)
 
     {:ok, disp} = D.notify(:hello, disp)
     refute_received {:"$gen_consumer", {_, ^ref0}, {:notification, :hello}}

@@ -58,18 +58,18 @@ defmodule GenStage.DemandDispatcherTest do
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
     assert disp == {[{3, pid, ref}], 0, 3}
 
-    {:ok, [], disp} = D.dispatch([:a], disp)
+    {:ok, [], disp} = D.dispatch([:a], 1, disp)
     assert disp == {[{2, pid, ref}], 0, 3}
     assert_received {:"$gen_consumer", {_, ^ref}, [:a]}
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
     assert disp == {[{5, pid, ref}], 0, 3}
 
-    {:ok, [:g, :h], disp} = D.dispatch([:b, :c, :d, :e, :f, :g, :h], disp)
+    {:ok, [:g, :h], disp} = D.dispatch([:b, :c, :d, :e, :f, :g, :h], 7, disp)
     assert disp == {[{0, pid, ref}], 0, 3}
     assert_received {:"$gen_consumer", {_, ^ref}, [:b, :c, :d, :e, :f]}
 
-    {:ok, [:i, :j], disp} = D.dispatch([:i, :j], disp)
+    {:ok, [:i, :j], disp} = D.dispatch([:i, :j], 2, disp)
     assert disp == {[{0, pid, ref}], 0, 3}
     refute_received {:"$gen_consumer", {_, ^ref}, _}
   end
@@ -111,12 +111,12 @@ defmodule GenStage.DemandDispatcherTest do
     assert disp == {[{3, pid, ref1}, {2, pid, ref2}], 0, 3}
 
     # One batch fits all
-    {:ok, [], disp} = D.dispatch([:a, :b, :c, :d, :e], disp)
+    {:ok, [], disp} = D.dispatch([:a, :b, :c, :d, :e], 5, disp)
     assert disp == {[{0, pid, ref1}, {0, pid, ref2}], 0, 3}
     assert_received {:"$gen_consumer", {_, ^ref1}, [:a, :b, :c]}
     assert_received {:"$gen_consumer", {_, ^ref2}, [:d, :e]}
 
-    {:ok, [:a, :b, :c], disp} = D.dispatch([:a, :b, :c], disp)
+    {:ok, [:a, :b, :c], disp} = D.dispatch([:a, :b, :c], 3, disp)
     assert disp == {[{0, pid, ref1}, {0, pid, ref2}], 0, 3}
     refute_received {:"$gen_consumer", {_, _}, _}
 
@@ -125,16 +125,16 @@ defmodule GenStage.DemandDispatcherTest do
     {:ok, 3, disp} = D.ask(3, {pid, ref2}, disp)
     assert disp == {[{3, pid, ref1}, {3, pid, ref2}], 0, 3}
 
-    {:ok, [], disp} = D.dispatch([:a, :b], disp)
+    {:ok, [], disp} = D.dispatch([:a, :b], 2, disp)
     assert disp == {[{3, pid, ref2}, {1, pid, ref1}], 0, 3}
     assert_received {:"$gen_consumer", {_, ^ref1}, [:a, :b]}
 
-    {:ok, [], disp} = D.dispatch([:c, :d], disp)
+    {:ok, [], disp} = D.dispatch([:c, :d], 2, disp)
     assert disp == {[{1, pid, ref1}, {1, pid, ref2}], 0, 3}
     assert_received {:"$gen_consumer", {_, ^ref2}, [:c, :d]}
 
     # Eliminate the left-over
-    {:ok, [:g], disp} = D.dispatch([:e, :f, :g], disp)
+    {:ok, [:g], disp} = D.dispatch([:e, :f, :g], 3, disp)
     assert disp == {[{0, pid, ref1}, {0, pid, ref2}], 0, 3}
     assert_received {:"$gen_consumer", {_, ^ref1}, [:e]}
     assert_received {:"$gen_consumer", {_, ^ref2}, [:f]}

@@ -81,20 +81,20 @@ defmodule GenStage.BroadcastDispatcherTest do
     assert disp == {[{0, pid, ref2}, {1, pid, ref1}], 2}
 
     # One batch fits all
-    {:ok, [], disp} = D.dispatch([:a, :b], disp)
+    {:ok, [], disp} = D.dispatch([:a, :b], 2, disp)
     assert disp == {[{0, pid, ref2}, {1, pid, ref1}], 0}
     assert_received {:"$gen_consumer", {_, ^ref1}, [:a, :b]}
     assert_received {:"$gen_consumer", {_, ^ref2}, [:a, :b]}
 
     # A batch with left-over
     {:ok, 1, disp} = D.ask(2, {pid, ref2}, disp)
-    {:ok, [:d], disp} = D.dispatch([:c, :d], disp)
+    {:ok, [:d], disp} = D.dispatch([:c, :d], 2, disp)
     assert disp == {[{1, pid, ref2}, {0, pid, ref1}], 0}
     assert_received {:"$gen_consumer", {_, ^ref1}, [:c]}
     assert_received {:"$gen_consumer", {_, ^ref2}, [:c]}
 
     # A batch with no demand
-    {:ok, [:d], disp} = D.dispatch([:d], disp)
+    {:ok, [:d], disp} = D.dispatch([:d], 1, disp)
     assert disp == {[{1, pid, ref2}, {0, pid, ref1}], 0}
     refute_received {:"$gen_consumer", {_, _}, _}
 
@@ -102,7 +102,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 1, disp} = D.ask(1, {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref3}, disp)
     assert disp == {[{-1, pid, ref3}, {0, pid, ref1}, {0, pid, ref2}], 1}
-    {:ok, [:e], disp} = D.dispatch([:d, :e], disp)
+    {:ok, [:e], disp} = D.dispatch([:d, :e], 2, disp)
     assert_received {:"$gen_consumer", {_, ^ref1}, [:d]}
     assert_received {:"$gen_consumer", {_, ^ref2}, [:d]}
     assert_received {:"$gen_consumer", {_, ^ref3}, [:d]}
@@ -111,7 +111,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.ask(2, {pid, ref1}, disp)
     {:ok, 0, disp} = D.ask(2, {pid, ref2}, disp)
     {:ok, 2, disp} = D.ask(3, {pid, ref3}, disp)
-    {:ok, [], disp} = D.dispatch([:e, :f], disp)
+    {:ok, [], disp} = D.dispatch([:e, :f], 2, disp)
     assert disp == {[{0, pid, ref3}, {0, pid, ref2}, {0, pid, ref1}], 0}
     assert_received {:"$gen_consumer", {_, ^ref1}, [:e, :f]}
     assert_received {:"$gen_consumer", {_, ^ref2}, [:e, :f]}
