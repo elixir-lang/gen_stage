@@ -19,9 +19,8 @@ defmodule GenStage.BroadcastDispatcher do
   `consumer` will receive all and only events broadcasted from `producer`
   for which the selector function returns a truthy value.
 
-  The :selector option can be specified in sync and async subscriptions,
-  as well as in the `:subscribe_to` list in the return tuple of `init` callbacks
-  for stages.
+  The `:selector` option can be specified in sync and async subscriptions,
+  as well as in the `:subscribe_to` list in the return tuple of `c:GenStasge.init/1`
   """
 
   @behaviour GenStage.Dispatcher
@@ -41,7 +40,7 @@ defmodule GenStage.BroadcastDispatcher do
 
   @doc false
   def subscribe(opts, {pid, ref}, {demands, waiting}) do
-    {:ok, selector} = validate_selector(opts)
+    selector = validate_selector(opts)
     {:ok, 0, {add_demand(-waiting, pid, ref, selector, demands), waiting}}
   end
 
@@ -83,11 +82,12 @@ defmodule GenStage.BroadcastDispatcher do
 
   defp validate_selector(opts) do
     case Keyword.get(opts, :selector) do
-      nil -> {:ok, nil}
+      nil ->
+        nil
       selector when is_function(selector, 1) ->
-        {:ok, selector}
-      something_else ->
-        raise ArgumentError, ":selector option must be passed a unary function, got: #{inspect something_else}"
+        selector
+      other ->
+        raise ArgumentError, ":selector option must be passed a unary function, got: #{inspect other}"
     end
   end
 
