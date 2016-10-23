@@ -7,18 +7,21 @@ defmodule GenStage.BroadcastDispatcher do
 
   If a producer uses BroadcastDispatcher, its subscribers can specify
   an optional `:selector` function of type (event :: any -> boolean)
-  at subscription time.
+  in the subscription options.
 
   Assume `producer` and `consumer` are stages exchanging events of type
-  `%{ :key => String.t, any => any}`, then by specifying
+  `%{:key => String.t, any => any}`, then by calling
 
-      GenStage.sync_subscribe(producer,
+      GenStage.sync_subscribe(consumer,
         to: producer,
         selector: fn %{key: key} -> String.starts_with?(key, "foo-") end)
 
-  `consumer` will receive events from `producer` only if the condition specified
-  in the selector function returns true.
+  `consumer` will receive all and only events broadcasted from `producer`
+  for which the selector function returns a truthy value.
 
+  The :selector option can be specified in sync and async subscriptions,
+  as well as in the `:subscribe_to` list in the return tuple of `init` callbacks
+  for stages.
   """
 
   @behaviour GenStage.Dispatcher
@@ -54,7 +57,7 @@ defmodule GenStage.BroadcastDispatcher do
 
   @doc false
   def ask(counter, {pid, ref}, {demands, waiting}) do
-    {{current, selector}, demands} = pop_demand(ref, demands)
+    {current, selector, demands} = pop_demand(ref, demands)
     demands = add_demand(current + counter, pid, ref, selector, demands)
     new_min = get_min(demands)
     demands = adjust_demand(new_min, demands)
@@ -84,8 +87,7 @@ defmodule GenStage.BroadcastDispatcher do
       selector when is_function(selector, 1) ->
         {:ok, selector}
       something_else ->
-        :error_logger.error_msg(':selector option must be passed a unary function and not: ~p~n', [something_else])
-        {:error, :not_a_unary_function}
+        raise ArgumentError, ":selector option must be passed a unary function, got: #{inspect something_else}"
     end
   end
 
@@ -114,8 +116,8 @@ defmodule GenStage.BroadcastDispatcher do
 
   defp pop_demand(ref, demands) do
     case List.keytake(demands, ref, 2) do
-      {{current, _pid, ^ref, selector}, rest} -> {{current, selector}, rest}
-      nil -> {{0, nil}, demands}
+      {{current, _pid, ^ref, selector}, rest} -> {current, selector, rest}
+      nil -> {0, nil, demands}
     end
   end
 

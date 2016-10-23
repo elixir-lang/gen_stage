@@ -1139,11 +1139,6 @@ defmodule GenStage do
       cancellations, the reason is wrapped in a `:cancel` tuple.
     * `:min_demand` - the minimum demand for this subscription
     * `:max_demand` - the maximum demand for this subscription
-    * `:selector` - a function (event :: any -> boolean)
-                    which is used in the dispatcher to filter events
-                    destinated to the consumer. This option is relevant only when
-                    subscribing to producers using BroadcastDispatcher. See the dispatcher
-                    documentation for event-selection examples.
 
   All other options are sent as is to the producer stage.
   """
