@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.8.0
+
+### Enhancements
+
+  * Support a `:selector` option in the `BroadcastDispatcher`
+
+### Bug fix
+
+  * Ensure PartitionDispatcher does not create more partitions than necessary
+
+### Backwards incompatible changes
+
+  * Pass the events `length` to dispatchers for more performant dispatching
+
 ## v0.7.0
 
 ### Enhancements

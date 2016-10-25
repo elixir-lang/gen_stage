@@ -46,7 +46,7 @@ defmodule GenStage.PartitionDispatcher do
         nil ->
           raise ArgumentError, "the enumerable of :partitions is required when using the partition dispatcher"
         partitions when is_integer(partitions) ->
-          0..partitions
+          0..partitions-1
         partitions ->
           partitions
       end
@@ -95,11 +95,8 @@ defmodule GenStage.PartitionDispatcher do
       _ when is_nil(partition) ->
         raise ArgumentError, "the :partition option is required when subscribing to a producer with partition dispatcher"
       _ ->
-        keys =
-          partitions
-          |> Map.keys()
-          |> Enum.join(", ")
-        raise ArgumentError, ":partition must be one of #{keys} but got: #{partition}"
+        keys = Map.keys(partitions)
+        raise ArgumentError, ":partition must be one of #{inspect keys}, got: #{partition}"
     end
   end
 
