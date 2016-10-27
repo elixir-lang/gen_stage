@@ -20,7 +20,7 @@ defmodule GenStage.BroadcastDispatcher do
   for which the selector function returns a truthy value.
 
   The `:selector` option can be specified in sync and async subscriptions,
-  as well as in the `:subscribe_to` list in the return tuple of `c:GenStasge.init/1`
+  as well as in the `:subscribe_to` list in the return tuple of `c:GenStage.init/1`
   """
 
   @behaviour GenStage.Dispatcher
