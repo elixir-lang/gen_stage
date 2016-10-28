@@ -16,7 +16,7 @@ defmodule GenStage.BroadcastDispatcher do
         to: producer,
         selector: fn %{key: key} -> String.starts_with?(key, "foo-") end)
 
-  `consumer` will receive all and only events broadcasted from `producer`
+  `consumer` will receive only the events broadcasted from `producer`
   for which the selector function returns a truthy value.
 
   The `:selector` option can be specified in sync and async subscriptions,
