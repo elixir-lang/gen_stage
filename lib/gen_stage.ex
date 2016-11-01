@@ -1979,6 +1979,10 @@ defmodule GenStage do
 
   ## Producer helpers
 
+  defp producer_demand(:forward, %{type: :producer_consumer} = stage) do
+    # That's the only mode on producer consumers.
+    {:noreply, stage}
+  end
   defp producer_demand(_mode, %{type: type} = stage) when type != :producer do
     :error_logger.error_msg('Demand mode can only be set for producers, GenStage ~p is a ~ts', [name(), type])
     {:noreply, stage}

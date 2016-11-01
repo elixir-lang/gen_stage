@@ -31,6 +31,10 @@ defmodule FlowTest do
       send parent, {:consumed, events}
       {:noreply, [], parent}
     end
+
+    def handle_info(_, parent) do
+      {:noreply, [], parent}
+    end
   end
 
   describe "errors" do
