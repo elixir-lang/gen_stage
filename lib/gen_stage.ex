@@ -935,7 +935,14 @@ defmodule GenStage do
       end
 
       @doc false
-      def handle_info(_msg, state) do
+      def handle_info(msg, state) do
+        proc =
+          case Process.info(self(), :registered_name) do
+            {_, []}   -> self()
+            {_, name} -> name
+          end
+        :error_logger.error_msg('~p ~p received unexpected message: ~p~n',
+                                [__MODULE__, proc, msg])
         {:noreply, [], state}
       end
 
