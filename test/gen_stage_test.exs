@@ -261,7 +261,7 @@ defmodule GenStageTest do
       {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
 
       # Subscribe but not demand
-      send producer, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, nil, []}}
 
       # Further subscriptions will block
       GenStage.sync_subscribe(consumer1, to: producer, max_demand: 10, min_demand: 0)
@@ -407,7 +407,7 @@ defmodule GenStageTest do
       {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
 
       # Subscribe but not demand
-      send doubler, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, []}}
+      send doubler, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, nil, []}}
 
       # Further subscriptions will block
       GenStage.sync_subscribe(consumer1, to: doubler, max_demand: 10, min_demand: 0)
@@ -604,7 +604,7 @@ defmodule GenStageTest do
 
       # Subscribe
       ref = make_ref()
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
 
       # Queue events and notification
       Counter.sync_queue(producer, [:a, :b, :c])
@@ -635,7 +635,7 @@ defmodule GenStageTest do
       GenStage.sync_notify(producer, :done)
 
       ref = make_ref()
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
       Counter.sync_queue(producer, [:c, :d, :e])
       assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done}}
     end
@@ -696,6 +696,54 @@ defmodule GenStageTest do
       GenStage.stop(producer)
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
+    end
+  end
+
+  describe "sync_resubscribe/2" do
+    test "returns ok with reference" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, old_ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
+      assert {:ok, new_ref} = GenStage.sync_resubscribe(consumer, old_ref, :resubscribe, to: producer)
+      assert_received {:consumer_subscribed, {^producer, ^old_ref}}
+      assert_received {:consumer_subscribed, {^producer, ^new_ref}}
+    end
+
+    test "returns ok with reference even if previous subscription does not exist" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, ref} = GenStage.sync_resubscribe(consumer, make_ref(), :resubscribe, to: producer)
+      assert_received {:consumer_subscribed, {^producer, ^ref}}
+    end
+
+    @tag :capture_log
+    test "returns errors on bad options" do
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:error, {:bad_opts, message}} =
+             GenStage.sync_resubscribe(consumer, make_ref(), :resubscribe, to: :whatever, max_demand: 0)
+      assert message == "expected :max_demand to be equal to or greater than 1, got: 0"
+
+      assert {:error, {:bad_opts, message}} =
+             GenStage.sync_resubscribe(consumer, make_ref(), :resubscribe, to: :whatever, min_demand: 2000)
+      assert message == "expected :min_demand to be equal to or less than 999, got: 2000"
+    end
+  end
+
+  describe "async_resubscribe/2" do
+    test "returns ok with reference" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert {:ok, old_ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
+      assert :ok = GenStage.async_resubscribe(consumer, old_ref, :resubscribe, to: producer)
+      assert_receive {:consumer_subscribed, {^producer, ^old_ref}}
+      assert_receive {:consumer_subscribed, {^producer, ref}} when ref != old_ref
+    end
+
+    test "returns ok with reference even if previous subscription does not exist" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      assert :ok = GenStage.async_resubscribe(consumer, make_ref(), :resubscribe, to: producer)
+      assert_receive {:consumer_subscribed, {^producer, _}}
     end
   end
 
@@ -795,7 +843,7 @@ defmodule GenStageTest do
 
       # Subscribe
       stage_ref = make_ref()
-      send producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, nil, []}}
       send producer, {:"$gen_producer", {self(), stage_ref}, {:ask, 3}}
 
       # Emulate a call
@@ -818,7 +866,7 @@ defmodule GenStageTest do
 
       # Subscribe
       stage_ref = make_ref()
-      send producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, nil, []}}
       send producer, {:"$gen_producer", {self(), stage_ref}, {:ask, 3}}
 
       # Emulate a call
@@ -1103,8 +1151,8 @@ defmodule GenStageTest do
     test "duplicated subscriptions" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       ref = make_ref()
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, []}}
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, []}}
+      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
+      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
       assert_receive {:"$gen_consumer", {^producer, ^ref}, {:cancel, :duplicated_subscription}}
     end
 
@@ -1117,7 +1165,7 @@ defmodule GenStageTest do
 
     test "not a producer" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      send consumer, {:"$gen_producer", {self(), make_ref()}, {:subscribe, []}}
+      send consumer, {:"$gen_producer", {self(), make_ref()}, {:subscribe, nil, []}}
     end
   end
 
@@ -1183,7 +1231,7 @@ defmodule GenStageTest do
     test "exits when producer does not ack and subscription is permanent" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
-          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+          {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
             send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
         end
       end)
@@ -1194,7 +1242,7 @@ defmodule GenStageTest do
     test "exits when producer does not ack and lives and subscription is permanent" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
-          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+          {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
             send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
             Process.sleep(:infinity)
         end
@@ -1216,7 +1264,7 @@ defmodule GenStageTest do
     test "exits when producer does not ack and subscription is temporary" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
-          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+          {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
             send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
         end
       end)
@@ -1226,7 +1274,7 @@ defmodule GenStageTest do
     test "exits when producer does not ack and lives and subscription is temporary" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
-          {:"$gen_producer", {pid, ref}, {:subscribe, _}} ->
+          {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
             send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
             Process.sleep(:infinity)
         end

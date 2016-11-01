@@ -618,7 +618,7 @@ defmodule GenStage do
   The producer is responsible for sending events to consumers
   based on demand.
 
-    * `{:"$gen_producer", from :: {consumer_pid, subscription_tag}, {:subscribe, options}}` -
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_tag}, {:subscribe, current, options}}` -
       sent by the consumer to the producer to start a new subscription.
 
       Before sending, the consumer MUST monitor the producer for clean-up
@@ -628,6 +628,10 @@ defmodule GenStage do
 
       Once sent, the consumer MAY immediately send demand to the producer.
       The `subscription_tag` is unique to identify the subscription.
+
+      The `current` field, when not nil, is a two-item tuple containing a
+      subscription that must be cancelled with the given reason before the
+      current one is accepted.
 
       Once received, the producer MUST monitor the consumer. However, if
       the subscription reference is known, it MUST send a `:cancel` message
@@ -1119,11 +1123,26 @@ defmodule GenStage do
   @spec sync_subscribe(stage, opts :: keyword(), timeout) ::
         {:ok, reference()} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
   def sync_subscribe(stage, opts, timeout \\ 5_000) do
+    sync_subscribe(stage, nil, opts, timeout)
+  end
+
+  @doc """
+  Cancels `ref` with `reason` and subscribe synchronously in one step.
+
+  See `sync_subscribe/3` for examples and options.
+  """
+  @spec sync_resubscribe(stage, ref :: term, reason :: term, opts :: keyword()) ::
+        {:ok, reference()} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
+  def sync_resubscribe(stage, ref, reason, opts, timeout \\ 5000) do
+    sync_subscribe(stage, {ref, reason}, opts, timeout)
+  end
+
+  defp sync_subscribe(stage, cancel, opts, timeout) do
     {to, opts} =
       Keyword.pop_lazy(opts, :to, fn ->
-        raise ArgumentError, "expected :to argument in subscribe"
+        raise ArgumentError, "expected :to argument in sync_(re)subscribe"
       end)
-    call(stage, {:"$subscribe", to, opts}, timeout)
+    call(stage, {:"$subscribe", cancel, to, opts}, timeout)
   end
 
   @doc """
@@ -1146,11 +1165,25 @@ defmodule GenStage do
   """
   @spec async_subscribe(stage, opts :: keyword()) :: :ok
   def async_subscribe(stage, opts) do
+    async_subscribe(stage, nil, opts)
+  end
+
+  @doc """
+  Cancels `ref` with `reason` and subscribe asynchronously in one step.
+
+  See `async_subscribe/2` for examples and options.
+  """
+  @spec async_resubscribe(stage, ref :: term, reason :: term, opts :: keyword()) :: :ok
+  def async_resubscribe(stage, ref, reason, opts) do
+    async_subscribe(stage, {ref, reason}, opts)
+  end
+
+  defp async_subscribe(stage, cancel, opts) do
     {to, opts} =
       Keyword.pop_lazy(opts, :to, fn ->
-        raise ArgumentError, "expected :to argument in subscribe"
+        raise ArgumentError, "expected :to argument in async_(re)subscribe"
       end)
-    cast(stage, {:"$subscribe", to, opts})
+    cast(stage, {:"$subscribe", cancel, to, opts})
   end
 
   @doc """
@@ -1472,7 +1505,7 @@ defmodule GenStage do
         producer_pid != nil ->
           inner_ref = Process.monitor(producer_pid)
           from = {parent, {monitor_ref, inner_ref}}
-          send_noconnect(producer_pid, {:"$gen_producer", from, {:subscribe, opts}})
+          send_noconnect(producer_pid, {:"$gen_producer", from, {:subscribe, nil, opts}})
           send_noconnect(producer_pid, {:"$gen_producer", from, {:ask, max}})
           Map.put(acc, inner_ref, {:subscribed, producer_pid, cancel, min, max, max})
         cancel == :temporary ->
@@ -1727,8 +1760,8 @@ defmodule GenStage do
     producer_notify(msg, stage)
   end
 
-  def handle_call({:"$subscribe", to, opts}, _from, stage) do
-    consumer_subscribe(to, opts, stage)
+  def handle_call({:"$subscribe", current, to, opts}, _from, stage) do
+    consumer_subscribe(current, to, opts, stage)
   end
 
   def handle_call(msg, from, %{mod: mod, state: state} = stage) do
@@ -1756,8 +1789,8 @@ defmodule GenStage do
     producer_demand(mode, stage)
   end
 
-  def handle_cast({:"$subscribe", to, opts}, stage) do
-    case consumer_subscribe(to, opts, stage) do
+  def handle_cast({:"$subscribe", current, to, opts}, stage) do
+    case consumer_subscribe(current, to, opts, stage) do
       {:reply, _, stage}        -> {:noreply, stage}
       {:stop, reason, _, stage} -> {:stop, reason, stage}
       {:stop, _, _} = stop      -> stop
@@ -1791,7 +1824,7 @@ defmodule GenStage do
     {:noreply, stage}
   end
 
-  def handle_info({:"$gen_producer", {consumer_pid, ref} = from, {:subscribe, opts}},
+  def handle_info({:"$gen_producer", {consumer_pid, ref} = from, {:subscribe, cancel, opts}},
                   %{consumers: consumers} = stage) do
     case consumers do
       %{^ref => _} ->
@@ -1799,10 +1832,15 @@ defmodule GenStage do
         send_noconnect(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}})
         {:noreply, stage}
       %{} ->
-        mon_ref = Process.monitor(consumer_pid)
-        stage = put_in stage.monitors[mon_ref], ref
-        stage = put_in stage.consumers[ref], {consumer_pid, mon_ref}
-        producer_subscribe(opts, from, stage)
+        case maybe_producer_cancel(cancel, stage) do
+          {:noreply, stage} ->
+            mon_ref = Process.monitor(consumer_pid)
+            stage = put_in stage.monitors[mon_ref], ref
+            stage = put_in stage.consumers[ref], {consumer_pid, mon_ref}
+            producer_subscribe(opts, from, stage)
+          other ->
+            other
+        end
     end
   end
 
@@ -2016,6 +2054,13 @@ defmodule GenStage do
       other ->
         {:stop, {:bad_return_value, other}, stage}
     end
+  end
+
+  defp maybe_producer_cancel({ref, reason}, stage) do
+    producer_cancel(ref, :cancel, reason, stage)
+  end
+  defp maybe_producer_cancel(nil, stage) do
+    {:noreply, stage}
   end
 
   defp producer_cancel(ref, kind, reason, stage) do
@@ -2316,16 +2361,16 @@ defmodule GenStage do
   end
 
   defp consumer_subscribe({to, opts}, stage) when is_list(opts),
-    do: consumer_subscribe(to, opts, stage)
+    do: consumer_subscribe(nil, to, opts, stage)
   defp consumer_subscribe(to, stage),
-    do: consumer_subscribe(to, [], stage)
+    do: consumer_subscribe(nil, to, [], stage)
 
-  defp consumer_subscribe(to, _opts, %{type: :producer} = stage) do
+  defp consumer_subscribe(_cancel, to, _opts, %{type: :producer} = stage) do
     :error_logger.error_msg('GenStage producer ~p cannot be subscribed to another stage: ~p~n', [name(), to])
     {:reply, {:error, :not_a_consumer}, stage}
   end
 
-  defp consumer_subscribe(to, opts, stage) do
+  defp consumer_subscribe(current, to, opts, stage) do
     with {:ok, cancel, _} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
          {:ok, max, _} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
          {:ok, min, _} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
@@ -2333,7 +2378,7 @@ defmodule GenStage do
       cond do
         producer_pid != nil ->
           ref = Process.monitor(producer_pid)
-          send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, opts}})
+          send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, current, opts}})
           consumer_subscribe(opts, ref, producer_pid, cancel, min, max, stage)
         cancel == :temporary ->
           {:reply, {:ok, make_ref()}, stage}

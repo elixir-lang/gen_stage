@@ -796,7 +796,7 @@ defmodule DynamicSupervisorTest do
     test "ask for more events when count reaches min_demand (low)" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
-          {:"$gen_producer", _, {:subscribe, _}} ->
+          {:"$gen_producer", _, {:subscribe, _, _}} ->
             receive do
               {:"$gen_producer", {pid, ref}, {:ask, 3}} ->
                 send(pid, {:"$gen_consumer", {pid, ref}, [:ok2, :ok2]})
