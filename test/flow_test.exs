@@ -552,6 +552,16 @@ defmodule FlowTest do
              |> Flow.emit(:state)
              |> Enum.at(0) == 55
     end
+
+    test "with start_link/1" do
+      parent = self()
+      Flow.from_enumerable(1..10)
+      |> Flow.partition(stages: 4)
+      |> Flow.reduce(fn -> 0 end, &+/2)
+      |> Flow.departition(fn -> [] end, &[&1 | &2], &send(parent, Enum.sort(&1)))
+      |> Flow.start_link
+      assert_receive [7, 10, 16, 22]
+    end
   end
 
   defp merged_flows(options) do

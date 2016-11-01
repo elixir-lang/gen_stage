@@ -55,6 +55,11 @@ defmodule Flow.Materialize do
     {acc, reducer, trigger} = window_ops(window, compiled_ops, opts)
     {stages, opts} = Keyword.pop(opts, :stages)
     {init_opts, subscribe_opts} = Keyword.split(opts, @map_reducer_opts)
+    init_opts =
+      case type do
+        :consumer -> Keyword.drop(init_opts, [:dispatcher])
+        _ -> init_opts
+      end
 
     for i <- 0..stages-1 do
       subscriptions =
