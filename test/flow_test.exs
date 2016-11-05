@@ -63,6 +63,18 @@ defmodule FlowTest do
     end
   end
 
+  describe "run/1" do
+    test "does not leave lingering messages nor monitors" do
+      Flow.from_enumerable(1..100, stages: 4)
+      |> Flow.reduce(fn -> 0 end, & &1 + &2)
+      |> Flow.emit(:state)
+      |> Enum.to_list()
+
+      refute_received _
+      assert Process.info(self(), :monitors) == {:monitors, []}
+    end
+  end
+
   describe "enumerable-stream" do
     @flow Flow.from_enumerables([[1, 2, 3], [4, 5, 6]], stages: 2)
 
