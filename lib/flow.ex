@@ -1109,6 +1109,8 @@ defmodule Flow do
   set to `:state`, to return the `:state` from `reduce/3`
   or `map_state/2` or even the processed collection as a whole.
   """
+  @spec emit(t, :events | :state | :nothing) :: t | Enumerable.t
+  def emit(flow, option \\ :events)
   def emit(flow, :events) do
     flow
   end
