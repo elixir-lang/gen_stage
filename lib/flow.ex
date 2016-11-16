@@ -1098,7 +1098,7 @@ defmodule Flow do
   Controls which values should be emitted from now.
 
   The argument can be either `:events`, `:state` or `:nothing`.
-  This step must be called afterthe reduce operation and it will
+  This step must be called after the reduce operation and it will
   guarantee the state is a list that can be sent downstream.
 
   Most commonly `:events` is used and each partition will emit the events it has
