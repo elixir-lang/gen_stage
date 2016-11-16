@@ -1104,7 +1104,7 @@ defmodule Flow do
   Most commonly `:events` is used and each partition will emit the events it has
   processed to the next stages. However, sometimes we want
   to emit counters or other data structures as a result of
-  our computations. In such cases, the `:emit` argument can be
+  our computations. In such cases, the emit argument can be
   set to `:state`, to return the `:state` from `reduce/3`
   or `map_state/2` or even the processed collection as a whole. The
   argument value of `:nothing` is used by `run/1` and `start_link/2`.
