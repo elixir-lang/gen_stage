@@ -412,7 +412,8 @@ defmodule Flow do
   @typep producers :: nil |
                       {:stages, GenStage.stage} |
                       {:enumerables, Enumerable.t} |
-                      {:join, t, t, fun(), fun(), fun()}
+                      {:join, t, t, fun(), fun(), fun()} |
+                      {:flows, [t]}
 
   @typep operation :: {:mapper, atom(), [term()]} |
                       {:partition, keyword()} |
