@@ -683,7 +683,7 @@ defmodule GenStage do
   @type type :: :producer | :consumer | :producer_consumer
 
   @typedoc "The supported init options"
-  @type options :: []
+  @type options :: keyword()
 
   @typedoc "The stage reference"
   @type stage :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
@@ -787,7 +787,7 @@ defmodule GenStage do
   If this callback is not implemented, the default implementation by
   `use GenStage` will return `{:automatic, state}`.
   """
-  @callback handle_subscribe(:producer | :consumer, opts :: [options],
+  @callback handle_subscribe(:producer | :consumer, options,
                              to_or_from :: GenServer.from, state :: term) ::
     {:automatic | :manual, new_state} |
     {:stop, reason, new_state} when new_state: term, reason: term
