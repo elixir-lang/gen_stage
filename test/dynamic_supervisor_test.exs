@@ -665,6 +665,16 @@ defmodule DynamicSupervisorTest do
       assert %{workers: 2, active: 2} = DynamicSupervisor.count_children(sup)
     end
 
+    test "start child with stream" do
+      {:ok, producer} = GenStage.from_enumerable([:ok2, :ok2, :ok2])
+      {:ok, sup} = Consumer.start_link()
+      opts = [to: producer, cancel: :temporary]
+      assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
+      assert_receive {:child_started, _}
+      assert_receive {:child_started, _}
+      assert_receive {:child_started, _}
+    end
+
     @tag :capture_log
     test "start child with throw/error/exit" do
       {:ok, producer} = Producer.start_link()
