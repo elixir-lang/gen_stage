@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.0
+
+### Enhancements
+
+  * Add `GenStage.sync_resubscribe/4` and `GenStage.async_resubscribe/4`
+  * Improve logs, specs and docs
+
+### Bug fixes
+
+  * Ensure `Flow.departition/4` works on `Flow.start_link/1`
+  * Make sure no lingering monitors or messages on the inbox after GenStage.stream/1
+
 ## v0.8.0
 
 ### Enhancements
