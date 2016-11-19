@@ -426,7 +426,7 @@ defmodule Flow.Window do
   emitting the `:done` trigger.
 
   `count` is a positive number. The `unit` may be a time unit
-  (`:second`, :millisecond`, `:second`, `:minute` and `:hour`).
+  (`:second`, `:millisecond`, `:second`, `:minute` and `:hour`).
   """
   @spec allowed_lateness(t, pos_integer, System.time_unit, :keep | :reset) :: t
   def allowed_lateness(window, count, unit, keep_or_reset \\ :keep)
