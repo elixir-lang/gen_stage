@@ -179,8 +179,10 @@ defmodule GenStage do
   will automatically re-invoke its `c:init/1` callback and resubscribe
   it to the supervisor.
 
-  This approach, however, is only possible when using named processes.
-  For example, assuming the process `A` and `B` are started as follows:
+  This approach works as long as the producer can be referenced when
+  the consumer starts--such as by name (for a named process) or by pid
+  for a running unnamed process.  For example, assuming the process
+  `A` and `B` are started as follows:
 
       # Let's call the stage in module A as A
       GenStage.start_link(A, 0, name: A)
