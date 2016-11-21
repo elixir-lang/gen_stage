@@ -401,7 +401,7 @@ defmodule Flow do
         |\ /\ /|
         | /\/\ |
         |//  \\|
-        [R1][R2]    # Flow.reduce_by_key/2 (consumer)
+        [R1][R2]    # Flow.reduce/3 (consumer)
 
   """
 
