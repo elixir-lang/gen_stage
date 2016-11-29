@@ -751,6 +751,18 @@ defmodule GenStage do
       represents the producer or a tuple with the producer and the
       subscription options (as defined in `sync_subscribe/2`)
 
+  ## Dispatcher
+
+  When using a `:producer` or `:producer_consumer`, the dispatcher
+  may be configured on init as follows:
+
+      {:producer, state, dispacher: GenStage.BroadcastDispatcher}
+
+  Some dispatchers may require options to be given on initialization,
+  those can be done with a tuple:
+
+      {:producer, state, dispatcher: {GenStage.PartitionDispatcher, partitions: 0..3}}
+
   """
   @callback init(args :: term) ::
     {type, state} |
@@ -1119,11 +1131,17 @@ defmodule GenStage do
       cancellations, the reason is wrapped in a `:cancel` tuple.
     * `:min_demand` - the minimum demand for this subscription
     * `:max_demand` - the maximum demand for this subscription
-    * `:selector` - If a producer uses BroadcastDispatcher, 
-      an optional :selector function of type (event :: any -> boolean)
-      limits this subscription to receiving only those events where the selector
-      function returns a truthy value.
 
+  Any other option is sent to the producer stage. This may be used by
+  dispatchers for custom configuration. For example, if a producer uses
+  a `GenStage.BroadcastDispatcher`,  an optional `:selector` function
+  that receives an event and returns a boolean limits this subscription to
+  receiving only those events where the selector function returns a truthy
+  value:
+
+      GenStage.sync_subscribe(consumer,
+        to: producer,
+        selector: fn %{key: key} -> String.starts_with?(key, "foo-") end)
 
   All other options are sent as is to the producer stage.
   """

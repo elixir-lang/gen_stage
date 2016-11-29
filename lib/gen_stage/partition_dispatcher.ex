@@ -27,6 +27,16 @@ defmodule GenStage.PartitionDispatcher do
       above. The default uses `&:erlang.phash2(&1, Enum.count(partitions))`
       on the event to select the partition.
 
+  ### Examples
+
+  To start a producer with four partitions named 0, 1, 2 and 3:
+
+      {:producer, state, dispatcher: {GenStage.PartitionDispatcher, partitions: 0..3}}
+
+  To start a producer with two partitions named `:odd` and `:even`:
+
+      {:producer, state, dispatcher: {GenStage.PartitionDispatcher, partitions: [:odd, :even]}}
+
   ## Subscribe options
 
   When subscribing to a `GenStage` with a partition dispatcher the following
@@ -34,6 +44,17 @@ defmodule GenStage.PartitionDispatcher do
 
     * `:partition` - the name of the partition. The partition must be one of
       the partitions specified in `:partitions` above.
+
+  ### Examples
+
+  The partition function can be given either on `init`'s subscribe_to:
+
+      {:consumer, :ok, subscribe_to: [{producer, partition: 0}]}
+
+  Or when calling `sync_subscribe`:
+
+      GenStage.sync_subscribe(consumer, to: producer, partition: 0)
+
   """
 
   @behaviour GenStage.Dispatcher

@@ -5,7 +5,17 @@ defmodule GenStage.Dispatcher do
   This module defines the behaviour used by `:producer` and
   `:producer_consumer` to dispatch events.
 
-  Elixir ships with two dispatcher implementations:
+  When using a `:producer` or `:producer_consumer`, the dispatcher
+  may be configured on init as follows:
+
+      {:producer, state, dispacher: GenStage.BroadcastDispatcher}
+
+  Some dispatchers may require options to be given on initialization,
+  those can be done with a tuple:
+
+      {:producer, state, dispatcher: {GenStage.PartitionDispatcher, partitions: 0..3}}
+
+  Elixir ships with the following dispatcher implementations:
 
     * `GenStage.DemandDispatcher` - dispatches the given batch of
       events to the consumer with the biggest demand in a FIFO
@@ -14,6 +24,11 @@ defmodule GenStage.Dispatcher do
     * `GenStage.BroadcastDispatcher` - dispatches all events to all
       consumers. The demand is only sent upstream once all consumers
       ask for data.
+
+    * `GenStage.PartitionDispatcher` - dispatches all events to a
+      fixed amount of consumers that works as partitions according
+      to a hash function.
+
   """
 
   @doc """

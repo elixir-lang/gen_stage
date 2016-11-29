@@ -5,9 +5,9 @@ defmodule GenStage.BroadcastDispatcher do
   A dispatcher that accumulates demand from all consumers
   before broadcasting events to all of them.
 
-  If a producer uses BroadcastDispatcher, its subscribers can specify
-  an optional `:selector` function of type (event :: any -> boolean)
-  in the subscription options.
+  If a producer uses `GenStage.BroadcastDispatcher`, its subscribers
+  can specify an optional `:selector` function that receives the event
+  and returns a boolean in the subscription options.
 
   Assume `producer` and `consumer` are stages exchanging events of type
   `%{:key => String.t, any => any}`, then by calling
@@ -20,8 +20,8 @@ defmodule GenStage.BroadcastDispatcher do
   for which the selector function returns a truthy value.
 
   The `:selector` option can be specified in sync and async subscriptions,
-  as well as in the `:subscribe_to` list in the return tuple of `c:GenStage.init/1`.
-  For example:
+  as well as in the `:subscribe_to` list in the return tuple of
+  `c:GenStage.init/1`. For example:
 
       def init(:ok) do
         {:consumer, :ok, subscribe_to: 
