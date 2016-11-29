@@ -786,6 +786,23 @@ defmodule Flow do
   end
 
   @doc """
+  Maps over the given values in the stage state.
+
+  It is expected the state to emit two-elements tuples,
+  such as list, maps, etc.
+
+  ## Examples
+
+      iex> flow = Flow.from_enumerable([foo: 1, foo: 2, bar: 3, foo: 4, bar: 5], stages: 1)
+      iex> flow |> Flow.group_by_key |> Flow.map_values(&Enum.sort/1) |> Enum.sort()
+      [bar: [3, 5], foo: [1, 2, 4]]
+
+  """
+  def map_values(flow, value_fun) when is_function(value_fun) do
+    map(flow, fn {key, value} -> {key, value_fun.(value)} end)
+  end
+
+  @doc """
   Applies the given function mapping each input in parallel and
   flattening the result, but only one level deep.
 
@@ -1040,7 +1057,8 @@ defmodule Flow do
 
   Events are grouped into maps where the key is the key
   returned by `key_fun` and the value is a list of values
-  in reverse order as returned by `value_fun`.
+  in reverse order as returned by `value_fun`. The resulting
+  map becomes the stage state.
 
   ## Examples
 
@@ -1060,6 +1078,10 @@ defmodule Flow do
 
   @doc """
   Groups a series of `{key, value}` tuples by keys.
+
+  Events are grouped into maps with the given key and a list
+  of values with the given keys in reverse order. The resulting
+  map becomes the stage state.
 
   ## Examples
 
@@ -1248,7 +1270,7 @@ defmodule Flow do
   end
   defp do_map_state(flow, mapper) do
     unless has_reduce?(flow) do
-      raise ArgumentError, "map_state/2 must be called after a reduce/3 operation"
+      raise ArgumentError, "map_state/2 must be called after a group_by/reduce operation"
     end
     add_operation(flow, {:map_state, mapper})
   end
@@ -1290,7 +1312,7 @@ defmodule Flow do
   end
   defp do_each_state(flow, mapper) do
     unless has_reduce?(flow) do
-      raise ArgumentError, "each_state/2 must be called after a reduce/3 operation"
+      raise ArgumentError, "each_state/2 must be called after a group_by/reduce operation"
     end
     add_operation(flow, {:map_state, mapper})
   end

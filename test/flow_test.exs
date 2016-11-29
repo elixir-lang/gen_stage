@@ -48,7 +48,7 @@ defmodule FlowTest do
     end
 
     test "on map_state without reduce" do
-      assert_raise ArgumentError, ~r"map_state/2 must be called after a reduce/3 operation", fn ->
+      assert_raise ArgumentError, ~r"map_state/2 must be called after a group_by/reduce operation", fn ->
         Flow.from_enumerable([1, 2, 3])
         |> Flow.map_state(fn x -> x end)
         |> Enum.to_list
@@ -117,7 +117,8 @@ defmodule FlowTest do
     end
 
     test "uniq_by/2" do
-      assert @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort() == [1, 2]
+      result = @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
+      assert result == [1, 2] or result == [4, 5]
     end
 
     test "keeps ordering" do
