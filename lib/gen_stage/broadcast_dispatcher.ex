@@ -20,7 +20,14 @@ defmodule GenStage.BroadcastDispatcher do
   for which the selector function returns a truthy value.
 
   The `:selector` option can be specified in sync and async subscriptions,
-  as well as in the `:subscribe_to` list in the return tuple of `c:GenStage.init/1`
+  as well as in the `:subscribe_to` list in the return tuple of `c:GenStage.init/1`.
+  For example:
+
+      def init(:ok) do
+        {:consumer, :ok, subscribe_to: 
+          [{producer, selector: fn %{key: key} -> String.starts_with?(key, "foo-") end}]}`
+      end
+
   """
 
   @behaviour GenStage.Dispatcher
