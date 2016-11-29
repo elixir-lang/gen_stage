@@ -947,7 +947,7 @@ defmodule Flow do
       when is_function(acc_fun, 0) and is_function(merge_fun, 2) and
            (is_function(done_fun, 1) or is_function(done_fun, 2)) do
     unless has_reduce?(flow) do
-      raise ArgumentError, "departition/5 must be called after a reduce/3 operation"
+      raise ArgumentError, "departition/5 must be called after a group_by/reduce operation"
     end
 
     done_fun =
@@ -1049,6 +1049,65 @@ defmodule Flow do
         add_operation(flow, {:reduce, acc_fun, reducer_fun})
       true ->
         raise ArgumentError, "Flow.reduce/3 expects the accumulator to be given as a function"
+    end
+  end
+
+  @doc """
+  Takes `n` events according to the sort function.
+
+  This function allows developers to calculate the top `n` entries
+  (or the bottom `n` entries) by performing most of the work
+  concurrently.
+
+  First `n` events are taken from every partition and then those `n`
+  events from every partition are merged into a single partition. The
+  final result is a flow with a single partition that will emit a list
+  with the top `n` events. The sorting is given by the `sort_fun`.
+
+  `take_sort/3` is built on top of departition, which means it will
+  also take and sort entries across windows.
+
+  ## Examples
+
+  As an example, imagine you are processing a list of URLs and you want
+  the list of the most accessed URLs.
+
+      iex> urls = ~w(www.foo.com www.bar.com www.foo.com www.foo.com www.baz.com)
+      iex> flow = urls |> Flow.from_enumerable |> Flow.partition()
+      iex> flow = flow |> Flow.reduce(fn -> %{} end, fn url, map ->
+      ...>   Map.update(map, url, 1, & &1 + 1)
+      ...> end)
+      iex> flow = flow |> Flow.take_sort(1, fn {_url_a, count_a}, {_url_b, count_b} ->
+      ...>   count_b <= count_a
+      ...> end)
+      iex> Enum.to_list(flow)
+      [[{"www.foo.com", 3}]]
+
+  """
+  def take_sort(flow, n, sort_fun \\ &<=/2) when is_integer(n) and n > 0 do
+    unless has_reduce?(flow) do
+      raise ArgumentError, "take_sort/3 must be called after a group_by/reduce operation"
+    end
+
+    flow
+    |> map_state(& &1 |> Enum.sort(sort_fun) |> Enum.take(n))
+    |> departition(fn -> [] end, &merge_sorted(&1, &2, n, sort_fun), fn x -> x end)
+  end
+
+  defp merge_sorted([], other, _, _), do: other
+  defp merge_sorted(other, [], _, _), do: other
+  defp merge_sorted(left, right, n, sort), do: merge_sorted(left, right, 0, n, sort)
+
+  defp merge_sorted(_, _, count, count, _sort), do: []
+  defp merge_sorted(lefties, [], count, n, _sort), do: Enum.take(lefties, n - count)
+  defp merge_sorted([], righties, count, n, _sort), do: Enum.take(righties, n - count)
+
+  defp merge_sorted([left | lefties], [right | righties], count, n, sort) do
+    case sort.(left, right) do
+      true ->
+        [left | merge_sorted(lefties, [right | righties], count + 1, n, sort)]
+      false ->
+        [right | merge_sorted([left | lefties], righties, count + 1, n, sort)]
     end
   end
 
@@ -1178,7 +1237,7 @@ defmodule Flow do
   end
   def emit(flow, :state) do
     unless has_reduce?(flow) do
-      raise ArgumentError, "emit/2 must be called after a reduce/3 operation"
+      raise ArgumentError, "emit/2 must be called after a group_by/reduce operation"
     end
     map_state(flow, fn acc, _, _ -> [acc] end)
   end

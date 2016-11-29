@@ -205,7 +205,8 @@ defmodule FlowTest do
     end
 
     test "uniq_by/2" do
-      assert @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort() == [1, 2]
+      result = @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
+      assert result == [1, 2] or result == [4, 5]
     end
 
     test "keeps ordering" do
@@ -506,6 +507,36 @@ defmodule FlowTest do
              |> Flow.reduce(fn -> [] end, &[&1 | &2])
              |> Flow.map_state(&[Enum.sum(&1)])
              |> Enum.sort() == [173, 361, 364, 377, 797, 865, 895, 1218]
+    end
+  end
+
+  describe "take_sort/3" do
+    test "is equivalent to Enum.sort/3 ascending on the whole collection" do
+      list1 = Enum.map(1..1000, fn _ -> :rand.uniform(10000) end)
+      list2 = Enum.map(1..1000, fn _ -> :rand.uniform(10000) end)
+      list3 = Enum.map(1..1000, fn _ -> :rand.uniform(10000) end)
+      list4 = Enum.map(1..1000, fn _ -> :rand.uniform(10000) end)
+
+      assert Flow.from_enumerables([list1, list2, list3, list4])
+             |> Flow.partition()
+             |> Flow.reduce(fn -> [] end, &[&1 | &2])
+             |> Flow.take_sort(100)
+             |> Enum.at(0) ==
+            (list1 ++ list2 ++ list3 ++ list4) |> Enum.sort |> Enum.take(100)
+    end
+
+    test "is equivalent to Enum.sort/3 descending on the whole collection" do
+      list1 = Enum.map(1..1000, fn _ -> :rand.uniform(10000) end)
+      list2 = Enum.map(1..1000, fn _ -> :rand.uniform(10000) end)
+      list3 = Enum.map(1..1000, fn _ -> :rand.uniform(10000) end)
+      list4 = Enum.map(1..1000, fn _ -> :rand.uniform(10000) end)
+
+      assert Flow.from_enumerables([list1, list2, list3, list4])
+             |> Flow.partition()
+             |> Flow.reduce(fn -> [] end, &[&1 | &2])
+             |> Flow.take_sort(100, &>=/2)
+             |> Enum.at(0) ==
+            (list1 ++ list2 ++ list3 ++ list4) |> Enum.sort(&>=/2) |> Enum.take(100)
     end
   end
 
