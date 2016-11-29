@@ -1026,13 +1026,53 @@ defmodule Flow do
   def reduce(flow, acc_fun, reducer_fun) when is_function(reducer_fun, 2) do
     cond do
       has_reduce?(flow) ->
-        raise ArgumentError, "cannot call reduce/3 on a flow after another reduce/3 operation " <>
+        raise ArgumentError, "cannot call group_by/reduce on a flow after another group_by/reduce operation " <>
                              "(it must be called only once per partition, consider using map_state/2 instead)"
       is_function(acc_fun, 0) ->
         add_operation(flow, {:reduce, acc_fun, reducer_fun})
       true ->
         raise ArgumentError, "Flow.reduce/3 expects the accumulator to be given as a function"
     end
+  end
+
+  @doc """
+  Groups events with the given `key_fun`.
+
+  Events are grouped into maps where the key is the key
+  returned by `key_fun` and the value is a list of values
+  in reverse order as returned by `value_fun`.
+
+  ## Examples
+
+      iex> flow = Flow.from_enumerable(~w[the quick brown fox], stages: 1)
+      iex> flow |> Flow.group_by(&String.length/1) |> Flow.emit(:state) |> Enum.to_list()
+      [%{3 => ["fox", "the"], 5 => ["brown", "quick"]}]
+
+  """
+  @spec group_by(t, (term -> term), (term -> term)) :: t
+  def group_by(flow, key_fun, value_fun \\ fn x -> x end)
+      when is_function(key_fun, 1) and is_function(value_fun, 1) do
+    reduce(flow, fn -> %{} end, fn entry, categories ->
+      value = value_fun.(entry)
+      Map.update(categories, key_fun.(entry), [value], &[value | &1])
+    end)
+  end
+
+  @doc """
+  Groups a series of `{key, value}` tuples by keys.
+
+  ## Examples
+
+      iex> flow = Flow.from_enumerable([foo: 1, foo: 2, bar: 3, foo: 4, bar: 5], stages: 1)
+      iex> flow |> Flow.group_by_key |> Flow.emit(:state) |> Enum.to_list()
+      [%{foo: [4, 2, 1], bar: [5, 3]}]
+
+  """
+  @spec group_by_key(t) :: t
+  def group_by_key(flow) do
+    reduce(flow, fn -> %{} end, fn {key, value}, acc ->
+      Map.update(acc, key, [value], &[value | &1])
+    end)
   end
 
   @doc """

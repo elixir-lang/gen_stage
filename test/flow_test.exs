@@ -39,7 +39,7 @@ defmodule FlowTest do
 
   describe "errors" do
     test "on multiple reduce calls" do
-      assert_raise ArgumentError, ~r"cannot call reduce/3 on a flow after another reduce/3 operation", fn ->
+      assert_raise ArgumentError, ~r"cannot call group_by/reduce on a flow after another group_by/reduce operation", fn ->
         Flow.from_enumerable([1, 2, 3])
         |> Flow.reduce(fn -> 0 end, & &1 + &2)
         |> Flow.reduce(fn -> 0 end, & &1 + &2)
@@ -319,7 +319,8 @@ defmodule FlowTest do
     end
 
     test "uniq_by/2" do
-      assert @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort() == [1, 2, 3, 4, 10]
+      result = @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
+      assert result == [1, 2, 3, 4, 10] or result == [3, 4, 7, 8, 10]
     end
 
     test "uniq_by/2 after reduce/3" do
