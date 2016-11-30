@@ -430,20 +430,42 @@ defmodule Flow do
 
       Flow.from_enumerable([enumerable], options)
 
+  The enumerable is consumed in batches, retrieving `max_demand`
+  items the first time and then `max_demand - min_demand` the
+  next times. Therefore, for streams that cannot produce items
+  that fast, it is recommended to pass a lower `:max_demand`
+  value as an option.
+
   ## Examples
 
       "some/file"
       |> File.stream!(read_ahead: 100_000)
       |> Flow.from_enumerable()
 
+      some_network_based_stream()
+      |> Flow.from_enumerable(max_demand: 20)
+
   """
   @spec from_enumerable(Enumerable.t, keyword) :: t
-  def from_enumerable(enumerable, options \\ []) do
+  def from_enumerable(enumerable, options \\ [])
+
+  def from_enumerable(%Flow{}, _options) do
+    raise ArgumentError, "passing a Flow to Flow.from_enumerable/2 is not supported. " <>
+                         "Did you mean to use Flow.partition/2 or Flow.merge/2?"
+  end
+
+  def from_enumerable(enumerable, options) do
     from_enumerables([enumerable], options)
   end
 
   @doc """
   Starts a flow with the given enumerable as producer.
+
+  The enumerable is consumed in batches, retrieving `max_demand`
+  items the first time and then `max_demand - min_demand` the
+  next times. Therefore, for streams that cannot produce items
+  that fast, it is recommended to pass a lower `:max_demand`
+  value as an option.
 
   See `GenStage.from_enumerable/2` for information and
   limitations on enumerable-based stages.

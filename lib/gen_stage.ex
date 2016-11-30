@@ -1367,11 +1367,17 @@ defmodule GenStage do
   arguments (in fact, streams are the most common argument to
   this function).
 
+  The enumerable is consumed in batches, retrieving `max_demand`
+  items the first time and then `max_demand - min_demand` the
+  next times. Therefore, for streams that cannot produce items
+  that fast, it is recommended to pass a lower `:max_demand`
+  value as an option.
+
   When the enumerable finishes or halts, a notification is sent
   to all consumers in the format of
-  `{{pid, subscription_tag}, {:producer, :halted | :done}}`. If the stage
-  is meant to terminate when there are no more consumers, we recommend
-  setting the `:consumers` option to `:permanent`.
+  `{{pid, subscription_tag}, {:producer, :halted | :done}}`. If the
+  stage is meant to terminate when there are no more consumers, we
+  recommend setting the `:consumers` option to `:permanent`.
 
   Keep in mind that streams that require the use of the process
   inbox to work most likely won't behave as expected with this
