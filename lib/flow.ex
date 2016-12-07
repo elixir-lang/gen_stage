@@ -24,6 +24,12 @@ defmodule Flow do
   to be materialized at different intervals, allowing developers
   to peek at results as they are computed.
 
+  This README will cover the main constructs and concepts behind
+  Flow with examples. There is also a presentation about GenStage
+  and Flow from José Valim at ElixirConf 2016, which also covers
+  data processing concepts for those unfamilar with the domain:
+  https://youtu.be/srtMWzyqdp8?t=244
+
   **Note:** this module is currently namespaced under
   `Experimental.Flow`. You will need to `alias Experimental.Flow`
   before writing the examples below.
