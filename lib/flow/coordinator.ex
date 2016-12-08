@@ -19,6 +19,7 @@ defmodule Flow.Coordinator do
   ## Callbacks
 
   def init({parent, flow, type, consumers, options}) do
+    Process.flag(:trap_exit, true)
     {:ok, sup} = start_supervisor()
     start_link = &Supervisor.start_child(sup, [&1, &2, &3])
     type_options = Keyword.take(options, [:dispatcher])
@@ -75,5 +76,14 @@ defmodule Flow.Coordinator do
       [] -> {:stop, :normal, state}
       refs -> {:noreply, %{state | refs: refs}}
     end
+  end
+
+  def terminate(_reason, %{supervisor: supervisor}) do
+    ref = Process.monitor(supervisor)
+    Process.exit(supervisor, :shutdown)
+    receive do
+      {:DOWN, ^ref, _, _, _} -> :ok
+    end
+    :ok
   end
 end
