@@ -32,7 +32,8 @@ defmodule FlowTest do
       {:noreply, [], parent}
     end
 
-    def handle_info(_, parent) do
+    def handle_info({{pid, ref}, {:producer, _}}, parent) do
+      GenStage.cancel({pid, ref}, :normal)
       {:noreply, [], parent}
     end
   end
@@ -133,7 +134,7 @@ defmodule FlowTest do
     test "start_link/2" do
       parent = self()
 
-      {:ok, _} =
+      {:ok, pid} =
         @flow
         |> Flow.filter(&rem(&1, 2) == 0)
         |> Flow.each(&send(parent, &1))
@@ -143,18 +144,24 @@ defmodule FlowTest do
       assert_receive 4
       assert_receive 6
       refute_received 1
+
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, _, _, _}
     end
 
     test "into_stages/3" do
       {:ok, forwarder} = GenStage.start_link(Forwarder, self())
 
-      {:ok, _} =
+      {:ok, pid} =
         @flow
         |> Flow.filter(&rem(&1, 2) == 0)
         |> Flow.into_stages([forwarder])
 
       assert_receive {:consumed, [2]}
       assert_receive {:consumed, [4, 6]}
+
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, _, _, _}
     end
   end
 
@@ -236,7 +243,7 @@ defmodule FlowTest do
     test "start_link/2" do
       parent = self()
 
-      {:ok, _} =
+      {:ok, pid} =
         @flow
         |> Flow.filter(&rem(&1, 2) == 0)
         |> Flow.each(&send(parent, &1))
@@ -246,6 +253,9 @@ defmodule FlowTest do
       assert_receive 4
       assert_receive 6
       refute_received 1
+
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, _, _, _}
     end
 
     test "into_stages/3" do
@@ -370,7 +380,7 @@ defmodule FlowTest do
     test "start_link/2" do
       parent = self()
 
-      {:ok, _} =
+      {:ok, pid} =
         @flow
         |> Flow.filter(&rem(&1, 2) == 0)
         |> Flow.each(&send(parent, &1))
@@ -380,6 +390,9 @@ defmodule FlowTest do
       assert_receive 4
       assert_receive 6
       refute_received 1
+
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, _, _, _}
     end
 
     test "into_stages/3" do
@@ -600,12 +613,17 @@ defmodule FlowTest do
 
     test "with start_link/1" do
       parent = self()
-      Flow.from_enumerable(1..10)
-      |> Flow.partition(stages: 4)
-      |> Flow.reduce(fn -> 0 end, &+/2)
-      |> Flow.departition(fn -> [] end, &[&1 | &2], &send(parent, Enum.sort(&1)))
-      |> Flow.start_link
+
+      {:ok, pid} =
+        Flow.from_enumerable(1..10)
+        |> Flow.partition(stages: 4)
+        |> Flow.reduce(fn -> 0 end, &+/2)
+        |> Flow.departition(fn -> [] end, &[&1 | &2], &send(parent, Enum.sort(&1)))
+        |> Flow.start_link
+
       assert_receive [7, 10, 16, 22]
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, _, _, _}
     end
   end
 
