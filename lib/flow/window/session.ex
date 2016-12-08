@@ -7,7 +7,7 @@ defmodule Flow.Window.Session do
   defstruct [:by, :gap, :trigger, periodically: []]
 
   def departition(_flow) do
-    raise ArgumentError, "cannot departition on a session window because each session window its own data"
+    raise ArgumentError, "cannot departition on a session window because each session window has its own data"
   end
 
   def materialize(%{by: by, gap: gap}, reducer_acc, reducer_fun, reducer_trigger, options) do

@@ -724,7 +724,7 @@ defmodule Flow do
   """
   @spec start_link(t, keyword()) :: GenServer.on_start
   def start_link(flow, options \\ []) do
-    GenServer.start_link(Flow.Coordinator, {emit(flow, :nothing), :consumer, [], options}, options)
+    Flow.Coordinator.start_link(emit(flow, :nothing), :consumer, [], options)
   end
 
   @doc """
@@ -740,7 +740,7 @@ defmodule Flow do
   @spec into_stages(t, consumers, keyword()) :: GenServer.on_start when
         consumers: [GenStage.stage | {GenStage.stage, keyword()}]
   def into_stages(flow, consumers, options \\ []) do
-    GenServer.start_link(Flow.Coordinator, {flow, :producer_consumer, consumers, options}, options)
+    Flow.Coordinator.start_link(flow, :producer_consumer, consumers, options)
   end
 
   ## Mappers
@@ -1417,10 +1417,12 @@ defmodule Flow do
 
   defimpl Enumerable do
     def reduce(flow, acc, fun) do
-      {producers, consumers} =
-        Flow.Materialize.materialize(flow, &GenStage.start_link/3, :producer_consumer, [])
-      pids = for {pid, _} <- producers, do: pid
-      GenStage.stream(consumers, producers: pids).(acc, fun)
+      case Flow.Coordinator.start(flow, :producer_consumer, [], [demand: :accumulate]) do
+        {:ok, pid} ->
+          Flow.Coordinator.stream(pid).(acc, fun)
+        {:error, {reason, stack}} ->
+          :erlang.raise(:error, reason, stack)
+      end
     end
 
     def count(_flow) do

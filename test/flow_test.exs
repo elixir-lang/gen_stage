@@ -84,6 +84,11 @@ defmodule FlowTest do
       assert @flow |> Enum.sort() == [1, 2, 3, 4, 5, 6]
     end
 
+    @tag :capture_log
+    test "raises locally" do
+      assert catch_exit(@flow |> Flow.map(fn _ -> raise "oops" end) |> Enum.to_list)
+    end
+
     test "each/2" do
       parent = self()
       assert @flow |> Flow.each(&send(parent, &1)) |> Enum.sort() ==
@@ -171,6 +176,11 @@ defmodule FlowTest do
 
     test "only sources"  do
       assert @flow |> Enum.sort() == [1, 2, 3, 4, 5, 6]
+    end
+
+    @tag :capture_log
+    test "raises locally" do
+      assert catch_exit(@flow |> Flow.map(fn _ -> raise "oops" end) |> Enum.to_list)
     end
 
     test "each/2" do
@@ -287,6 +297,11 @@ defmodule FlowTest do
              |> Flow.emit(:state)
              |> Enum.map(&Enum.sort/1)
              |> Enum.sort() == [[1, 5, 7, 9], [2, 6, 8], [3, 4], [10]]
+    end
+
+    @tag :capture_log
+    test "raises locally" do
+      assert catch_exit(@flow |> Flow.map(fn _ -> raise "oops" end) |> Enum.to_list)
     end
 
     test "each/2" do
@@ -424,6 +439,11 @@ defmodule FlowTest do
       assert Flow.from_stage(pid, stages: 1)
              |> Enum.take(5)
              |> Enum.sort() == [0, 1, 2, 3, 4]
+    end
+
+    @tag :capture_log
+    test "raises locally" do
+      assert catch_exit(@flow |> Flow.map(fn _ -> raise "oops" end) |> Enum.to_list)
     end
 
     test "each/2", %{counter: pid} do
