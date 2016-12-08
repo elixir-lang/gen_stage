@@ -84,6 +84,5 @@ defmodule Flow.Coordinator do
     receive do
       {:DOWN, ^ref, _, _, _} -> :ok
     end
-    :ok
   end
 end
