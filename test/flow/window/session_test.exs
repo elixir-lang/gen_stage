@@ -9,13 +9,13 @@ defmodule Flow.Window.SessionTest do
 
   @tag :capture_log
   test "can't be departitioned" do
-    assert_raise ArgumentError, ~r/cannot departition on a session window/, fn ->
+    assert catch_exit(
       Flow.from_enumerable(1..100, stages: 4, max_demand: 5)
       |> Flow.partition(window: single_window(), stages: 4, key: fn _ -> 0 end)
       |> Flow.reduce(fn -> 0 end, & &1 + &2)
       |> Flow.departition(fn -> 0 end, & &1 + &2, &(&1))
       |> Enum.to_list
-    end
+    )
   end
 
   describe "single window" do

@@ -58,10 +58,9 @@ defmodule FlowTest do
 
     @tag :capture_log
     test "on window without computation" do
-      assert_raise ArgumentError, ~r"a window was set but no computation is happening on this partition", fn ->
-        Flow.from_enumerable([1, 2, 3], window: Flow.Window.fixed(1, :second, & &1))
-        |> Enum.to_list
-      end
+      assert catch_exit(
+        Flow.from_enumerable([1, 2, 3], window: Flow.Window.fixed(1, :second, & &1)) |> Enum.to_list
+      )
     end
   end
 

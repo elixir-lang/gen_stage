@@ -1420,8 +1420,8 @@ defmodule Flow do
       case Flow.Coordinator.start(flow, :producer_consumer, [], [demand: :accumulate]) do
         {:ok, pid} ->
           Flow.Coordinator.stream(pid).(acc, fun)
-        {:error, {reason, stack}} ->
-          :erlang.raise(:error, reason, stack)
+        {:error, reason} ->
+          exit({reason, {__MODULE__, :reduce, [flow, acc, fun]}})
       end
     end
 
