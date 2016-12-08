@@ -7,6 +7,7 @@ defmodule Flow.Window.SessionTest do
     Flow.Window.session(1, :second, fn x -> x end)
   end
 
+  @tag :capture_log
   test "can't be departitioned" do
     assert_raise ArgumentError, ~r/cannot departition on a session window/, fn ->
       Flow.from_enumerable(1..100, stages: 4, max_demand: 5)

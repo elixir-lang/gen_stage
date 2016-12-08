@@ -56,6 +56,7 @@ defmodule FlowTest do
       end
     end
 
+    @tag :capture_log
     test "on window without computation" do
       assert_raise ArgumentError, ~r"a window was set but no computation is happening on this partition", fn ->
         Flow.from_enumerable([1, 2, 3], window: Flow.Window.fixed(1, :second, & &1))
@@ -119,7 +120,7 @@ defmodule FlowTest do
 
     test "uniq_by/2" do
       result = @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
-      assert result == [1, 2] or result == [4, 5]
+      assert length(result) == 2
     end
 
     test "keeps ordering" do
@@ -213,7 +214,7 @@ defmodule FlowTest do
 
     test "uniq_by/2" do
       result = @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
-      assert result == [1, 2] or result == [4, 5]
+      assert length(result) == 2
     end
 
     test "keeps ordering" do
@@ -332,7 +333,7 @@ defmodule FlowTest do
 
     test "uniq_by/2" do
       result = @flow |> Flow.uniq_by(&rem(&1, 2)) |> Enum.sort()
-      assert result == [1, 2, 3, 4, 10] or result == [3, 4, 7, 8, 10]
+      assert length(result) == 5
     end
 
     test "uniq_by/2 after reduce/3" do
