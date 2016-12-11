@@ -134,13 +134,15 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([selector: selector1], {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([selector: selector2], {pid, ref2}, disp)
     assert {[{0, ^pid, ^ref2, _selector2}, {0, ^pid, ^ref1, _selector1}], 0} = disp
+
     {:ok, 0, disp} = D.ask(4, {pid, ref2}, disp)
     {:ok, 4, disp} = D.ask(4, {pid, ref1}, disp)
-
     {:ok, [], _disp} = D.dispatch([%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}, %{key: "foo0000"}], 4, disp)
 
-    assert_received {:"$gen_consumer", {_, ^ref2}, [%{key: "pref-1234"}, %{key: "pref-5678"}]}
+    assert_received {:"$gen_producer", {_, ^ref1}, {:ask, 1}}
+    assert_received {:"$gen_producer", {_, ^ref2}, {:ask, 2}}
     assert_received {:"$gen_consumer", {_, ^ref1}, [%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}]}
+    assert_received {:"$gen_consumer", {_, ^ref2}, [%{key: "pref-1234"}, %{key: "pref-5678"}]}
   end
 
   test "delivers notifications to all consumers" do
