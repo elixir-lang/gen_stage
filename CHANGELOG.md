@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.10.0
+
+### Enhancements
+
+  * Add `Flow.group_by/3` and `Flow.group_by_key/3` as conveniences around `Flow.reduce/3`
+  * Add `Flow.map_values/2` for mapping over the values in a key-value based state
+  * Add `Flow.take_sort/3` that efficiently sorts and takes the top N entries
+
+### Bug fixes
+
+  * Ensure BroadcastDispatcher sends demand to itself when custom selector discards events
+  * Ensure flows started with `Flow.start_link/2` properly terminate if producers terminate
+  * Ensure flows exit locally instead of relying on linked processes exits. With this change, `Flow.run(flow)` and `Enum.to_list(flow)` no longer start stages linked directly to the caller but does so through a supervisor
+
 ## v0.9.0
 
 ### Enhancements

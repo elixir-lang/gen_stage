@@ -1142,10 +1142,10 @@ defmodule Flow do
   @doc """
   Groups events with the given `key_fun`.
 
-  Events are grouped into maps where the key is the key
-  returned by `key_fun` and the value is a list of values
-  in reverse order as returned by `value_fun`. The resulting
-  map becomes the stage state.
+  This is a reduce operation that groups events into maps
+  where the key is the key returned by `key_fun` and the
+  value is a list of values in reverse order as returned by
+  `value_fun`. The resulting map becomes the stage state.
 
   ## Examples
 
@@ -1166,9 +1166,9 @@ defmodule Flow do
   @doc """
   Groups a series of `{key, value}` tuples by keys.
 
-  Events are grouped into maps with the given key and a list
-  of values with the given keys in reverse order. The resulting
-  map becomes the stage state.
+  This is a reduce operation that groups events into maps
+  with the given key and a list of values with the given keys
+  in reverse order. The resulting map becomes the stage state.
 
   ## Examples
 
