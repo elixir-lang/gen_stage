@@ -271,7 +271,7 @@ defmodule GenStage do
   The buffer can also be used in cases external sources only send
   events in batches larger than asked for. For example, if you are
   receiving events from an external source that only sends events
-  in batches of 1000 in 1000 and the internal demand is smaller than
+  in batches of 1000 and the internal demand is smaller than
   that, the buffer allows you to always emit batches of 1000 events
   even when the consumer has asked for less.
 
