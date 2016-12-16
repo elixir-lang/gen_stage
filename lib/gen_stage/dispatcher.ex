@@ -8,7 +8,7 @@ defmodule GenStage.Dispatcher do
   When using a `:producer` or `:producer_consumer`, the dispatcher
   may be configured on init as follows:
 
-      {:producer, state, dispacher: GenStage.BroadcastDispatcher}
+      {:producer, state, dispatcher: GenStage.BroadcastDispatcher}
 
   Some dispatchers may require options to be given on initialization,
   those can be done with a tuple:
