@@ -2092,6 +2092,7 @@ defmodule GenStage do
       [] -> {:noreply, stage}
       demands when is_list(demands) ->
         demands
+        |> :lists.reverse
         |> Enum.reduce({:noreply, stage},
                        fn(d, {:noreply, %{state: state} = stage}) ->
                            noreply_callback(:handle_demand, [d, state], stage)
@@ -2166,7 +2167,7 @@ defmodule GenStage do
           %{events: :forward, state: state} ->
             noreply_callback(:handle_demand, [counter, state], stage)
           %{events: events} when is_list(events) ->
-            {:noreply, %{stage | events: events ++ [counter]}}
+            {:noreply, %{stage | events: [counter|events]}}
           %{events: queue} -> # producer_consumer
             take_pc_events(queue, counter, stage)
         end
