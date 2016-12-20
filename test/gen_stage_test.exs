@@ -85,6 +85,28 @@ defmodule GenStageTest do
     end
   end
 
+  defmodule DemandProducer do
+    @moduledoc """
+    A producer that tracks demand requests.
+    """
+
+    use GenStage
+
+    def start_link(init, opts \\ []) do
+      GenStage.start_link(__MODULE__, init, opts)
+    end
+
+    ## Callbacks
+
+    def init(init) do
+      init
+    end
+
+    def handle_demand(demand, past_demands) do
+      {:noreply, [demand], [demand | past_demands]}
+    end
+  end
+
   defmodule Doubler do
     @moduledoc """
     Multiples every event by two.
@@ -484,6 +506,20 @@ defmodule GenStageTest do
       GenStage.demand(producer, :accumulate)
       GenStage.demand(producer, :forward)
       assert_receive {:consumed, [0, 1, 2, 3]}
+    end
+
+    test "does not combine demands when accumulating" do
+      {:ok, producer} = DemandProducer.start_link({:producer, [], demand: :accumulate})
+      {:ok, consumer1} = Forwarder.start_link({:consumer, self()})
+      {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
+      GenStage.sync_subscribe(consumer1, to: producer, max_demand: 2)
+      GenStage.sync_subscribe(consumer2, to: producer, max_demand: 2)
+      refute_received {:consumed, [4]}
+      refute_received {:consumed, [1]}
+      GenStage.demand(producer, :forward)
+      assert_receive {:consumed, [2]}
+      assert_receive {:consumed, [2]}
+      assert_receive {:consumed, [1]}
     end
   end
 
