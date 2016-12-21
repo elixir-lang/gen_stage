@@ -679,7 +679,7 @@ defmodule GenStage do
   """
 
   defstruct [:mod, :state, :type, :dispatcher_mod, :dispatcher_state, :buffer,
-             :buffer_config, events: [], monitors: %{}, producers: %{}, consumers: %{}]
+             :buffer_config, events: :forward, monitors: %{}, producers: %{}, consumers: %{}]
 
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer
@@ -1752,7 +1752,7 @@ defmodule GenStage do
          :ok <- validate_no_opts(opts) do
       stage = %GenStage{mod: mod, state: state, type: :producer_consumer,
                         buffer: {:queue.new, 0, init_wheel(buffer_size)},
-                        buffer_config: {buffer_size, buffer_keep},
+                        buffer_config: {buffer_size, buffer_keep}, events: 0,
                         dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state}
       consumer_init_subscribe(subscribe_to, stage)
     else
@@ -1934,8 +1934,8 @@ defmodule GenStage do
       %{^ref => _entry} ->
         {counter, queue} =
           case demand_or_queue do
-            demands when is_list(demands) ->
-              {Enum.sum(demands), :queue.new}
+            demand when is_integer(demand)  ->
+              {demand, :queue.new}
             queue ->
               {0, queue}
           end
@@ -1967,10 +1967,10 @@ defmodule GenStage do
   def handle_info({:"$gen_consumer", {producer_pid, ref} = from, {:notification, msg}},
                   %{producers: producers, events: events, state: state} = stage) do
     case producers do
-      %{^ref => _} when is_list(events) ->
-        noreply_callback(:handle_info, [{from, msg}, state], stage)
-      %{^ref => _} ->
+      %{^ref => _} when is_tuple(events) ->
         {:noreply, %{stage | events: :queue.in({:notification, {from, msg}}, events)}}
+      %{^ref => _} ->
+        noreply_callback(:handle_info, [{from, msg}, state], stage)
       _ ->
         send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}})
         {:noreply, stage}
@@ -2088,19 +2088,18 @@ defmodule GenStage do
   end
   defp producer_demand(:forward, %{events: events} = stage) do
     stage = %{stage | events: :forward}
-    case events do
-      [] -> {:noreply, stage}
-      demands when is_list(demands) ->
-        demands
-        |> :lists.reverse
-        |> Enum.reduce({:noreply, stage},
-                       fn(d, {:noreply, %{state: state} = stage}) ->
-                           noreply_callback(:handle_demand, [d, state], stage)
-                         (d, {:noreply, %{state: state} = stage, _}) ->
-                           noreply_callback(:handle_demand, [d, state], stage)
-                         (_, {:stop, _, _} = acc) -> acc
-                       end)
-      _ -> {:noreply, stage}
+
+    if is_list(events) do
+      :lists.foldl(fn
+        d, {:noreply, %{state: state} = stage} ->
+          noreply_callback(:handle_demand, [d, state], stage)
+        d, {:noreply, %{state: state} = stage, _} ->
+          noreply_callback(:handle_demand, [d, state], stage)
+        _, {:stop, _, _} = acc ->
+          acc
+      end, {:noreply, stage}, :lists.reverse(events))
+    else
+      {:noreply, stage}
     end
   end
   defp producer_demand(:accumulate, %{events: events} = stage) do
@@ -2164,11 +2163,16 @@ defmodule GenStage do
         {:noreply, stage}
       {:ok, counter, stage} when is_integer(counter) and counter > 0 ->
         case stage do
+          # producer
           %{events: :forward, state: state} ->
             noreply_callback(:handle_demand, [counter, state], stage)
           %{events: events} when is_list(events) ->
-            {:noreply, %{stage | events: [counter|events]}}
-          %{events: queue} -> # producer_consumer
+            {:noreply, %{stage | events: [counter | events]}}
+
+          # producer_consumer
+          %{events: events} when is_integer(events) ->
+            {:noreply, %{stage | events: counter + events}}
+          %{events: queue} ->
             take_pc_events(queue, counter, stage)
         end
     end
@@ -2539,7 +2543,7 @@ defmodule GenStage do
             stop
         end
       {:empty, _queue} ->
-        {:noreply, %{stage | events: [counter]}}
+        {:noreply, %{stage | events: counter}}
     end
   end
 
