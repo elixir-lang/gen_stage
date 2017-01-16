@@ -95,12 +95,12 @@ defmodule DynamicSupervisor do
 
   Remember, the agent process for the previous stack is gone. The
   supervisor started a new stack but it has a new PID. For now,
-  let's use `DynamicSupervisor.which_children/1` to fetch the new PID:
+  let's use `which_children/1` to fetch the new PID:
 
       [stack] = DynamicSupervisor.which_children(sup)
       Stack.pop(stack) #=> :hello
 
-  In practice though, it is unlikely we would use `children/1`.
+  In practice though, it is unlikely we would use `which_children/1`.
   When we are managing thousands to millions of processes, we
   must find more efficient ways to retrieve processes. We have a
   couple of options.
