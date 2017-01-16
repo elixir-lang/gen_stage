@@ -214,12 +214,12 @@ defmodule DynamicSupervisor do
   @behaviour GenStage
 
   @typedoc "Options used by the `start*` functions"
-  @type options :: [registry: atom,
-                    name: Supervisor.name,
-                    strategy: Supervisor.Spec.strategy,
-                    max_restarts: non_neg_integer,
-                    max_seconds: non_neg_integer,
-                    max_dynamic: non_neg_integer | :infinity]
+  @type option :: {:registry, atom} |
+                  {:name, Supervisor.name} |
+                  {:strategy, Supervisor.Spec.strategy} |
+                  {:max_restarts, non_neg_integer} |
+                  {:max_seconds, non_neg_integer} |
+                  {:max_dynamic, non_neg_integer | :infinity}
 
   @doc """
   Callback invoked to start the supervisor and during hot code upgrades.
@@ -273,7 +273,7 @@ defmodule DynamicSupervisor do
   and will exit not only on crashes but also if the parent process
   exits with `:normal` reason.
   """
-  @spec start_link([Supervisor.Spec.spec], options) :: Supervisor.on_start
+  @spec start_link([Supervisor.Spec.spec], [option]) :: Supervisor.on_start
   def start_link(children, options) when is_list(children) do
     # TODO: Do not call supervise but the shared spec validation logic
     {:ok, {_, spec}} = Supervisor.Spec.supervise(children, options)
@@ -300,7 +300,7 @@ defmodule DynamicSupervisor do
   name, the supported values are described under the `Name Registration`
   section in the `GenServer` module docs.
   """
-  @spec start_link(module, any, [options]) :: Supervisor.on_start
+  @spec start_link(module, any, [option]) :: Supervisor.on_start
   def start_link(mod, args, opts \\ []) do
     GenStage.start_link(__MODULE__, {mod, args, opts[:name]}, opts)
   end
