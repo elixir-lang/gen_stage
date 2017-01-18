@@ -22,15 +22,13 @@ Examples for using GenStage and ConsumerSupervisor can be found [examples](examp
 
   * [RateLimiter](examples/rate_limiter.exs) - an example of performing rate limiting in a GenStage pipeline
 
-You may also be interested in the[Flow](https://hexdocs.pm/flow) or [José Valim's keynote at ElixirConf 2017](https://youtu.be/srtMWzyqdp8?t=244) introducing the main GenStage and Flow concepts.
-
 ## Installation
 
 GenStage requires Elixir v1.3. Just add `:gen_stage` to your list of dependencies in mix.exs:
 
 ```elixir
 def deps do
-  [{:gen_stage, "~> 0.11"}]
+  [{:gen_stage, "~> 0.10"}]
 end
 ```
 
