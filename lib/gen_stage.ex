@@ -1,5 +1,3 @@
-alias Experimental.GenStage
-
 defmodule GenStage do
   @moduledoc ~S"""
   Stages are computation steps that send and/or receive data
@@ -8,10 +6,6 @@ defmodule GenStage do
   When a stage sends data, it acts as a producer. When it receives
   data, it acts as a consumer. Stages may take both producer and
   consumer roles at once.
-
-  **Note:** this module is currently namespaced under
-  `Experimental.GenStage`. You will need to `alias Experimental.GenStage`
-  before writing the examples below.
 
   ## Stage types
 
@@ -240,8 +234,8 @@ defmodule GenStage do
   number of cores (as returned by `System.schedulers_online/0`) but can
   likely be increased if the consumers are mostly waiting on IO.
 
-  Another alternative to the scenario above, is to use a `DynamicSupervisor`
-  for consuming the events instead of N consumers. The `DynamicSupervisor`
+  Another alternative to the scenario above, is to use a `ConsumerSupervisor`
+  for consuming the events instead of N consumers. The `ConsumerSupervisor`
   will start a separate supervised process per event in a way you have at
   most `max_demand` children and the average amount of children is
   `(max_demand - min_demand) / 2`.
@@ -462,14 +456,14 @@ defmodule GenStage do
   is set to `:manual`, developers must use `GenStage.ask/3` to send
   demand upstream when necessary.
 
-  For example, the `DynamicSupervisor` module processes events
+  For example, the `ConsumerSupervisor` module processes events
   asynchronously by starting child process and such is done by
-  manually sending demand to producers. The `DynamicSupervisor`
+  manually sending demand to producers. The `ConsumerSupervisor`
   can be used to distribute work to a limited amount of
   processes, behaving similar to a pool where a new process is
   started per event. The minimum amount of concurrent children per
   producer is specified by `min_demand` and the `maximum` is given
-  by `max_demand`. See the `DynamicSupervisor` docs for more
+  by `max_demand`. See the `ConsumerSupervisor` docs for more
   information.
 
   Setting the demand to `:manual` in `c:handle_subscribe/4` is not
@@ -791,7 +785,7 @@ defmodule GenStage do
   or `{:manual, state}`. The default is to return `:automatic`, which means
   the stage implementation will take care of automatically sending demand to
   producers. `:manual` must be used when a special behaviour is desired
-  (for example, `DynamicSupervisor` uses `:manual` demand) and demand must
+  (for example, `ConsumerSupervisor` uses `:manual` demand) and demand must
   be sent explicitly with `ask/2`. The manual subscription must be cancelled
   when `handle_cancel/3` is called.
 

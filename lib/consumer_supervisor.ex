@@ -1,209 +1,57 @@
-alias Experimental.{DynamicSupervisor, GenStage}
-
-defmodule DynamicSupervisor do
+defmodule ConsumerSupervisor do
   @moduledoc ~S"""
-  A supervisor that dynamically supervises and manages children.
+  A supervisor that starts children as events flow in.
 
-  A supervisor is a process which supervises other processes, called
-  child processes. Different from the regular `Supervisor`,
-  `DynamicSupervisor` was designed to start, manage and supervise
-  these children dynamically.
-
-  **Note**: if you want to perform hot code upgrades, the
-  `DynamicSupervisor` can only be used as the root supervisor in
-  your supervision tree from Erlang 19 onwards.
-
-  **Note:** this module is currently namespaced under
-  `Experimental.DynamicSupervisor`. You will need to
-  `alias Experimental.DynamicSupervisor` before writing the examples below.
-
-  ## Example
-
-  Before we start our dynamic supervisor, let's first build an agent
-  that represents a stack. That's the process we will start dynamically:
-
-      defmodule Stack do
-        def start_link(state) do
-          Agent.start_link(fn -> state end, opts)
-        end
-
-        def pop(pid) do
-          Agent.get_and_update(pid, fn [h|t] -> {h, t} end)
-        end
-
-        def push(pid, h) do
-          Agent.cast(pid, fn t -> [h|t] end)
-        end
-      end
-
-  Now let's start our dynamic supervisor. Similar to a regular
-  supervisor, the dynamic supervisor expects a list of child
-  specifications on start. Different from regular supervisors,
-  this list must contain only one item. The child specified in
-  the list won't be started alongside the supervisor. Instead,
-  the child specification will be used as a template for all
-  future supervised children.
-
-  Let's give it a try:
-
-      # Import helpers for defining supervisors
-      import Supervisor.Spec
-
-      # We are going to supervise the Stack server which
-      # will be started with a single argument [:hello]
-      # and the default name of :sup_stack.
-      children = [
-        worker(Stack, [])
-      ]
-
-      # Start the supervisor with our template
-      {:ok, sup} = DynamicSupervisor.start_link(children, strategy: :one_for_one)
-
-  With the supervisor up and running, let's start our first
-  child with `DynamicSupervisor.start_child/2`. `start_child/2`
-  expects the supervisor PID and a list of arguments. Let's start
-  our child with a default stack of `[:hello]`:
-
-      {:ok, stack} = DynamicSupervisor.start_child(sup, [[:hello]])
-
-  Now let's use the stack:
-
-      Stack.pop(stack)
-      #=> :hello
-
-      Stack.push(stack, :world)
-      #=> :ok
-
-      Stack.pop(stack)
-      #=> :world
-
-  However, there is a bug in our stack agent. If we call `:pop` and
-  the stack is empty, it is going to crash because no clause matches.
-  Let's try it:
-
-      Stack.pop(stack)
-      ** (exit) exited in: GenServer.call(#PID<...>, ..., 5000)
-
-  Since the stack is being supervised, the supervisor will automatically
-  start a new agent, with the same default stack of `[:hello]` we have
-  specified before. However, if we try to access it with the same PID,
-  we will get an error:
-
-      Stack.pop(stack)
-      ** (exit) exited in: GenServer.call(#PID<...>, ..., 5000)
-         ** (EXIT) no process
-
-  Remember, the agent process for the previous stack is gone. The
-  supervisor started a new stack but it has a new PID. For now,
-  let's use `which_children/1` to fetch the new PID:
-
-      [stack] = DynamicSupervisor.which_children(sup)
-      Stack.pop(stack) #=> :hello
-
-  In practice though, it is unlikely we would use `which_children/1`.
-  When we are managing thousands to millions of processes, we
-  must find more efficient ways to retrieve processes. We have a
-  couple of options.
-
-  The first option is to ask if we really want the stack to be
-  automatically restarted. If not, we can choose another restart
-  mode for the worker. For example:
-
-      worker(Stack, [], restart: :temporary)
-
-  The `:temporary` option will tell the supervisor to not restart
-  the worker when it exits. Read the "Exit reasons" section later on
-  for more information.
-
-  The second option is to give a name when starting the Stack agent:
-
-      DynamicSupervisor.start_child(sup, [[:hello], [name: MyStack]])
-
-  Now whenever that particular agent is started or restarted, it will
-  be registered with a `MyStack` name which we can use when accessing
-  it:
-
-      Stack.pop(MyStack)
-      #=> [:hello]
-
-  And that's it. If the stack crashes, another stack will be up and
-  have registered itself with the name `MyStack`.
-
-  ## Module-based supervisors
-
-  In the example above, a supervisor was started by passing the
-  supervision structure to `start_link/2`. However, supervisors
-  can also be created by explicitly defining a supervision module:
-
-      defmodule MyApp.Supervisor do
-        use DynamicSupervisor
-
-        def start_link do
-          DynamicSupervisor.start_link(__MODULE__, [])
-        end
-
-        def init([]) do
-          children = [
-            worker(Stack, [[:hello]])
-          ]
-
-          {:ok, children, strategy: :one_for_one}
-        end
-      end
-
-  **Note:** differently from `Supervisor`, the `DynamicSupervisor`
-  expects a 3-item tuple from `init/1` and it does not
-  use the `supervise/2` function. The goal is to standardize both
-  implementations in the long term.
-
-  You may want to use a module-based supervisor if you need to
-  perform some particular action on supervisor initialization,
-  like setting up an ETS table.
-
-  ## Strategies
-
-  Currently dynamic supervisors support a single strategy:
-
-    * `:one_for_one` - if a child process terminates, only that
-      process is restarted.
-
-  ## GenStage consumer
-
-  A `DynamicSupervisor` can be used as the consumer in a `GenStage` pipeline.
+  A `ConsumerSupervisor` can be used as the consumer in a `GenStage` pipeline.
   A new child process will be started per event, where the event is appended
   to the arguments in the child specification.
 
-  A `DynamicSupervisor` can be attached to a producer by returning
+  A `ConsumerSupervisor` can be attached to a producer by returning
   `:subscribe_to` from `init/1` or explicitly with `GenStage.sync_subscribe/3`
   and `GenStage.async_subscribe/2`.
 
   Once subscribed, the supervisor will ask the producer for `max_demand` events
   and start child processes as events arrive. As child processes terminate, the
   supervisor will accumulate demand and request more events once `min_demand`
-  is reached. This allows the `DynamicSupervisor` to work similar to a pool,
+  is reached. This allows the `ConsumerSupervisor` to work similar to a pool,
   except a child process is started per event. The minimum amount of concurrent
   children per producer is specified by `min_demand` and the `maximum` is given
   by `max_demand`.
 
-  ## Exit reasons
+  ## Example
 
-  From the example above, you may have noticed that the transient restart
-  strategy for the worker does not restart the child if it crashes with
-  reason `:normal`, `:shutdown` or `{:shutdown, term}`.
+  Let's define a GenStage consumer as a `ConsumerSupervisor` that subscribes
+  to a producer named `Producer` and starts a new process for each event
+  received from the producer. Each new process will be started by calling
+  `Printer.start_link/1`, which simply starts a task that will print the
+  incoming event to the terminal.
 
-  So one may ask: which exit reason should I choose when exiting my worker?
-  There are three options:
+      defmodule Consumer do
+        use ConsumerSupervisor
 
-    * `:normal` - in such cases, the exit won't be logged, there is no restart
-      in transient mode and linked processes do not exit
+        def start_link() do
+          children = [
+            worker(Printer, [], restart: :temporary)
+          ]
 
-    * `:shutdown` or `{:shutdown, term}` - in such cases, the exit won't be
-      logged, there is no restart in transient mode and linked processes exit
-      with the same reason unless trapping exits
+          ConsumerSupervisor.start_link(children, strategy: :one_for_one,
+                                                  subscribe_to: [{Producer, max_demand: 50}])
+        end
+      end
 
-    * any other term - in such cases, the exit will be logged, there are
-      restarts in transient mode and linked processes exit with the same reason
-      unless trapping exits
+  Then on the printer module:
+
+      defmodule Printer do
+        def start_link(event) do
+          Task.start_link(fn ->
+            IO.inspect {self(), event}
+          end)
+        end
+      end
+
+  Similar to `Supervisor`, `ConsumerSupervisor` also provides `start_link/3`,
+  which allows developers to start a supervisor with the help of a callback
+  module.
 
   ## Name Registration
 
@@ -227,7 +75,7 @@ defmodule DynamicSupervisor do
   ## Options
 
     * `:strategy` - the restart strategy option. Only `:one_for_one`
-      is supported by dynamic supervisors.
+      is supported by consumer supervisors.
 
     * `:max_restarts` - the maximum amount of restarts allowed in
       a time frame. Defaults to 3 times.
@@ -252,7 +100,7 @@ defmodule DynamicSupervisor do
   @doc false
   defmacro __using__(_) do
     quote location: :keep do
-      @behaviour DynamicSupervisor
+      @behaviour ConsumerSupervisor
       import Supervisor.Spec
     end
   end
@@ -269,7 +117,7 @@ defmodule DynamicSupervisor do
   The supported values are described under the `Name Registration`
   section in the `GenServer` module docs.
 
-  Note that the dynamic supervisor is linked to the parent process
+  Note that the consumer supervisor is linked to the parent process
   and will exit not only on crashes but also if the parent process
   exits with `:normal` reason.
   """
@@ -283,7 +131,7 @@ defmodule DynamicSupervisor do
   end
 
   @doc """
-  Starts a dynamic supervisor module with the given `arg`.
+  Starts a consumer supervisor module with the given `arg`.
 
   To start the supervisor, the `init/1` callback will be invoked in the given
   module, with `arg` passed to it. The `init/1` callback must return a
@@ -306,7 +154,7 @@ defmodule DynamicSupervisor do
   end
 
   @doc """
-  Starts a child in the dynamic supervisor.
+  Starts a child in the consumer supervisor.
 
   The child process will be started by appending the given list of
   `args` to the existing function arguments in the child specification.
@@ -346,7 +194,7 @@ defmodule DynamicSupervisor do
   This function returns a list of tuples containing:
 
     * `id` - as defined in the child specification but is always
-      set to `:undefined` for dynamic supervisors
+      set to `:undefined` for consumer supervisors
 
     * `child` - the pid of the corresponding child process or the
       atom `:restarting` if the process is about to be restarted
@@ -367,7 +215,7 @@ defmodule DynamicSupervisor do
 
   The map contains the following keys:
 
-    * `:specs` - always 1 as dynamic supervisors have a single specification
+    * `:specs` - always 1 as consumer supervisors have a single specification
 
     * `:active` - the count of all actively running child processes managed by
       this supervisor
@@ -402,7 +250,7 @@ defmodule DynamicSupervisor do
       {:ok, children, opts} ->
         case validate_specs(children) do
           :ok ->
-            state = %DynamicSupervisor{mod: mod, args: args, name: name || {self(), mod}}
+            state = %ConsumerSupervisor{mod: mod, args: args, name: name || {self(), mod}}
             case init(state, children, opts) do
               {:ok, state, opts} -> {:consumer, state, opts}
               {:error, message} -> {:stop, {:bad_opts, message}}
@@ -440,12 +288,12 @@ defmodule DynamicSupervisor do
     :ok # TODO: Do proper spec validation
   end
   defp validate_specs(_children) do
-    {:error, "dynamic supervisor expects a list with a single item as a template"}
+    {:error, "consumer supervisor expects a list with a single item as a template"}
   end
 
   defp validate_strategy(strategy) when strategy in [:one_for_one], do: :ok
   defp validate_strategy(nil), do: {:error, "supervisor expects a strategy to be given"}
-  defp validate_strategy(_), do: {:error, "unknown supervision strategy for dynamic supervisor"}
+  defp validate_strategy(_), do: {:error, "unknown supervision strategy for consumer supervisor"}
 
   defp validate_restarts(restart) when is_integer(restart), do: :ok
   defp validate_restarts(_), do: {:error, "max_restarts must be an integer"}
@@ -500,7 +348,7 @@ defmodule DynamicSupervisor do
       :ignore ->
         start_events(extras, from, child, errors+1, acc, state)
       {:error, reason} ->
-        :error_logger.error_msg('DynamicSupervisor failed to start child from: ~p with reason: ~p~n',
+        :error_logger.error_msg('ConsumerSupervisor failed to start child from: ~p with reason: ~p~n',
           [from, reason])
         report_error(:start_error, reason, :undefined, args, child, state)
         start_events(extras, from , child, errors+1, acc, state)
@@ -515,7 +363,7 @@ defmodule DynamicSupervisor do
     case producers do
       %{^ref => {to, count, pending, min, max}} ->
         if count + events > max do
-          :error_logger.error_msg('DynamicSupervisor has received ~p events in excess from: ~p~n',
+          :error_logger.error_msg('ConsumerSupervisor has received ~p events in excess from: ~p~n',
                                   [count + events - max, {pid, ref}])
         end
 

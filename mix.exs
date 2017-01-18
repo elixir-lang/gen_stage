@@ -1,18 +1,18 @@
 defmodule GenStage.Mixfile do
   use Mix.Project
 
-  @version "0.10.0"
+  @version "0.11.0"
 
   def project do
     [app: :gen_stage,
      version: @version,
      elixir: "~> 1.3",
      package: package(),
-     description: "GenStage specification and computational flow for Elixir",
+     description: "Producer and consumer pipelines with back-pressure for Elixir",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      deps: deps(),
-     docs: [main: "Experimental.GenStage", source_ref: "v#{@version}",
+     docs: [main: "GenStage", source_ref: "v#{@version}",
             source_url: "https://github.com/elixir-lang/gen_stage"]]
   end
 

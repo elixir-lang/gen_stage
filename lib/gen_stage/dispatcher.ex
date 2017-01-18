@@ -1,5 +1,3 @@
-alias Experimental.GenStage
-
 defmodule GenStage.Dispatcher do
   @moduledoc """
   This module defines the behaviour used by `:producer` and

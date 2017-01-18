@@ -1,6 +1,4 @@
 # Usage: mix run examples/gen_event.exs
-alias Experimental.{GenStage}
-
 defmodule Broadcaster do
   @moduledoc """
   Using a GenStage for implementing a GenEvent manager

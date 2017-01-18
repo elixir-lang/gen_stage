@@ -1,5 +1,3 @@
-alias Experimental.GenStage
-
 defmodule GenStage.Streamer do
   @moduledoc false
   use GenStage

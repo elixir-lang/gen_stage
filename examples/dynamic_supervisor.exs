@@ -1,7 +1,6 @@
 # Usage: mix run examples/dynamic_supervisor.exs
 #
 # Hit Ctrl+C twice to stop it.
-alias Experimental.{DynamicSupervisor, GenStage}
 
 defmodule Counter do
   @moduledoc """
@@ -31,14 +30,14 @@ end
 
 defmodule Consumer do
   @moduledoc """
-  A consumer will be a dynamic supervisor that will
+  A consumer will be a consumer supervisor that will
   spawn printer tasks for each event.
   """
 
-  use DynamicSupervisor
+  use ConsumerSupervisor
 
   def start_link() do
-    DynamicSupervisor.start_link(__MODULE__, :ok)
+    ConsumerSupervisor.start_link(__MODULE__, :ok)
   end
 
   # Callbacks
@@ -72,7 +71,7 @@ defmodule App do
 
     children = [
       worker(Counter, [0]),
-      # We can add as many dynamic supervisors as consumers as we want!
+      # We can add as many consumer supervisors as consumers as we want!
       worker(Consumer, [], id: 1)
     ]
 

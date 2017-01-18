@@ -1,5 +1,3 @@
-alias Experimental.GenStage
-
 defmodule GenStageTest do
   use ExUnit.Case, async: true
 

@@ -1,5 +1,3 @@
-alias Experimental.GenStage
-
 defmodule GenStage.PartitionDispatcherTest do
   use ExUnit.Case, async: true
 

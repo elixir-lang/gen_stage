@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.11.0
+
+### Backwards incompatible changes
+
+  * Remove the Experimental namespace
+  * Rename DynamicSupervisor to ConsumerSupervisor
+  * Move Flow to a separate project: https://github.com/elixir-lang/flow
+
+Except by the module name changes, all APIs remain exactly the same.
+
+### Bug fixes
+
+  * Accumulate demands but don't sum them together. This provides a better ramp up time for producers with multiple consumers
+
 ## v0.10.0
 
 ### Enhancements
@@ -73,7 +87,7 @@
 
 ### Bug fixes
 
-  * Ensure dynamic supervisor respects `min_demand` and does not send demand too soon
+  * Ensure consumer supervisor respects `min_demand` and does not send demand too soon
 
 ### Backwards incompatible changes
 
@@ -157,4 +171,4 @@ This release moves `Flow` from under the `GenStage` namespace and into `Experime
 ### Enhancements
 
   * Include GenStage with `:producer` and `:consumer` types
-  * Include DynamicSupervisor implemented as a `GenStage` consumer and that provides the `:simple_one_for_one` functionality
+  * Include ConsumerSupervisor implemented as a `GenStage` consumer and that provides the `:simple_one_for_one` functionality

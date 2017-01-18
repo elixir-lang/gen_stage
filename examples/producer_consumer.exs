@@ -5,8 +5,6 @@
 # This is a base example where a producer A emits items,
 # which are amplified by a producer consumer B and printed
 # by consumer C.
-alias Experimental.{GenStage}
-
 defmodule A do
   use GenStage
 

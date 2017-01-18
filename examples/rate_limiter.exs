@@ -4,8 +4,6 @@
 #
 # This is an example of using manual demand for
 # doing rate limiting work on a consumer.
-alias Experimental.{GenStage}
-
 defmodule Producer do
   use GenStage
 

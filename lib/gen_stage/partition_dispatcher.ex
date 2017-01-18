@@ -1,5 +1,3 @@
-alias Experimental.GenStage
-
 defmodule GenStage.PartitionDispatcher do
   @moduledoc """
   A dispatcher that sends events according to partitions.

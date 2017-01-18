@@ -1,5 +1,3 @@
-alias Experimental.GenStage
-
 defmodule GenStage.BroadcastDispatcherTest do
   use ExUnit.Case, async: true
 
