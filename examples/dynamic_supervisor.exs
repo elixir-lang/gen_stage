@@ -34,10 +34,10 @@ defmodule Consumer do
   spawn printer tasks for each event.
   """
 
-  use ConsumerSupervisor
+  use GenStage.ConsumerSupervisor
 
   def start_link() do
-    ConsumerSupervisor.start_link(__MODULE__, :ok)
+    GenStage.ConsumerSupervisor.start_link(__MODULE__, :ok)
   end
 
   # Callbacks
