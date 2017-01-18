@@ -8,7 +8,7 @@ This project currently provides the following functionality:
 
   * `ConsumerSupervisor` ([docs](https://hexdocs.pm/gen_stage/ConsumerSupervisor.html)) - a supervisor designed for consuming events from GenStage and starting a child process per event
 
-You may also be interested in [the Flow project](https://github.com/elixir-lang/flow) for building computational flows using regular `map`, `reduce` and more that run in parallel on top of GenStage. See documentation for [Flow](https://hexdocs.pm/flow) or [José Valim's keynote at ElixirConf 2017](https://youtu.be/srtMWzyqdp8?t=244) introducing the main concepts behind GenStage and Flow.
+You may also be interested in [the Flow project](https://github.com/elixir-lang/flow) for building computational flows using regular `map`, `reduce` and more that run in parallel on top of GenStage. See documentation for [Flow](https://hexdocs.pm/flow) or [José Valim's keynote at ElixirConf 2016](https://youtu.be/srtMWzyqdp8?t=244) introducing the main concepts behind GenStage and Flow.
 
 ## Examples
 
@@ -28,7 +28,7 @@ GenStage requires Elixir v1.3. Just add `:gen_stage` to your list of dependencie
 
 ```elixir
 def deps do
-  [{:gen_stage, "~> 0.10"}]
+  [{:gen_stage, "~> 0.11"}]
 end
 ```
 
