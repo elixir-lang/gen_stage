@@ -167,7 +167,7 @@ defmodule GenStage do
   ## `init` and `subscribe_to`
 
   In the example above, we have started the processes A, B and C
-  independently and subscribed them later on. But most often it is
+  independently and subscribed them later on. But most often it is
   simpler to subscribe a consumer to its producer on its `c:init/1`
   callback. This way, if the consumer crashes, restarting the consumer
   will automatically re-invoke its `c:init/1` callback and resubscribe
@@ -553,12 +553,12 @@ defmodule GenStage do
   of the demand-driven protocol but respecting the event ordering.
   See `sync_notify/3` and `async_notify/2`.
 
-  Notifications are useful for out-of-band information, for example,
+  Notifications are useful for out-of-band information. For example,
   to notify consumers the producer has sent all events it had to
   process or that a new batch of events is starting.
 
   Note the notification system should not be used for broadcasting
-  events, for such, consider using `GenStage.BroadcastDispatcher`.
+  events; for such, consider using `GenStage.BroadcastDispatcher`.
 
   ## Callbacks
 
@@ -581,7 +581,7 @@ defmodule GenStage do
   rely directly on GenServer functions such as `GenServer.multi_call/4`
   and `GenServer.abcast/3` if they wish to.
 
-  ### Name Registration
+  ### Name registration
 
   `GenStage` is bound to the same name registration rules as a `GenServer`.
   Read more about it in the `GenServer` docs.
@@ -633,7 +633,7 @@ defmodule GenStage do
       the subscription reference is known, it MUST send a `:cancel` message
       to the consumer instead of monitoring and accepting the subscription.
 
-    * `{:"$gen_producer", from :: {pid, subscription_tag}, {:cancel, reason}}` -
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_tag}, {:cancel, reason}}` -
       sent by the consumer to cancel a given subscription.
 
       Once received, the producer MUST send a `:cancel` reply to the
@@ -643,7 +643,7 @@ defmodule GenStage do
       If the pair is unknown, the producer MUST send an appropriate cancel
       reply.
 
-    * `{:"$gen_producer", from :: {pid, subscription_tag}, {:ask, count}}` -
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_tag}, {:ask, count}}` -
       sent by consumers to ask data in a given subscription.
 
       Once received, the producer MUST send data up to the demand. If the
@@ -1060,7 +1060,11 @@ defmodule GenStage do
 
   The given message will be delivered in the format
   `{{producer_pid, subscription_tag}, msg}`, where `msg` is the message
-  given below.
+  given below. `subscription_tag` is the subscription tag passed to the
+  consumer's `c:handle_subscribe/4` callback in the `to_or_from` tuple.
+  Consumers that wish to verify the `subscription_tag` in their
+  `c:handle_info/2` implementation should store such subscription tag in
+  their state.
 
   This function will return `:ok` as long as the notification request is
   sent. It may return `{:error, :not_a_producer}` in case the stage is not
@@ -1076,7 +1080,11 @@ defmodule GenStage do
 
   The given message will be delivered in the format
   `{{producer_pid, subscription_tag}, msg}`, where `msg` is the message
-  given below.
+  given below. `subscription_tag` is the subscription tag passed to the
+  consumer's `c:handle_subscribe/4` callback in the `to_or_from` tuple.
+  Consumers that wish to verify the `subscription_tag` in their
+  `c:handle_info/2` implementation should store such subscription tag in
+  their state.
 
   This call returns `:ok` regardless if the notification has been
   received by the producer or sent. It is typically called from
