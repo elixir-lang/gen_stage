@@ -553,7 +553,7 @@ defmodule GenStage do
   of the demand-driven protocol but respecting the event ordering.
   See `sync_notify/3` and `async_notify/2`.
 
-  Notifications are useful for out-of-band information: for example,
+  Notifications are useful for out-of-band information. For example,
   to notify consumers the producer has sent all events it had to
   process or that a new batch of events is starting.
 
