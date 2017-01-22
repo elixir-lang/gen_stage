@@ -2,6 +2,7 @@ defmodule ConsumerSupervisorTest do
   use ExUnit.Case, async: true
 
   import Supervisor.Spec
+  alias GenStage.ConsumerSupervisor
 
   defmodule Simple do
     def init(args), do: args

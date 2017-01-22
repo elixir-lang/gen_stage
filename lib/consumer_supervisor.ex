@@ -1,4 +1,4 @@
-defmodule ConsumerSupervisor do
+defmodule GenStage.ConsumerSupervisor do
   @moduledoc ~S"""
   A supervisor that starts children as events flow in.
 
@@ -27,14 +27,14 @@ defmodule ConsumerSupervisor do
   incoming event to the terminal.
 
       defmodule Consumer do
-        use ConsumerSupervisor
+        use GenStage.ConsumerSupervisor
 
         def start_link() do
           children = [
             worker(Printer, [], restart: :temporary)
           ]
 
-          ConsumerSupervisor.start_link(children, strategy: :one_for_one,
+          GenStage.ConsumerSupervisor.start_link(children, strategy: :one_for_one,
                                                   subscribe_to: [{Producer, max_demand: 50}])
         end
       end
@@ -100,7 +100,7 @@ defmodule ConsumerSupervisor do
   @doc false
   defmacro __using__(_) do
     quote location: :keep do
-      @behaviour ConsumerSupervisor
+      @behaviour GenStage.ConsumerSupervisor
       import Supervisor.Spec
     end
   end
@@ -250,7 +250,7 @@ defmodule ConsumerSupervisor do
       {:ok, children, opts} ->
         case validate_specs(children) do
           :ok ->
-            state = %ConsumerSupervisor{mod: mod, args: args, name: name || {self(), mod}}
+            state = %GenStage.ConsumerSupervisor{mod: mod, args: args, name: name || {self(), mod}}
             case init(state, children, opts) do
               {:ok, state, opts} -> {:consumer, state, opts}
               {:error, message} -> {:stop, {:bad_opts, message}}
