@@ -1,4 +1,4 @@
-# Usage: mix run examples/dynamic_supervisor.exs
+# Usage: mix run examples/consumer_supervisor.exs
 #
 # Hit Ctrl+C twice to stop it.
 
