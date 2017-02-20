@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.12.0
+
+### Backwards incompatible changes
+
+  * Remove `:max_dynamic` from ConsumerSupervisor (it will be added to Elixir's DynamicSupervisor that will ship in Elixir v1.5)
+
 ## v0.11.0
 
 ### Backwards incompatible changes
