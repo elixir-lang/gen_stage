@@ -164,14 +164,6 @@ defmodule ConsumerSupervisorTest do
            ConsumerSupervisor.start_child(pid, [:exit])
   end
 
-  test "start_child/2 with max_dynamic" do
-    children = [worker(__MODULE__, [])]
-    opts = [strategy: :one_for_one, max_dynamic: 0]
-    {:ok, pid} = ConsumerSupervisor.start_link(children, opts)
-
-    assert {:error, :max_dynamic} = ConsumerSupervisor.start_child(pid, [:ok2])
-  end
-
   test "temporary child is not restarted regardless of reason" do
     children = [worker(__MODULE__, [], restart: :temporary)]
     {:ok, pid} = ConsumerSupervisor.start_link(children, strategy: :one_for_one)
@@ -260,18 +252,6 @@ defmodule ConsumerSupervisorTest do
             ConsumerSupervisor.which_children(pid)
     assert_kill child5, :shutdown
     assert %{workers: 4, active: 2} = ConsumerSupervisor.count_children(pid)
-  end
-
-  test "restarting children counted in max_dynamic" do
-    children = [worker(__MODULE__, [:restart], restart: :permanent)]
-    opts = [strategy: :one_for_one, max_dynamic: 1, max_restarts: 100_000]
-    {:ok, pid} = ConsumerSupervisor.start_link(children, opts)
-
-    assert {:ok, child1} = ConsumerSupervisor.start_child(pid, [:error])
-    assert_kill child1, :shutdown
-    assert %{workers: 1, active: 0} = ConsumerSupervisor.count_children(pid)
-
-    assert {:error, :max_dynamic} = ConsumerSupervisor.start_child(pid, [:ok2])
   end
 
   test "child is restarted when trying again" do

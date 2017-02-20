@@ -66,8 +66,7 @@ defmodule ConsumerSupervisor do
                     name: Supervisor.name,
                     strategy: Supervisor.Spec.strategy,
                     max_restarts: non_neg_integer,
-                    max_seconds: non_neg_integer,
-                    max_dynamic: non_neg_integer | :infinity]
+                    max_seconds: non_neg_integer]
 
   @doc """
   Callback invoked to start the supervisor and during hot code upgrades.
@@ -83,9 +82,6 @@ defmodule ConsumerSupervisor do
     * `:max_seconds` - the time frame in which `:max_restarts` applies
       in seconds. Defaults to 5 seconds.
 
-    * `:max_dynamic` - the maximum number of children started under the
-      supervisor via `start_child/2`. Defaults to infinity children.
-
     * `:subscribe_to` - a list of producers to subscribe to. Each element
       represents the producer or a tuple with the producer and the subscription
       options. e.g. `[Producer]` or `[{Producer, max_demand: 10, min_demand: 20}]`
@@ -94,8 +90,7 @@ defmodule ConsumerSupervisor do
     {:ok, [Supervisor.Spec.spec], options :: keyword()} | :ignore
 
   defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
-             :max_dynamic, children: %{}, producers: %{}, restarts: [],
-             restarting: 0, dynamic: 0]
+             children: %{}, producers: %{}, restarts: [], restarting: 0]
 
   @doc false
   defmacro __using__(_) do
@@ -109,7 +104,7 @@ defmodule ConsumerSupervisor do
   Starts a supervisor with the given children.
 
   A strategy is required to be given as an option. Furthermore,
-  the `:max_restarts`, `:max_seconds`, `:max_dynamic` and `:subscribe_to`
+  the `:max_restarts`, `:max_seconds`, and `:subscribe_to`
   values can be configured as described in the documentation for the
   `c:init/1` callback.
 
@@ -126,7 +121,7 @@ defmodule ConsumerSupervisor do
     # TODO: Do not call supervise but the shared spec validation logic
     {:ok, {_, spec}} = Supervisor.Spec.supervise(children, options)
     # TODO: Validate options in the regular Supervisor too
-    spec_options = Keyword.take(options, [:strategy, :max_restarts, :max_seconds, :max_dynamic, :subscribe_to])
+    spec_options = Keyword.take(options, [:strategy, :max_restarts, :max_seconds, :subscribe_to])
     start_link(Supervisor.Default, {:ok, spec, spec_options}, options)
   end
 
@@ -158,6 +153,9 @@ defmodule ConsumerSupervisor do
 
   The child process will be started by appending the given list of
   `args` to the existing function arguments in the child specification.
+
+  This child is started separately from any producer and does not
+  count towards the demand of any of them.
 
   If the child process starts, function returns `{:ok, child}` or
   `{:ok, child, info}`, the pid is added to the supervisor and the
@@ -269,15 +267,12 @@ defmodule ConsumerSupervisor do
     {strategy, opts}     = Keyword.pop(opts, :strategy)
     {max_restarts, opts} = Keyword.pop(opts, :max_restarts, 3)
     {max_seconds, opts}  = Keyword.pop(opts, :max_seconds, 5)
-    {max_dynamic, opts}  = Keyword.pop(opts, :max_dynamic, :infinity)
 
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
-         :ok <- validate_seconds(max_seconds),
-         :ok <- validate_dynamic(max_dynamic) do
+         :ok <- validate_seconds(max_seconds) do
       {:ok, %{state | template: child, strategy: strategy,
-                      max_restarts: max_restarts, max_seconds: max_seconds,
-                      max_dynamic: max_dynamic}, opts}
+                      max_restarts: max_restarts, max_seconds: max_seconds}, opts}
     end
   end
   defp init(_state, [_], _opts) do
@@ -300,10 +295,6 @@ defmodule ConsumerSupervisor do
 
   defp validate_seconds(seconds) when is_integer(seconds), do: :ok
   defp validate_seconds(_), do: {:error, "max_seconds must be an integer"}
-
-  defp validate_dynamic(:infinity), do: :ok
-  defp validate_dynamic(dynamic) when is_integer(dynamic), do: :ok
-  defp validate_dynamic(_), do: {:error, "max_dynamic must be an integer or :infinity"}
 
   @doc false
   def handle_subscribe(:producer, opts, {_, ref} = from, state) do
@@ -432,13 +423,8 @@ defmodule ConsumerSupervisor do
     end
   end
 
-  def handle_call({:start_child, extra}, _from, state) do
-    %{dynamic: dynamic, max_dynamic: max_dynamic, template: child} = state
-    if dynamic < max_dynamic do
-      handle_start_child(child, extra, %{state | dynamic: dynamic + 1})
-    else
-      {:reply, {:error, :max_dynamic}, [], state}
-    end
+  def handle_call({:start_child, extra}, _from, %{template: child} = state) do
+    handle_start_child(child, extra, state)
   end
 
   defp handle_start_child({_, {m, f, args}, restart, _, _, _}, extra, state) do
@@ -449,7 +435,7 @@ defmodule ConsumerSupervisor do
       {:ok, pid} ->
         {:reply, reply, [], save_child(restart, :dynamic, pid, args, state)}
       _ ->
-        {:reply, reply, [], update_in(state.dynamic, & &1 - 1)}
+        {:reply, reply, [], state}
     end
   end
 
@@ -678,9 +664,8 @@ defmodule ConsumerSupervisor do
     {:ok, delete_child(producer, pid, state)}
   end
 
-  defp delete_child(:dynamic, pid, state) do
-    %{children: children, dynamic: dynamic} = state
-    %{state | children: Map.delete(children, pid), dynamic: dynamic - 1}
+  defp delete_child(:dynamic, pid, %{children: children} = state) do
+    %{state | children: Map.delete(children, pid)}
   end
   defp delete_child(ref, pid, %{children: children} = state) do
     children = Map.delete(children, pid)
