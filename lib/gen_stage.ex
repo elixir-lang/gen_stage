@@ -1,6 +1,6 @@
 defmodule GenStage do
   @moduledoc ~S"""
-  Stages are computation steps that send and/or receive data
+  Stages are data-exchange steps that send and/or receive data
   from other stages.
 
   When a stage sends data, it acts as a producer. When it receives
@@ -42,6 +42,32 @@ defmodule GenStage do
   is tracked and the events are sent by a dispatcher. This allows
   producers to send data using different "strategies". See
   `GenStage.Dispatcher` for more information.
+
+  Many developers tend to create layers of stages, such as A, B and
+  C for achieving concurrency. However, that's a misuse of GenStage.
+  Processes in Elixir are the abstraction for achieving concurrency,
+  since the VM does all of the work of multiplexing those processes.
+  Instead, layers in GenStage must be created when there is a need
+  for back-pressure or to route the data in different ways.
+
+  For example, if you need the data to go over multiple steps but
+  without a need for back-pressure or without a need to break the
+  data apart, do not design it as such:
+
+      [Producer] -> [Step 1] -> [Step 2] -> [Step 3]
+
+  Instead it is better to design it as:
+
+                  [Consumer]
+                 /
+      [Producer]--[Consumer]
+                 \
+                  [Consumer]
+
+  Where Consumer are multiple processes that subscribe to the same
+  producer and run exactly the same code, with all of transformation
+  steps from above. The module `ConsumerSupervisor` that is included
+  as part of `GenStage` provides conveniences for the design above.
 
   ## Example
 
