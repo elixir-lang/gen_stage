@@ -44,11 +44,11 @@ defmodule GenStage do
   `GenStage.Dispatcher` for more information.
 
   Many developers tend to create layers of stages, such as A, B and
-  C for achieving concurrency. However, that's a misuse of GenStage.
-  Processes in Elixir are the abstraction for achieving concurrency,
-  since the VM does all of the work of multiplexing those processes.
-  Instead, layers in GenStage must be created when there is a need
-  for back-pressure or to route the data in different ways.
+  C for achieving concurrency. If all you want is concurrency, using
+  processes are enough. They are the primitive for achieving concurrency
+  in Elixir and the VM does all of the work of multiplexing them.
+  Instead, layers in GenStage must be created when there is a need for
+  back-pressure or to route the data in different ways.
 
   For example, if you need the data to go over multiple steps but
   without a need for back-pressure or without a need to break the
@@ -66,8 +66,10 @@ defmodule GenStage do
 
   Where Consumer are multiple processes that subscribe to the same
   producer and run exactly the same code, with all of transformation
-  steps from above. The module `ConsumerSupervisor` that is included
-  as part of `GenStage` provides conveniences for the design above.
+  steps from above. In such scenarios, you may even find the
+  `Task.async_stream/2` function that ships as part of Elixir to be
+  enough or achieve the flexibility you need with the `ConsumerSupervisor`
+  functionality that is included as part of `GenStage`.
 
   ## Example
 
