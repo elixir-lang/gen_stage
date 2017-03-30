@@ -1392,11 +1392,9 @@ defmodule GenStageTest do
       assert_receive {:consumed, ^batch}
       assert_receive {:producer, :done}
 
-      {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
-
-      consumer_ref = Process.monitor(consumer2)
-      send producer, {:"$gen_producer", {consumer2, consumer_ref}, {:subscribe, nil, []}}
-      assert_receive {:producer, :done}
+      ref = Process.monitor(producer)
+      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
+      assert_receive {{_, ^ref}, {:producer, :done}}
     end
   end
 end
