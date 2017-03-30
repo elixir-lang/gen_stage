@@ -190,6 +190,11 @@ defmodule GenStageTest do
       {Keyword.get(opts, :consumer_demand, :automatic), recipient}
     end
 
+    def handle_info({{_pid, _ref}, {:producer, _} = msg}, recipient) do
+      send(recipient, msg)
+      {:noreply, [], recipient}
+    end
+
     def handle_info(other, recipient) do
       send(recipient, other)
       {:noreply, [], recipient}
@@ -1377,6 +1382,21 @@ defmodule GenStageTest do
       {:ok, producer} = GenStage.from_enumerable([], name: :gen_stage_from_enumerable)
       assert Process.info(producer, :registered_name) ==
              {:registered_name, :gen_stage_from_enumerable}
+    end
+
+    test "sends a message to the consumer when subscribing to a `done `producer" do
+      {:ok, producer} = GenStage.from_enumerable(1..5, consumers: :permanent)
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+
+      batch = Enum.to_list(1..5)
+      assert_receive {:consumed, ^batch}
+      assert_receive {:producer, :done}
+
+      {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
+
+      consumer_ref = Process.monitor(consumer2)
+      send producer, {:"$gen_producer", {consumer2, consumer_ref}, {:subscribe, nil, []}}
+      assert_receive {:producer, :done}
     end
   end
 end

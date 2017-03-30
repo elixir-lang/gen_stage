@@ -19,6 +19,10 @@ defmodule GenStage.Streamer do
   def handle_subscribe(_, _, _from, {:temporary, _} = state) do
     {:automatic, state}
   end
+  def handle_subscribe(_, _, {pid, ref}, {consumers, continuation}) when is_atom(continuation) do
+    send pid, {{pid, ref}, {:producer, :done}}
+    {:automatic, {[ref | consumers], continuation}}
+  end
   def handle_subscribe(_, _, {_, ref}, {consumers, continuation}) do
     {:automatic, {[ref | consumers], continuation}}
   end
