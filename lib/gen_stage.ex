@@ -327,7 +327,7 @@ defmodule GenStage do
         end
 
         @doc "Sends an event and returns only after the event is dispatched."
-        def sync_notify(pid, event, timeout \\ 5000) do
+        def sync_notify(event, timeout \\ 5000) do
           GenStage.call(__MODULE__, {:notify, event}, timeout)
         end
 
