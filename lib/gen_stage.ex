@@ -264,8 +264,8 @@ defmodule GenStage do
 
   Another alternative to the scenario above, is to use a `ConsumerSupervisor`
   for consuming the events instead of N consumers. The `ConsumerSupervisor`
-  will start a separate supervised process per event in a way you have at
-  most `max_demand` children and the average amount of children is
+  will start a separate supervised process per event where the number of children
+  is at most `max_demand` and the average amount of children is
   `(max_demand - min_demand) / 2`.
 
   ## Buffering
@@ -284,13 +284,13 @@ defmodule GenStage do
   Due to the concurrent nature of Elixir software, sometimes a producer
   may dispatch events without consumers to send those events to. For example,
   imagine a `:consumer` B subscribes to `:producer` A. Next, the consumer B
-  sends demand to A, which uses to start producing events. Now, if the
-  consumer B crashes, the producer may attempt to dispatch the now produced
-  events but it no longer has a consumer to send those events to. In such
-  cases, the producer will automatically buffer the events until another
+  sends demand to A, which starts producing events to satisfy the demand.
+  Now, if the consumer B crashes, the producer may attempt to dispatch the
+  now produced events but it no longer has a consumer to send those events to.
+  In such cases, the producer will automatically buffer the events until another
   consumer subscribes.
 
-  The buffer can also be used in cases external sources only send
+  The buffer can also be used in cases where external sources only send
   events in batches larger than asked for. For example, if you are
   receiving events from an external source that only sends events
   in batches of 1000 and the internal demand is smaller than
@@ -395,6 +395,7 @@ defmodule GenStage do
         defp dispatch_events(queue, 0, events) do
           {:noreply, Enum.reverse(events), {queue, 0}}
         end
+
         defp dispatch_events(queue, demand, events) do
           case :queue.out(queue) do
             {{:value, {from, event}}, queue} ->
