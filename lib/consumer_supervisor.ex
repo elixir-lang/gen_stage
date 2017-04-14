@@ -27,8 +27,6 @@ defmodule ConsumerSupervisor do
   incoming event to the terminal.
 
       defmodule Consumer do
-        use ConsumerSupervisor
-
         def start_link() do
           import Supervisor.Spec
 
