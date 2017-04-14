@@ -27,9 +27,9 @@ defmodule ConsumerSupervisor do
   incoming event to the terminal.
 
       defmodule Consumer do
-        use ConsumerSupervisor
-
         def start_link() do
+          import Supervisor.Spec
+
           children = [
             worker(Printer, [], restart: :temporary)
           ]
@@ -39,7 +39,7 @@ defmodule ConsumerSupervisor do
         end
       end
 
-  Then on the printer module:
+  Then in the `Printer` module:
 
       defmodule Printer do
         def start_link(event) do
