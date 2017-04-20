@@ -713,6 +713,13 @@ defmodule GenStage do
   @typedoc "The stage reference"
   @type stage :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
 
+  defmacrop is_transient_shutdown(value) do
+    quote do
+      unquote(value) == :normal or unquote(value) == :shutdown or
+        (is_tuple(unquote(value)) and tuple_size(unquote(value)) == 2 and elem(unquote(value), 0) == :shutdown)
+    end
+  end
+
   @doc """
   Invoked when the server is started.
 
@@ -1156,10 +1163,12 @@ defmodule GenStage do
 
   ## Options
 
-    * `:cancel` - `:permanent` (default) or `:temporary`. When permanent,
-      the consumer exits when the producer cancels or exits. In case
-      of exits, the same reason is used to exit the consumer. In case of
-      cancellations, the reason is wrapped in a `:cancel` tuple.
+    * `:cancel` - `:permanent` (default), `:transient` or `:temporary`.
+      When permanent, the consumer exits when the producer cancels or exits.
+      When transient, the consumer exits only if reason is not `:normal`,
+      `:shutdown`, or `{:shutdown, reason}`. When temporary, it never exits.
+      In case of exits, the same reason is used to exit the consumer.
+      In case of cancellations, the reason is wrapped in a `:cancel` tuple.
     * `:min_demand` - the minimum demand for this subscription
     * `:max_demand` - the maximum demand for this subscription
 
@@ -1208,16 +1217,7 @@ defmodule GenStage do
   effectively happened or not. It is typically called from
   a stage's `init/1` callback.
 
-  ## Options
-
-    * `:cancel` - `:permanent` (default) or `:temporary`. When permanent,
-      the consumer exits when the producer cancels or exits. In case
-      of exits, the same reason is used to exit the consumer. In case of
-      cancellations, the reason is wrapped in a `:cancel` tuple.
-    * `:min_demand` - the minimum demand for this subscription
-    * `:max_demand` - the maximum demand for this subscription
-
-  All other options are sent as is to the producer stage.
+  See `sync_subscribe/3` for examples and options.
   """
   @spec async_subscribe(stage, opts :: keyword()) :: :ok
   def async_subscribe(stage, opts) do
@@ -1404,11 +1404,13 @@ defmodule GenStage do
   that fast, it is recommended to pass a lower `:max_demand`
   value as an option.
 
-  When the enumerable finishes or halts, a notification is sent
-  to all consumers in the format of
-  `{{pid, subscription_tag}, {:producer, :halted | :done}}`. If the
-  stage is meant to terminate when there are no more consumers, we
-  recommend setting the `:consumers` option to `:permanent`.
+  When the enumerable finishes or halts, the stage will exit with
+  `:normal` reason. This means that, if a consumer is subscribed
+  to the enumerable stage and the `:cancel` option is set to
+  `:permanent`, which is the default, the consumer will also exit
+  with `:normal` reason. This behaviour can be changed by setting
+  setting the `:cancel` option to either `:transient` or `:temporary`
+  as described in the `sync_subscribe/3` docs.
 
   Keep in mind that streams that require the use of the process
   inbox to work most likely won't behave as expected with this
@@ -1419,9 +1421,6 @@ defmodule GenStage do
 
     * `:link` - when false, does not link the stage to the current
       process. Defaults to `true`
-
-    * `:consumers` - when `:permanent`, the stage exits when there
-      are no more consumers. Defaults to `:temporary`
 
     * `:dispatcher` - the dispatcher responsible for handling demands.
       Defaults to `GenStage.DemandDispatch`. May be either an atom or
@@ -1447,8 +1446,19 @@ defmodule GenStage do
 
   It expects a list of producers to subscribe to. Each element
   represents the producer or a tuple with the producer and the
-  subscription options as defined in `sync_subscribe/2`. Once
-  all producers are subscribed to, their demand is automatically
+  subscription options as defined in `sync_subscribe/2`:
+
+      GenStage.stream([{producer, max_demand: 100}])
+
+  If the producer process exits, the stream will exit with the same
+  reason. If it is expected that the producer will exit and the stream
+  should just halt when such happens, setting the cancel option to
+  either `:transient` or `:temporary` will avoid the stream for exiting
+  as described in the `sync_subscribe/3` docs:
+
+      GenStage.stream([{producer, max_demand: 100, cancel: :transient}])
+
+  Once all producers are subscribed to, their demand is automatically
   set to `:forward` mode. See the `:demand` and `:producers`
   options below for more information.
 
@@ -1512,7 +1522,7 @@ defmodule GenStage do
   end
 
   defp stream_validate_opts({to, opts}) when is_list(opts) do
-    with {:ok, cancel, _} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
+    with {:ok, cancel, _} <- validate_in(opts, :cancel, :permanent, [:temporary, :transient, :permanent]),
          {:ok, max, _} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
          {:ok, min, _} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
       {to, cancel, min, max, opts}
@@ -1570,10 +1580,10 @@ defmodule GenStage do
           send_noconnect(producer_pid, {:"$gen_producer", from, {:subscribe, nil, opts}})
           send_noconnect(producer_pid, {:"$gen_producer", from, {:ask, max}})
           Map.put(acc, inner_ref, {:subscribed, producer_pid, cancel, min, max, max})
+        cancel == :permanent or cancel == :transient ->
+          exit({:noproc, {GenStage, :init_stream, [subscriptions]}})
         cancel == :temporary ->
           acc
-        cancel == :permanent ->
-          exit({:noproc, {GenStage, :init_stream, [subscriptions]}})
       end
     end, %{}, subscriptions)
   end
@@ -1707,7 +1717,9 @@ defmodule GenStage do
 
   defp cancel_stream(inner_ref, reason, monitor_pid, monitor_ref, subscriptions) do
     case subscriptions do
-      %{^inner_ref => {_, _, :permanent, _, _, _}} ->
+      %{^inner_ref => {_, _, cancel, _, _, _}}
+          when cancel == :permanent
+          when cancel == :transient and not is_transient_shutdown(reason) ->
         Process.demonitor(inner_ref, [:flush])
         {:halt, {:exit, reason, monitor_pid, monitor_ref, Map.delete(subscriptions, inner_ref)}}
       %{^inner_ref => _} ->
@@ -2476,7 +2488,7 @@ defmodule GenStage do
   end
 
   defp consumer_subscribe(current, to, opts, stage) do
-    with {:ok, cancel, _} <- validate_in(opts, :cancel, :permanent, [:temporary, :permanent]),
+    with {:ok, cancel, _} <- validate_in(opts, :cancel, :permanent, [:temporary, :transient, :permanent]),
          {:ok, max, _} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
          {:ok, min, _} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
       producer_pid = GenServer.whereis(to)
@@ -2485,10 +2497,10 @@ defmodule GenStage do
           ref = Process.monitor(producer_pid)
           send_noconnect(producer_pid, {:"$gen_producer", {self(), ref}, {:subscribe, current, opts}})
           consumer_subscribe(opts, ref, producer_pid, cancel, min, max, stage)
+        cancel == :permanent or cancel == :transient ->
+          {:stop, :noproc, {:ok, make_ref()}, stage}
         cancel == :temporary ->
           {:reply, {:ok, make_ref()}, stage}
-        cancel == :permanent ->
-          {:stop, :noproc, {:ok, make_ref()}, stage}
        end
     else
       {:error, message} ->
@@ -2524,7 +2536,9 @@ defmodule GenStage do
         Process.demonitor(ref, [:flush])
         stage = %{stage | producers: producers}
         case noreply_callback(:handle_cancel, [{kind, reason}, {producer_pid, ref}, state], stage) do
-          {:noreply, stage} when mode == :permanent ->
+          {:noreply, stage}
+              when mode == :permanent
+              when mode == :transient and not is_transient_shutdown(reason) ->
             {:stop, reason, stage}
           other ->
             other
