@@ -1255,16 +1255,16 @@ defmodule GenStage do
 
   It accepts the same options as `Process.send/3`.
   """
-  @spec ask(stage, non_neg_integer, list) :: :ok
+  @spec ask(GenServer.from, non_neg_integer, [:noconnect | :nosuspend]) ::
+        :ok | :noconnect | :nosuspend
   def ask(producer, demand, opts \\ [])
 
-  def ask({_, _}, 0, _opts) do
+  def ask({_pid, _ref}, 0, _opts) do
     :ok
   end
 
   def ask({pid, ref}, demand, opts) when is_integer(demand) and demand > 0 do
     Process.send(pid, {:"$gen_producer", {self(), ref}, {:ask, demand}}, opts)
-    :ok
   end
 
   @doc """
@@ -1277,9 +1277,10 @@ defmodule GenStage do
 
   It accepts the same options as `Process.send/3`.
   """
+  @spec cancel(GenServer.from, term, [:noconnect | :nosuspend]) ::
+        :ok | :noconnect | :nosuspend
   def cancel({pid, ref}, reason, opts \\ []) do
     Process.send(pid, {:"$gen_producer", {self(), ref}, {:cancel, reason}}, opts)
-    :ok
   end
 
   @compile {:inline, send_noconnect: 2, ask: 3, cancel: 3}
