@@ -1255,6 +1255,7 @@ defmodule GenStage do
 
   It accepts the same options as `Process.send/3`.
   """
+  @spec ask(stage, non_neg_integer, list) :: :ok
   def ask(producer, demand, opts \\ [])
 
   def ask({_, _}, 0, _opts) do
