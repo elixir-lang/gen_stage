@@ -707,11 +707,17 @@ defmodule GenStage do
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer
 
-  @typedoc "The supported init options"
+  @typedoc "The supported init options."
   @type options :: keyword()
 
-  @typedoc "The stage reference"
+  @typedoc "The stage."
   @type stage :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
+
+  @typedoc "The term that identifies a subscription."
+  @opaque subscription_tag :: reference
+
+  @typedoc "The term that identifies a subscription associated with the corresponding producer/consumer."
+  @type from :: {pid, subscription_tag}
 
   @doc """
   Invoked when the server is started.
@@ -824,8 +830,7 @@ defmodule GenStage do
   If this callback is not implemented, the default implementation by
   `use GenStage` will return `{:automatic, state}`.
   """
-  @callback handle_subscribe(:producer | :consumer, options,
-                             to_or_from :: GenServer.from, state :: term) ::
+  @callback handle_subscribe(:producer | :consumer, options, from, state :: term) ::
     {:automatic | :manual, new_state} |
     {:stop, reason, new_state} when new_state: term, reason: term
 
@@ -842,7 +847,7 @@ defmodule GenStage do
 
   Return values are the same as `c:handle_cast/2`.
   """
-  @callback handle_cancel({:cancel | :down, reason :: term}, GenServer.from, state :: term) ::
+  @callback handle_cancel({:cancel | :down, reason :: term}, from, state :: term) ::
     {:noreply, [event], new_state} |
     {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, new_state} when event: term, new_state: term, reason: term
@@ -854,7 +859,7 @@ defmodule GenStage do
 
   Return values are the same as `c:handle_cast/2`.
   """
-  @callback handle_events([event], GenServer.from, state :: term) ::
+  @callback handle_events([event], from, state :: term) ::
     {:noreply, [event], new_state} |
     {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, new_state} when new_state: term, reason: term, event: term
@@ -890,7 +895,7 @@ defmodule GenStage do
   If this callback is not implemented, the default implementation by
   `use GenStage` will return `{:stop, {:bad_call, request}, state}`.
   """
-  @callback handle_call(request :: term, GenServer.from, state :: term) ::
+  @callback handle_call(request :: term, from :: GenServer.from, state :: term) ::
     {:reply, reply, [event], new_state} |
     {:reply, reply, [event], new_state, :hibernate} |
     {:noreply, [event], new_state} |
@@ -1042,15 +1047,11 @@ defmodule GenStage do
     * `:name` - used for name registration as described in the "Name
       registration" section of the module documentation
 
-    * `:timeout` - if present, the server is allowed to spend the given amount of
-      milliseconds initializing or it will be terminated and the start function
-      will return `{:error, :timeout}`
-
     * `:debug` - if present, the corresponding function in the [`:sys`
       module](http://www.erlang.org/doc/man/sys.html) is invoked
 
-    * `:spawn_opt` - if present, its value is passed as options to the
-      underlying process as in `Process.spawn/4`
+  This function also accepts all the options accepted by
+  `GenServer.start_link/3`.
 
   ## Return values
 
@@ -1064,7 +1065,7 @@ defmodule GenStage do
   or `:ignore`, the process is terminated and this function returns
   `{:error, reason}` or `:ignore`, respectively.
   """
-  @spec start_link(module, any, options) :: GenServer.on_start
+  @spec start_link(module, any, GenServer.options) :: GenServer.on_start
   def start_link(module, args, options \\ []) when is_atom(module) and is_list(options) do
     GenServer.start_link(__MODULE__, {module, args}, options)
   end
@@ -1074,7 +1075,7 @@ defmodule GenStage do
 
   See `start_link/3` for more information.
   """
-  @spec start(module, any, options) :: GenServer.on_start
+  @spec start(module, any, GenServer.options) :: GenServer.on_start
   def start(module, args, options \\ []) when is_atom(module) and is_list(options) do
     GenServer.start(__MODULE__, {module, args}, options)
   end
@@ -1119,7 +1120,7 @@ defmodule GenStage do
   received by the producer or sent. It is typically called from
   the producer stage itself.
   """
-  @spec async_notify(stage, msg :: term()) :: :ok
+  @spec async_notify(stage, msg :: term) :: :ok
   def async_notify(stage, msg) do
     cast(stage, {:"$notify", msg})
   end
@@ -1176,8 +1177,8 @@ defmodule GenStage do
 
   All other options are sent as is to the producer stage.
   """
-  @spec sync_subscribe(stage, opts :: keyword(), timeout) ::
-        {:ok, reference()} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
+  @spec sync_subscribe(stage, opts :: keyword, timeout) ::
+        {:ok, subscription_tag} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
   def sync_subscribe(stage, opts, timeout \\ 5_000) do
     sync_subscribe(stage, nil, opts, timeout)
   end
@@ -1187,8 +1188,8 @@ defmodule GenStage do
 
   See `sync_subscribe/3` for examples and options.
   """
-  @spec sync_resubscribe(stage, ref :: term, reason :: term, opts :: keyword()) ::
-        {:ok, reference()} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
+  @spec sync_resubscribe(stage, subscription_tag, reason :: term, opts :: keyword()) ::
+        {:ok, subscription_tag} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
   def sync_resubscribe(stage, ref, reason, opts, timeout \\ 5000) do
     sync_subscribe(stage, {ref, reason}, opts, timeout)
   end
@@ -1219,7 +1220,7 @@ defmodule GenStage do
 
   All other options are sent as is to the producer stage.
   """
-  @spec async_subscribe(stage, opts :: keyword()) :: :ok
+  @spec async_subscribe(stage, options) :: :ok
   def async_subscribe(stage, opts) do
     async_subscribe(stage, nil, opts)
   end
@@ -1229,7 +1230,7 @@ defmodule GenStage do
 
   See `async_subscribe/2` for examples and options.
   """
-  @spec async_resubscribe(stage, ref :: term, reason :: term, opts :: keyword()) :: :ok
+  @spec async_resubscribe(stage, subscription_tag, reason :: term, options) :: :ok
   def async_resubscribe(stage, ref, reason, opts) do
     async_subscribe(stage, {ref, reason}, opts)
   end
@@ -1255,7 +1256,7 @@ defmodule GenStage do
 
   It accepts the same options as `Process.send/3`.
   """
-  @spec ask(GenServer.from, non_neg_integer, [:noconnect | :nosuspend]) ::
+  @spec ask(from, non_neg_integer, [:noconnect | :nosuspend]) ::
         :ok | :noconnect | :nosuspend
   def ask(producer, demand, opts \\ [])
 
@@ -1277,7 +1278,7 @@ defmodule GenStage do
 
   It accepts the same options as `Process.send/3`.
   """
-  @spec cancel(GenServer.from, term, [:noconnect | :nosuspend]) ::
+  @spec cancel(from, term, [:noconnect | :nosuspend]) ::
         :ok | :noconnect | :nosuspend
   def cancel({pid, ref}, reason, opts \\ []) do
     Process.send(pid, {:"$gen_producer", {self(), ref}, {:cancel, reason}}, opts)
@@ -1499,7 +1500,7 @@ defmodule GenStage do
   consume such streams from a separate process which will be
   discarded after the stream is consumed.
   """
-  @spec stream([stage | {stage, keyword()}], keyword()) :: Enumerable.t
+  @spec stream([stage | {stage, keyword}], options) :: Enumerable.t
   def stream(subscriptions, options \\ [])
 
   def stream(subscriptions, options) when is_list(subscriptions) do
