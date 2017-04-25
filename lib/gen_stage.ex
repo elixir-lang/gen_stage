@@ -44,8 +44,8 @@ defmodule GenStage do
   `GenStage.Dispatcher` for more information.
 
   Many developers tend to create layers of stages, such as A, B and
-  C for achieving concurrency. If all you want is concurrency, using
-  processes are enough. They are the primitive for achieving concurrency
+  C, for achieving concurrency. If all you want is concurrency, using
+  processes is enough. They are the primitive for achieving concurrency
   in Elixir and the VM does all of the work of multiplexing them.
   Instead, layers in GenStage must be created when there is a need for
   back-pressure or to route the data in different ways.
@@ -58,14 +58,14 @@ defmodule GenStage do
 
   Instead it is better to design it as:
 
-                  [Consumer]
-                 /
-      [Producer]--[Consumer]
-                 \
-                  [Consumer]
+                   [Consumer]
+                  /
+      [Producer]-<-[Consumer]
+                  \
+                   [Consumer]
 
-  Where Consumer are multiple processes that subscribe to the same
-  producer and run exactly the same code, with all of transformation
+  where "Consumer" are multiple processes that subscribe to the same
+  "Producer" and run exactly the same code, with all of transformation
   steps from above. In such scenarios, you may even find the
   `Task.async_stream/2` function that ships as part of Elixir to be
   enough or achieve the flexibility you need with the `ConsumerSupervisor`
@@ -147,7 +147,7 @@ defmodule GenStage do
 
         def handle_events(events, _from, state) do
           # Wait for a second.
-          :timer.sleep(1000)
+          Process.sleep(1000)
 
           # Inspect the events.
           IO.inspect(events)
@@ -166,7 +166,7 @@ defmodule GenStage do
       GenStage.sync_subscribe(c, to: b)
       GenStage.sync_subscribe(b, to: a)
 
-  Notice we typically subscribe from bottom to top. Since A will
+  Typically, we subscribe from bottom to top. Since A will
   start producing items only when B connects to it, we want this
   subscription to happen when the whole pipeline is ready. After
   you subscribe all of them, demand will start flowing upstream and
@@ -176,9 +176,9 @@ defmodule GenStage do
   `:min_demand` on subscription. The `:max_demand` specifies the
   maximum amount of events that must be in flow while the `:min_demand`
   specifies the minimum threshold to trigger for more demand. For
-  example, if `:max_demand` is 1000 and `:min_demand` is 500
-  (the default values), the consumer will ask for 1000 events initially
-  and ask for more only after it receives at least 500.
+  example, if `:max_demand` is 1000 and `:min_demand` is 750,
+  the consumer will ask for 1000 events initially and ask for more
+  only after it receives at least 250.
 
   In the example above, B is a `:producer_consumer` and therefore
   acts as a buffer. Getting the proper demand values in B is
@@ -192,9 +192,9 @@ defmodule GenStage do
   50 seconds to be consumed by C, which will then request another
   batch of 50 items.
 
-  ## `init` and `subscribe_to`
+  ## `init` and `:subscribe_to`
 
-  In the example above, we have started the processes A, B and C
+  In the example above, we have started the processes A, B, and C
   independently and subscribed them later on. But most often it is
   simpler to subscribe a consumer to its producer on its `c:init/1`
   callback. This way, if the consumer crashes, restarting the consumer
@@ -203,7 +203,7 @@ defmodule GenStage do
 
   This approach works as long as the producer can be referenced when
   the consumer starts--such as by name (for a named process) or by pid
-  for a running unnamed process.  For example, assuming the process
+  for a running unnamed process. For example, assuming the process
   `A` and `B` are started as follows:
 
       # Let's call the stage in module A as A
@@ -219,7 +219,7 @@ defmodule GenStage do
         {:consumer, :the_state_does_not_matter, subscribe_to: [B]}
       end
 
-  Or:
+  or:
 
       def init(:ok) do
         {:consumer, :the_state_does_not_matter, subscribe_to: [{B, options}]}
@@ -229,7 +229,7 @@ defmodule GenStage do
 
   Another advantage of this approach is that it makes it straight-forward
   to leverage concurrency by simply starting multiple consumers that subscribe
-  to its producer (or producer_consumer). This can be done in the example above
+  to their producer (or producer-consumer). This can be done in the example above
   by simply calling start link multiple times:
 
       # Start 4 consumers
@@ -251,7 +251,7 @@ defmodule GenStage do
 
       Supervisor.start_link(children, strategy: :one_for_one)
 
-  In fact, multiple consumers is often the easiest and simplest way to
+  In fact, having multiple consumers is often the easiest and simplest way to
   leverage concurrency in a GenStage pipeline, especially if events can
   be processed out of order. For example, imagine a scenario where you
   have a stream of incoming events and you need to access a number of
@@ -262,7 +262,7 @@ defmodule GenStage do
   number of cores (as returned by `System.schedulers_online/0`) but can
   likely be increased if the consumers are mostly waiting on IO.
 
-  Another alternative to the scenario above, is to use a `ConsumerSupervisor`
+  Another alternative to the scenario above is to use a `ConsumerSupervisor`
   for consuming the events instead of N consumers. The `ConsumerSupervisor`
   will start a separate supervised process per event where the number of children
   is at most `max_demand` and the average amount of children is
@@ -301,7 +301,9 @@ defmodule GenStage do
   a producer, the event will be automatically stored and sent the next
   time consumers ask for events. The size of the buffer is configured
   via the `:buffer_size` option returned by `init/1` and the default
-  value is 10000. If the `buffer_size` is exceeded, an error is logged.
+  value is `10_000`. If the `buffer_size` is exceeded, an error is logged.
+  See the documentation for `c:init/1` for more detailed infromation about
+  the `:buffer_size` option.
 
   ### Buffering demand
 
@@ -355,14 +357,14 @@ defmodule GenStage do
   and demand by tracking this data locally, leaving the `GenStage` internal
   buffer only for cases where consumers crash without consuming all data.
 
-  To handle such cases, we will make the broadcaster state a tuple with
-  two elements: a queue and the pending demand. When events arrive and
-  there are no consumers, we store the event in the queue alongside the
-  process information that broadcasted the event. When consumers send
-  demand and there are not enough events, we increase the pending demand.
-  Once we have both the data and the demand, we acknowledge the process
-  that has sent the event to the broadcaster and finally broadcast the
-  event downstream.
+  To handle such cases, we will use a two-element tuple as the broadcaster state
+  where the first elemeent is a queue and the second element is the pending
+  demand.  When events arrive and there are no consumers, we will store the
+  event in the queue alongside information about the process that broadcasted
+  the event. When consumers send demand and there are not enough events, we will
+  increase the pending demand.  Once we have both data and demand, we
+  acknowledge the process that has sent the event to the broadcaster and finally
+  broadcast the event downstream.
 
       defmodule QueueBroadcaster do
         use GenStage
@@ -410,7 +412,7 @@ defmodule GenStage do
   Let's also implement a consumer that automatically subscribes to the
   broadcaster on `c:init/1`. The advantage of doing so on initialization
   is that, if the consumer crashes while it is supervised, the subscription
-  is automatically reestablished when the supervisor restarts it.
+  is automatically re-established when the supervisor restarts it.
 
       defmodule Printer do
         use GenStage
@@ -446,35 +448,35 @@ defmodule GenStage do
       Printer.start_link()
       Printer.start_link()
 
-  At this point, all consumers must have sent their demand which we were
-  not able to fulfill. Now by calling `sync_notify`, the event shall be
-  broadcasted to all consumers at once as we have buffered the demand in
-  the producer:
+  At this point, all consumers must have sent their demand which we were not
+  able to fulfill. Now by calling `QueueBroadcaster.sync_notify/1`, the event
+  shall be broadcasted to all consumers at once as we have buffered the demand
+  in the producer:
 
       QueueBroadcaster.sync_notify(:hello_world)
 
   If we had called `QueueBroadcaster.sync_notify(:hello_world)` before any
-  consumer was available, the event would also be buffered in our own
-  queue and served only when demand is received.
+  consumer was available, the event would also have been buffered in our own
+  queue and served only when demand had been received.
 
-  By having control over the demand and queue, the `Broadcaster` has
+  By having control over the demand and queue, the broadcaster has
   full control on how to behave when there are no consumers, when the
   queue grows too large, and so forth.
 
   ## Asynchronous work and `handle_subscribe`
 
-  Both producer_consumer and consumer have been designed to do their
-  work in the `c:handle_events/3` callback. This means that, after
-  `c:handle_events/3` is invoked, both producer_consumer and consumer
-  will immediately send demand upstream and ask for more items, as
-  it assumes events have been fully processed by `c:handle_events/3`.
+  Both `:producer_consumer` and `:consumer` stages have been designed to do
+  their work in the `c:handle_events/3` callback. This means that, after
+  `c:handle_events/3` is invoked, both `:producer_consumer` and `:consumer`
+  stages will immediately send demand upstream and ask for more items, as the
+  stage that produced the events assumes events have been fully processed by
+  `c:handle_events/3`.
 
-  Such default behaviour makes producer_consumer and consumer
-  unfeasible for doing asynchronous work. However, given `GenStage`
-  was designed to run with multiple consumers, it is not a problem
-  to perform synchronous or blocking actions inside `handle_events/3`
-  as you can then start multiple consumers in order to max both CPU
-  and IO usage as necessary.
+  Such default behaviour makes `:producer_consumer` and `:consumer` stages
+  unfeasible for doing asynchronous work. However, given `GenStage` was designed
+  to run with multiple consumers, it is not a problem to perform synchronous or
+  blocking actions inside `handle_events/3` as you can then start multiple
+  consumers in order to max both CPU and IO usage as necessary.
 
   On the other hand, if you must perform some work asynchronously,
   `GenStage` comes with an option that manually controls how demand
@@ -485,14 +487,15 @@ defmodule GenStage do
   is set to `:manual`, developers must use `GenStage.ask/3` to send
   demand upstream when necessary.
 
+  Note that when `:max_demand` and `:min_demand` must be manually respected when
+  manually asking for demand through `GenStage.ask/3`.
+
   For example, the `ConsumerSupervisor` module processes events
-  asynchronously by starting child process and such is done by
-  manually sending demand to producers. The `ConsumerSupervisor`
+  asynchronously by starting a process for each event and this is achieved by
+  manually sending demand to producers. `ConsumerSupervisor`
   can be used to distribute work to a limited amount of
   processes, behaving similar to a pool where a new process is
-  started per event. The minimum amount of concurrent children per
-  producer is specified by `min_demand` and the `maximum` is given
-  by `max_demand`. See the `ConsumerSupervisor` docs for more
+  started for each event. See the `ConsumerSupervisor` docs for more
   information.
 
   Setting the demand to `:manual` in `c:handle_subscribe/4` is not
@@ -561,7 +564,7 @@ defmodule GenStage do
         end
       end
 
-  With the `RateLimiter` implemented, let's subscribe it to the
+  Let's subscribe the `RateLimiter` above to the
   producer we have implemented at the beginning of the module
   documentation:
 
@@ -572,24 +575,25 @@ defmodule GenStage do
       GenStage.sync_subscribe(b, to: a, max_demand: 10, interval: 2000)
 
   Although the rate limiter above is a consumer, it could be made a
-  producer_consumer by changing `c:init/1` to return a `:producer_consumer`
+  producer-consumer by changing `c:init/1` to return a `:producer_consumer`
   and then forwarding the events in `c:handle_events/3`.
 
   ## Callbacks
 
-  `GenStage` is implemented on top of a `GenServer` with two additions.
+  `GenStage` is implemented on top of a `GenServer` with a few additions.
   Besides exposing all of the `GenServer` callbacks, it also provides
-  `handle_demand/2` to be implemented by producers and `handle_events/3`
-  to be implemented by consumers, as shown above. Furthermore, all the
-  callback responses have been modified to potentially emit events.
-  See the callbacks documentation for more information.
+  `handle_demand/2` to be implemented by producers and `handle_events/3` to be
+  implemented by consumers, as shown above, as well as subscription-related
+  callbacks. Furthermore, all the callback responses have been modified to
+  potentially emit events. See the callbacks documentation for more
+  information.
 
   By adding `use GenStage` to your module, Elixir will automatically
-  define all callbacks for you except the following:
+  define all callbacks for you except for the following ones:
 
-    * `init/1` - must be implemented to choose between `:producer`, `:consumer` or `:producer_consumer`
-    * `handle_demand/2` - must be implemented by `:producer` types
-    * `handle_events/3` - must be implemented by `:producer_consumer` and `:consumer` types
+    * `init/1` - must be implemented to choose between `:producer`, `:consumer`, or `:producer_consumer` stages
+    * `handle_demand/2` - must be implemented by `:producer` stages
+    * `handle_events/3` - must be implemented by `:producer_consumer` and `:consumer` stages
 
   Although this module exposes functions similar to the ones found in
   the `GenServer` API, like `call/3` and `cast/2`, developers can also
@@ -601,9 +605,9 @@ defmodule GenStage do
   `GenStage` is bound to the same name registration rules as a `GenServer`.
   Read more about it in the `GenServer` docs.
 
-  ## Message-protocol overview
+  ## Message protocol overview
 
-  This section will describe the message-protocol implemented
+  This section will describe the message protocol implemented
   by stages. By documenting these messages, we will allow
   developers to provide their own stage implementations.
 
@@ -619,15 +623,16 @@ defmodule GenStage do
   whenever it wants to. A consumer must never receive more data
   than it has asked for from any given producer stage.
 
-  A consumer may have multiple producers, where each demand is
-  managed individually. A producer may have multiple consumers,
-  where the demand and events are managed and delivered according
-  to a `GenStage.Dispatcher` implementation.
+  A consumer may have multiple producers, where each demand is managed
+  individually (on a per-subscription basis). A producer may have multiple
+  consumers, where the demand and events are managed and delivered according to
+  a `GenStage.Dispatcher` implementation.
 
   ### Producer messages
 
   The producer is responsible for sending events to consumers
-  based on demand.
+  based on demand. These are the messages that consumers can
+  send to producers:
 
     * `{:"$gen_producer", from :: {consumer_pid, subscription_tag}, {:subscribe, current, options}}` -
       sent by the consumer to the producer to start a new subscription.
@@ -638,9 +643,8 @@ defmodule GenStage do
       reference although it may be any term.
 
       Once sent, the consumer MAY immediately send demand to the producer.
-      The `subscription_tag` is unique to identify the subscription.
 
-      The `current` field, when not nil, is a two-item tuple containing a
+      The `current` field, when not `nil`, is a two-item tuple containing a
       subscription that must be cancelled with the given reason before the
       current one is accepted.
 
@@ -658,8 +662,9 @@ defmodule GenStage do
       If the pair is unknown, the producer MUST send an appropriate cancel
       reply.
 
-    * `{:"$gen_producer", from :: {consumer_pid, subscription_tag}, {:ask, count}}` -
-      sent by consumers to ask data in a given subscription.
+    * `{:"$gen_producer", from :: {consumer_pid, subscription_tag}, {:ask, demand}}` -
+      sent by consumers to ask demand for a given subscription (identified
+      by `subscription_tag`).
 
       Once received, the producer MUST send data up to the demand. If the
       pair is unknown, the producer MUST send an appropriate cancel reply.
@@ -667,7 +672,8 @@ defmodule GenStage do
   ### Consumer messages
 
   The consumer is responsible for starting the subscription
-  and sending demand to producers.
+  and sending demand to producers. These are the messages that
+  producers can send to consumers:
 
     * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, {:cancel, reason}}` -
       sent by producers to cancel a given subscription.
@@ -675,12 +681,12 @@ defmodule GenStage do
       It is used as a confirmation for client cancellations OR
       whenever the producer wants to cancel some upstream demand.
 
-    * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, [event]}` -
+    * `{:"$gen_consumer", from :: {producer_pid, subscription_tag}, events :: [event, ...]}` -
       events sent by producers to consumers.
 
       `subscription_tag` identifies the subscription. The third argument
       is a non-empty list of events. If the subscription is unknown, the
-      events must be ignored and a cancel message sent to the producer.
+      events must be ignored and a cancel message must be sent to the producer.
 
   """
 
@@ -690,11 +696,17 @@ defmodule GenStage do
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer
 
-  @typedoc "The supported init options"
+  @typedoc "The supported init options."
   @type options :: keyword()
 
-  @typedoc "The stage reference"
+  @typedoc "The stage."
   @type stage :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
+
+  @typedoc "The term that identifies a subscription."
+  @opaque subscription_tag :: reference
+
+  @typedoc "The term that identifies a subscription associated with the corresponding producer/consumer."
+  @type from :: {pid, subscription_tag}
 
   defmacrop is_transient_shutdown(value) do
     quote do
@@ -706,13 +718,16 @@ defmodule GenStage do
   @doc """
   Invoked when the server is started.
 
-  `start_link/3` (or `start/3`) will block until it returns. `args`
-  is the argument term (second argument) passed to `start_link/3`.
+  `start_link/3` (or `start/3`) will block until this callback returns.
+  `args` is the argument term (second argument) passed to `start_link/3`
+  (or `start/3`).
 
   In case of successful start, this callback must return a tuple
-  where the first element is the stage type, which is either
-  a `:producer`, `:consumer` or `:producer_consumer` if it is
-  taking both roles.
+  where the first element is the stage type, which is one of:
+
+    * `:producer`
+    * `:consumer`
+    * `:producer_consumer` (if the stage is acting as both)
 
   For example:
 
@@ -735,46 +750,38 @@ defmodule GenStage do
   ## Options
 
   This callback may return options. Some options are specific to
-  the stage type while others are shared across all types.
+  the chosen stage type while others are shared across all types.
 
-  ### :producer options
+  ### `:producer` options
 
     * `:demand` - when `:forward`, the demand is always forwarded to
-      the `handle_demand` callback. When `:accumulate`, demand is
+      the `c:handle_demand/2` callback. When `:accumulate`, demand is
       accumulated until its mode is set to `:forward` via `demand/2`.
       This is useful as a synchronization mechanism, where the demand
       is accumulated until all consumers are subscribed. Defaults to
       `:forward`.
 
-  ### :producer and :producer_consumer options
+  ### `:producer` and `:producer_consumer` options
 
-    * `:buffer_size` - the size of the buffer to store events
-      without demand. Check the "Buffer events" section on the
-      module documentation (defaults to 10000 for `:producer`,
-      `:infinity` for `:producer_consumer`)
-    * `:buffer_keep` - returns if the `:first` or `:last` (default) entries
-      should be kept on the buffer in case we exceed the buffer size
+    * `:buffer_size` - the size of the buffer to store events without
+      demand. Can be `:infinity` to signal no limit on the buffer size. Check
+      the "Buffer events" section of the module documentation. Defaults to
+      `10_000` for `:producer`, `:infinity` for `:producer_consumer`.
+
+    * `:buffer_keep` - returns whether the `:first` or `:last` entries
+      should be kept on the buffer in case the buffer size is exceeded.
+      Defaults to `:last`.
+
     * `:dispatcher` - the dispatcher responsible for handling demands.
-      Defaults to `GenStage.DemandDispatch`. May be either an atom or
-      a tuple with the dispatcher and the dispatcher options
+      Defaults to `GenStage.DemandDispatch`. May be either an atom
+      representing a dispatcher module or a two-element tuple with
+      the dispatcher module and the dispatcher options.
 
-  ### :consumer and :producer_consumer options
+  ### `:consumer` and `:producer_consumer` options
 
     * `:subscribe_to` - a list of producers to subscribe to. Each element
-      represents the producer or a tuple with the producer and the
-      subscription options (as defined in `sync_subscribe/2`)
-
-  ## Dispatcher
-
-  When using a `:producer` or `:producer_consumer`, the dispatcher
-  may be configured on init as follows:
-
-      {:producer, state, dispatcher: GenStage.BroadcastDispatcher}
-
-  Some dispatchers may require options to be given on initialization,
-  those can be done with a tuple:
-
-      {:producer, state, dispatcher: {GenStage.PartitionDispatcher, partitions: 0..3}}
+      represents either the producer module or a tuple with the producer module
+      and the subscription options (as defined in `sync_subscribe/2`).
 
   """
   @callback init(args :: term) ::
@@ -784,11 +791,32 @@ defmodule GenStage do
     {:stop, reason :: any} when state: any
 
   @doc """
-  Invoked on :producer stages.
+  Invoked on `:producer` stages.
 
-  Must always be explicitly implemented by `:producer` types.
-  It is invoked with the demand from consumers/dispatcher. The
-  producer must either store the demand or return the events requested.
+  This callback is invoked on `:producer` stages with the demand from
+  consumers/dispatcher. The producer that implements this callback must either
+  store the demand, or return the amount of requested events.
+
+  Must always be explicitly implemented by `:producer` stages.
+
+  ## Examples
+
+      def handle_demand(demand, state) do
+        # We check if we're able to satisfy the demand and fetch
+        # events if we aren't.
+        events =
+          if length(state.events) >= demand do
+            events
+          else
+            fetch_events()
+          end
+
+        # We dispatch only the requested number of events.
+        {to_dispatch, remaining} = Enum.split(events, demand)
+
+        {:noreply, to_dispatch, %{state | events: remaining}}
+      end
+
   """
   @callback handle_demand(demand :: pos_integer, state :: term) ::
     {:noreply, [event], new_state} |
@@ -799,69 +827,88 @@ defmodule GenStage do
   Invoked when a consumer subscribes to a producer.
 
   This callback is invoked in both producers and consumers.
+  `producer_or_consumer` will be `:producer` when this callback is
+  invoked on a consumer that subscribed to a producer, and `:consumer`
+  if when this callback is invoked on producers a consumer subscribed to.
 
-  For consumers, successful subscriptions must return `{:automatic, new_state}`
-  or `{:manual, state}`. The default is to return `:automatic`, which means
-  the stage implementation will take care of automatically sending demand to
-  producers. `:manual` must be used when a special behaviour is desired
-  (for example, `ConsumerSupervisor` uses `:manual` demand) and demand must
-  be sent explicitly with `ask/2`. The manual subscription must be cancelled
-  when `handle_cancel/3` is called.
+  For consumers, successful subscriptions must return one of:
+
+    * `{:automatic, new_state}` - means the stage implementation will take care
+      of automatically sending demand to producers. This is the default.
+
+    * `{:manual, state}` - means that demand must be sent to producers
+      explicitly via `ask/3`. `:manual` subscriptions must be cancelled when
+      `c:handle_cancel/3` is called. `:manual` can be used when a special
+      behaviour is desired (for example, `ConsumerSupervisor` uses `:manual`
+      demand in its implementation).
 
   For producers, successful subscriptions must always return
-  `{:automatic, new_state}`, the `:manual` mode is not supported.
+  `{:automatic, new_state}`. `:manual` mode is not supported.
 
   If this callback is not implemented, the default implementation by
   `use GenStage` will return `{:automatic, state}`.
+
+  ## Examples
+
+  Let's see an example where we define this callback in a consumer that will use
+  `:manual` mode. In this case, we'll store the subscription (`from`) in the
+  state in order to be able to use it later on when asking demand via `ask/3`.
+
+      def handle_subscribe(:producer, _options, from, state) do
+        new_state = %{state | subscription: from}
+        {:manual, new_state
+      end
+
   """
-  @callback handle_subscribe(:producer | :consumer, options,
-                             to_or_from :: GenServer.from, state :: term) ::
+  @callback handle_subscribe(producer_or_consumer :: :producer | :consumer, options, from, state :: term) ::
     {:automatic | :manual, new_state} |
     {:stop, reason, new_state} when new_state: term, reason: term
 
   @doc """
   Invoked when a consumer is no longer subscribed to a producer.
 
-  It receives the cancellation reason, the `from` tuple and the state.
-  The `cancel_reason` will be a `{:cancel, _}` tuple if the reason for
-  cancellation was a `GenStage.cancel/2` call. Any other value means
-  the cancellation reason was due to an EXIT.
+  It receives the cancellation reason, the `from` tuple representing the
+  cancelled subscription and the state.  The `cancel_reason` will be a
+  `{:cancel, _}` tuple if the reason for cancellation was a `GenStage.cancel/2`
+  call. Any other value means the cancellation reason was due to an EXIT.
 
   If this callback is not implemented, the default implementation by
   `use GenStage` will return `{:noreply, [], state}`.
 
   Return values are the same as `c:handle_cast/2`.
   """
-  @callback handle_cancel({:cancel | :down, reason :: term}, GenServer.from, state :: term) ::
+  @callback handle_cancel(cancellation_reason :: {:cancel | :down, reason :: term}, from, state :: term) ::
     {:noreply, [event], new_state} |
     {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, new_state} when event: term, new_state: term, reason: term
 
   @doc """
-  Invoked on :producer_consumer and :consumer stages to handle events.
+  Invoked on `:producer_consumer` and `:consumer` stages to handle events.
 
   Must always be explicitly implemented by such types.
 
   Return values are the same as `c:handle_cast/2`.
   """
-  @callback handle_events([event], GenServer.from, state :: term) ::
+  @callback handle_events(events :: [event], from, state :: term) ::
     {:noreply, [event], new_state} |
     {:noreply, [event], new_state, :hibernate} |
     {:stop, reason, new_state} when new_state: term, reason: term, event: term
 
   @doc """
-  Invoked to handle synchronous `call/3` messages. `call/3` will block until a
-  reply is received (unless the call times out or nodes are disconnected).
+  Invoked to handle synchronous `call/3` messages.
 
-  `request` is the request message sent by a `call/3`, `from` is a 2-tuple
+  `call/3` will block until a reply is received (unless the call times out or
+  nodes are disconnected).
+
+  `request` is the request message sent by a `call/3`, `from` is a two-element tuple
   containing the caller's PID and a term that uniquely identifies the call, and
   `state` is the current state of the `GenStage`.
 
   Returning `{:reply, reply, [events], new_state}` sends the response `reply`
   to the caller after events are dispatched (or buffered) and continues the
-  loop with new state `new_state`.  In case you want to deliver the reply before
-  the processing events, use `GenStage.reply/2` and return `{:noreply, [event],
-  state}` (see below).
+  loop with new state `new_state`. In case you want to deliver the reply before
+  processing events, use `reply/2` and return `{:noreply, [event],
+  state}`.
 
   Returning `{:noreply, [event], new_state}` does not send a response to the
   caller and processes the given events before continuing the loop with new
@@ -872,15 +919,15 @@ defmodule GenStage do
 
   Returning `{:stop, reason, reply, new_state}` stops the loop and `terminate/2`
   is called with reason `reason` and state `new_state`. Then the `reply` is sent
-  as the response to call and the process exits with reason `reason`.
+  as the response to the call and the process exits with reason `reason`.
 
   Returning `{:stop, reason, new_state}` is similar to
-  `{:stop, reason, reply, new_state}` except a reply is not sent.
+  `{:stop, reason, reply, new_state}` except that no reply is sent to the caller.
 
   If this callback is not implemented, the default implementation by
   `use GenStage` will return `{:stop, {:bad_call, request}, state}`.
   """
-  @callback handle_call(request :: term, GenServer.from, state :: term) ::
+  @callback handle_call(request :: term, from :: GenServer.from, state :: term) ::
     {:reply, reply, [event], new_state} |
     {:reply, reply, [event], new_state, :hibernate} |
     {:noreply, [event], new_state} |
@@ -899,7 +946,8 @@ defmodule GenStage do
 
   Returning `{:noreply, [event], new_state, :hibernate}` is similar to
   `{:noreply, new_state}` except the process is hibernated before continuing the
-  loop.
+  loop. See the return values for `c:GenServer.handle_call/3` for more information
+  on hibernation.
 
   Returning `{:stop, reason, new_state}` stops the loop and `terminate/2` is
   called with the reason `reason` and state `new_state`. The process exits with
@@ -916,7 +964,7 @@ defmodule GenStage do
   @doc """
   Invoked to handle all other messages.
 
-  `msg` is the message and `state` is the current state of the `GenStage`. When
+  `message` is the message and `state` is the current state of the `GenStage`. When
   a timeout occurs the message is `:timeout`.
 
   If this callback is not implemented, the default implementation by
@@ -924,7 +972,7 @@ defmodule GenStage do
 
   Return values are the same as `c:handle_cast/2`.
   """
-  @callback handle_info(msg :: term, state :: term) ::
+  @callback handle_info(message :: term, state :: term) ::
     {:noreply, [event], new_state} |
     {:noreply, [event], new_state, :hibernate} |
     {:stop, reason :: term, new_state} when new_state: term, event: term
@@ -1024,37 +1072,33 @@ defmodule GenStage do
 
   Note that a `GenStage` started with `start_link/3` is linked to the
   parent process and will exit in case of crashes from the parent. The `GenStage`
-  will also exit due to the `:normal` reasons in case it is configured to trap
-  exits in the `init/1` callback.
+  will also exit due to the `:normal` reason in case it is configured to trap
+  exits in the `c:init/1` callback.
 
   ## Options
 
     * `:name` - used for name registration as described in the "Name
       registration" section of the module documentation
 
-    * `:timeout` - if present, the server is allowed to spend the given amount of
-      milliseconds initializing or it will be terminated and the start function
-      will return `{:error, :timeout}`
-
     * `:debug` - if present, the corresponding function in the [`:sys`
       module](http://www.erlang.org/doc/man/sys.html) is invoked
 
-    * `:spawn_opt` - if present, its value is passed as options to the
-      underlying process as in `Process.spawn/4`
+  This function also accepts all the options accepted by
+  `GenServer.start_link/3`.
 
   ## Return values
 
-  If the server is successfully created and initialized, this function returns
-  `{:ok, pid}`, where `pid` is the pid of the server. If a process with the
-  specified server name already exists, this function returns
+  If the stage is successfully created and initialized, this function returns
+  `{:ok, pid}`, where `pid` is the pid of the stage. If a process with the
+  specified name already exists, this function returns
   `{:error, {:already_started, pid}}` with the pid of that process.
 
-  If the `init/1` callback fails with `reason`, this function returns
-  `{:error, reason}`. Otherwise, if it returns `{:stop, reason}`
+  If the `c:init/1` callback fails with `reason`, this function returns
+  `{:error, reason}`. Otherwise, if `c:init/1` returns `{:stop, reason}`
   or `:ignore`, the process is terminated and this function returns
   `{:error, reason}` or `:ignore`, respectively.
   """
-  @spec start_link(module, any, options) :: GenServer.on_start
+  @spec start_link(module, term, GenServer.options) :: GenServer.on_start
   def start_link(module, args, options \\ []) when is_atom(module) and is_list(options) do
     GenServer.start_link(__MODULE__, {module, args}, options)
   end
@@ -1064,7 +1108,7 @@ defmodule GenStage do
 
   See `start_link/3` for more information.
   """
-  @spec start(module, any, options) :: GenServer.on_start
+  @spec start(module, term, GenServer.options) :: GenServer.on_start
   def start(module, args, options \\ []) when is_atom(module) and is_list(options) do
     GenServer.start(__MODULE__, {module, args}, options)
   end
@@ -1123,13 +1167,14 @@ defmodule GenStage do
   This call is synchronous and will return after the called consumer
   sends the subscribe message to the producer. It does not, however,
   wait for the subscription confirmation. Therefore this function
-  will return before `handle_subscribe` is called in the consumer.
+  will return before `c:handle_subscribe/4` is called in the consumer.
   In other words, it guarantees the message was sent, but it does not
   guarantee a subscription has effectively been established.
 
-  This function will return `{:ok, ref}` as long as the subscription
-  message is sent. It may return `{:error, :not_a_consumer}` in case
-  the stage is not a consumer.
+  This function will return `{:ok, subscription_tag}` as long as the
+  subscription message is sent. It may return `{:error, :not_a_consumer}` in
+  case the stage is not a consumer. `subscription_tag` is the second element
+  of the two-element tuple that will be passed to `c:handle_subscribe/4`.
 
   ## Options
 
@@ -1139,12 +1184,16 @@ defmodule GenStage do
       `:shutdown`, or `{:shutdown, reason}`. When temporary, it never exits.
       In case of exits, the same reason is used to exit the consumer.
       In case of cancellations, the reason is wrapped in a `:cancel` tuple.
-    * `:min_demand` - the minimum demand for this subscription
-    * `:max_demand` - the maximum demand for this subscription
+
+    * `:min_demand` - the minimum demand for this subscription. See the module
+      documentation for more information.
+
+    * `:max_demand` - the maximum demand for this subscription. See the module
+      documentation for more information.
 
   Any other option is sent to the producer stage. This may be used by
   dispatchers for custom configuration. For example, if a producer uses
-  a `GenStage.BroadcastDispatcher`,  an optional `:selector` function
+  a `GenStage.BroadcastDispatcher`, an optional `:selector` function
   that receives an event and returns a boolean limits this subscription to
   receiving only those events where the selector function returns a truthy
   value:
@@ -1153,23 +1202,24 @@ defmodule GenStage do
         to: producer,
         selector: fn %{key: key} -> String.starts_with?(key, "foo-") end)
 
-  All other options are sent as is to the producer stage.
   """
-  @spec sync_subscribe(stage, opts :: keyword(), timeout) ::
-        {:ok, reference()} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
+  @spec sync_subscribe(stage, options, timeout) ::
+        {:ok, subscription_tag} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
   def sync_subscribe(stage, opts, timeout \\ 5_000) do
     sync_subscribe(stage, nil, opts, timeout)
   end
 
   @doc """
-  Cancels `ref` with `reason` and subscribe synchronously in one step.
+  Cancels `subscription_tag` with `reason` and subscribes synchronously in one step.
+
+  `subscription_tag` is the subscription tag returned by `sync_subscribe/3`.
 
   See `sync_subscribe/3` for examples and options.
   """
-  @spec sync_resubscribe(stage, ref :: term, reason :: term, opts :: keyword()) ::
-        {:ok, reference()} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
-  def sync_resubscribe(stage, ref, reason, opts, timeout \\ 5000) do
-    sync_subscribe(stage, {ref, reason}, opts, timeout)
+  @spec sync_resubscribe(stage, subscription_tag, term, options, timeout) ::
+        {:ok, subscription_tag} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
+  def sync_resubscribe(stage, subscription_tag, reason, opts, timeout \\ 5000) do
+    sync_subscribe(stage, {subscription_tag, reason}, opts, timeout)
   end
 
   defp sync_subscribe(stage, cancel, opts, timeout) do
@@ -1185,23 +1235,26 @@ defmodule GenStage do
 
   This call returns `:ok` regardless if the subscription
   effectively happened or not. It is typically called from
-  a stage's `init/1` callback.
+  a stage's `c:init/1` callback.
 
-  See `sync_subscribe/3` for examples and options.
+  ## Options
+
+  This function accepts the same options as `sync_subscribe/4`.
   """
-  @spec async_subscribe(stage, opts :: keyword()) :: :ok
+  @spec async_subscribe(stage, options) :: :ok
   def async_subscribe(stage, opts) do
     async_subscribe(stage, nil, opts)
   end
 
   @doc """
-  Cancels `ref` with `reason` and subscribe asynchronously in one step.
+  Cancels `subscription_tag` with `reason` and subscribe asynchronously in one
+  step.
 
   See `async_subscribe/2` for examples and options.
   """
-  @spec async_resubscribe(stage, ref :: term, reason :: term, opts :: keyword()) :: :ok
-  def async_resubscribe(stage, ref, reason, opts) do
-    async_subscribe(stage, {ref, reason}, opts)
+  @spec async_resubscribe(stage, subscription_tag, reason :: term, options) :: :ok
+  def async_resubscribe(stage, subscription_tag, reason, opts) do
+    async_subscribe(stage, {subscription_tag, reason}, opts)
   end
 
   defp async_subscribe(stage, cancel, opts) do
@@ -1215,25 +1268,31 @@ defmodule GenStage do
   @doc """
   Asks the given demand to the producer.
 
+  `producer_subscription` is the subscription this demand will be asked on; this
+  term could be for example stored in the stage when received in
+  `c:handle_subscribe/4`.
+
   The demand is a non-negative integer with the amount of events to
-  ask a producer for. If the demand is 0, it simply returns `:ok`
+  ask a producer for. If the demand is `0`, this function simply returns `:ok`
   without asking for data.
 
-  This function must only be used in the rare cases when a consumer
+  This function must only be used in the cases when a consumer
   sets a subscription to `:manual` mode in the `c:handle_subscribe/4`
   callback.
 
-  It accepts the same options as `Process.send/3`.
+  It accepts the same options as `Process.send/3`, and returns the same value as
+  `Process.send/3`.
   """
-  def ask(producer, demand, opts \\ [])
+  @spec ask(from, non_neg_integer, [:noconnect | :nosuspend]) ::
+        :ok | :noconnect | :nosuspend
+  def ask(producer_subscription, demand, opts \\ [])
 
-  def ask({_, _}, 0, _opts) do
+  def ask({_pid, _ref}, 0, _opts) do
     :ok
   end
 
   def ask({pid, ref}, demand, opts) when is_integer(demand) and demand > 0 do
     Process.send(pid, {:"$gen_producer", {self(), ref}, {:ask, demand}}, opts)
-    :ok
   end
 
   @doc """
@@ -1244,11 +1303,13 @@ defmodule GenStage do
   guarantee as the producer may crash for unrelated reasons
   before). This is an asynchronous request.
 
-  It accepts the same options as `Process.send/3`.
+  It accepts the same options as `Process.send/3`, and returns the same value as
+  `Process.send/3`.
   """
-  def cancel({pid, ref}, reason, opts \\ []) do
+  @spec cancel(from, term, [:noconnect | :nosuspend]) ::
+        :ok | :noconnect | :nosuspend
+  def cancel({pid, ref} = _producer_subscription, reason, opts \\ []) do
     Process.send(pid, {:"$gen_producer", {self(), ref}, {:cancel, reason}}, opts)
-    :ok
   end
 
   @compile {:inline, send_noconnect: 2, ask: 3, cancel: 3}
@@ -1260,8 +1321,8 @@ defmodule GenStage do
   @doc """
   Makes a synchronous call to the `stage` and waits for its reply.
 
-  The client sends the given `request` to the server and waits until a reply
-  arrives or a timeout occurs. `handle_call/3` will be called on the stage
+  The client sends the given `request` to the stage and waits until a reply
+  arrives or a timeout occurs. `c:handle_call/3` will be called on the stage
   to handle the request.
 
   `stage` can be any of the values described in the "Name registration"
@@ -1274,7 +1335,7 @@ defmodule GenStage do
   indefinitely. The default value is `5000`. If no reply is received within
   the specified time, the function call fails and the caller exits. If the
   caller catches the failure and continues running, and the stage is just late
-  with the reply, it may arrive at any time later into the caller's message
+  with the reply, such reply may arrive at any time later into the caller's message
   queue. The caller must in this case be prepared for this and discard any such
   garbage messages that are two-element tuples with a reference as the first
   element.
@@ -1289,10 +1350,10 @@ defmodule GenStage do
 
   This function always returns `:ok` regardless of whether
   the destination `stage` (or node) exists. Therefore it
-  is unknown whether the destination `stage` successfully
+  is unknown whether the destination stage successfully
   handled the message.
 
-  `handle_cast/2` will be called on the stage to handle
+  `c:handle_cast/2` will be called on the stage to handle
   the request. In case the `stage` is on a node which is
   not yet connected to the caller one, the call is going to
   block until a connection happens.
@@ -1307,14 +1368,14 @@ defmodule GenStage do
 
   This function can be used to explicitly send a reply to a client that
   called `call/3` when the reply cannot be specified in the return value
-  of `handle_call/3`.
+  of `c:handle_call/3`.
 
   `client` must be the `from` argument (the second argument) accepted by
-  `handle_call/3` callbacks. `reply` is an arbitrary term which will be given
+  `c:handle_call/3` callbacks. `reply` is an arbitrary term which will be given
   back to the client as the return value of the call.
 
-  Note that `reply/2` can be called from any process, not just the `GenServer`
-  that originally received the call (as long as that `GenServer` communicated the
+  Note that `reply/2` can be called from any process, not just the `GenStage`
+  that originally received the call (as long as that `GenStage` communicated the
   `from` argument somehow).
 
   This function always returns `:ok`.
@@ -1346,7 +1407,7 @@ defmodule GenStage do
   @doc """
   Stops the stage with the given `reason`.
 
-  The `terminate/2` callback of the given `stage` will be invoked before
+  The `c:terminate/2` callback of the given `stage` will be invoked before
   exiting. This function returns `:ok` if the server terminates with the
   given reason; if it terminates with another reason, the call exits.
 
@@ -1354,7 +1415,7 @@ defmodule GenStage do
   If the reason is any other than `:normal`, `:shutdown` or
   `{:shutdown, _}`, an error report is logged.
   """
-  @spec stop(stage, reason :: term, timeout) :: :ok
+  @spec stop(stage, term, timeout) :: :ok
   def stop(stage, reason \\ :normal, timeout \\ :infinity) do
     :gen.stop(stage, reason, timeout)
   end
@@ -1390,11 +1451,11 @@ defmodule GenStage do
   ## Options
 
     * `:link` - when false, does not link the stage to the current
-      process. Defaults to `true`
+      process. Defaults to `true`.
 
     * `:dispatcher` - the dispatcher responsible for handling demands.
       Defaults to `GenStage.DemandDispatch`. May be either an atom or
-      a tuple with the dispatcher and the dispatcher options
+      a tuple with the dispatcher and the dispatcher options.
 
     * `:demand` - configures the demand to `:forward` or `:accumulate`
       mode. See `c:init/1` and `demand/2` for more information.
@@ -1454,7 +1515,7 @@ defmodule GenStage do
 
   ## Known limitations
 
-  ### from_enumerable
+  ### `from_enumerable/2`
 
   This module also provides a function called `from_enumerable/2`
   which receives an enumerable (like a stream) and creates a stage
@@ -1462,8 +1523,8 @@ defmodule GenStage do
 
   Given both `GenStage.from_enumerable/2` and `GenStage.stream/1`
   require the process inbox to send and receive messages, it is
-  impossible to run a `stream/1` inside a `from_enumerable/2` as
-  the `stream/1` will never receive the messages it expects.
+  impossible to run a `stream/2` inside a `from_enumerable/2` as
+  the `stream/2` will never receive the messages it expects.
 
   ### Remote nodes
 
@@ -1477,8 +1538,8 @@ defmodule GenStage do
   consume such streams from a separate process which will be
   discarded after the stream is consumed.
   """
-  @spec stream([stage | {stage, keyword()}], keyword()) :: Enumerable.t
-  def stream(subscriptions, options \\ [])
+  @spec stream([stage | {stage, keyword}], keyword) :: Enumerable.t
+  def stream(subscriptions, opts \\ [])
 
   def stream(subscriptions, options) when is_list(subscriptions) do
     subscriptions = :lists.map(&stream_validate_opts/1, subscriptions)
