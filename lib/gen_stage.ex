@@ -2544,6 +2544,7 @@ defmodule GenStage do
           {:noreply, stage}
               when mode == :permanent
               when mode == :transient and not is_transient_shutdown(reason) ->
+            :error_logger.info_msg('GenStage consumer ~p is stopping after receiving cancel from producer ~p with reason: ~p~n', [name(), producer_pid, reason])
             {:stop, reason, stage}
           other ->
             other
