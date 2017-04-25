@@ -190,11 +190,6 @@ defmodule GenStageTest do
       {Keyword.get(opts, :consumer_demand, :automatic), recipient}
     end
 
-    def handle_info({{_pid, _ref}, {:producer, _} = msg}, recipient) do
-      send(recipient, msg)
-      {:noreply, [], recipient}
-    end
-
     def handle_info(other, recipient) do
       send(recipient, other)
       {:noreply, [], recipient}
@@ -581,64 +576,80 @@ defmodule GenStageTest do
     end
   end
 
-  describe "notifications" do
-    test "delivers notifications immediately when there is no buffer" do
-      {:ok, producer} = Counter.start_link({:producer, self()})
+  describe "info" do
+    test "delivers info to consumer" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
 
-      :ok = GenStage.sync_notify(producer, :sync)
-      assert_receive {{_, ^ref}, :sync}
+      :ok = GenStage.sync_info(consumer, :sync)
+      assert_receive :sync
 
-      :ok = GenStage.async_notify(producer, :async)
-      assert_receive {{_, ^ref}, :async}
+      :ok = GenStage.async_info(consumer, :async)
+      assert_receive :async
     end
 
-    test "delivers notifications eventually with infinity buffer size" do
+    test "delivers info to producer immediately when there is no buffer" do
+      {:ok, producer} = Counter.start_link({:producer, self()})
+
+      :ok = GenStage.sync_info(producer, :sync)
+      assert_receive :sync
+
+      :ok = GenStage.async_info(producer, :async)
+      assert_receive :async
+    end
+
+    test "delivers info to producer eventually with infinity buffer size" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: :infinity})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      Counter.sync_queue(producer, [:a, :b, :c])
-      GenStage.sync_notify(producer, :done)
 
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      Counter.sync_queue(producer, [:a, :b, :c])
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
+
+      GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b, :c]}
-      assert_receive {{_, ^ref}, :done}
+      assert_receive :sync
     end
 
-    test "delivers notifications eventually with one-item filled buffer" do
+    test "delivers info to producer eventually with one-item filled buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 3})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+
       Counter.sync_queue(producer, [:a])
-      GenStage.sync_notify(producer, :done)
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
 
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a]}
-      assert_receive {{_, ^ref}, :done}
+      assert_receive :sync
     end
 
-    test "delivers notifications eventually with mid filled buffer" do
+    test "delivers info to producer eventually with mid filled buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 3})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+
       Counter.sync_queue(producer, [:a, :b])
-      GenStage.sync_notify(producer, :done)
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
 
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b]}
-      assert_receive {{_, ^ref}, :done}
+      assert_receive :sync
     end
 
-    test "delivers notifications eventually with filled buffer" do
+    test "delivers info to producer eventually with filled buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 3})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      Counter.sync_queue(producer, [:a, :b, :c])
-      GenStage.sync_notify(producer, :done)
 
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      Counter.sync_queue(producer, [:a, :b, :c])
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
+
+      GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b, :c]}
-      assert_receive {{_, ^ref}, :done}
+      assert_receive :sync
     end
 
-    test "delivers notifications eventually with moving buffer" do
+    test "delivers info to producer eventually with moving buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 3})
 
       # Subscribe
@@ -647,36 +658,38 @@ defmodule GenStageTest do
 
       # Queue events and notification
       Counter.sync_queue(producer, [:a, :b, :c])
-      GenStage.sync_notify(producer, :done1)
+      GenStage.sync_info(producer, :sync1)
 
       # Ask for event and notification
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 2}}
       assert_receive {:"$gen_consumer", {_, ^ref}, [:a, :b]}
-      refute_received {{_, ^ref}, :done1}
+      refute_received :sync1
 
       # Queue more events and another notification
       Counter.sync_queue(producer, [:d, :e])
-      GenStage.sync_notify(producer, :done2)
+      GenStage.sync_info(producer, :sync2)
 
       # Ask the remaining events and notifications
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 1}}
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 2}}
       assert_receive {:"$gen_consumer", {_, ^ref}, [:c]}
-      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done1}}
+      assert_receive :sync1
       assert_receive {:"$gen_consumer", {_, ^ref}, [:d, :e]}
-      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done2}}
+      assert_receive :sync2
     end
 
     @tag :capture_log
-    test "delivers notifications eventually when dropping buffer" do
+    test "delivers info to producer eventually when dropping buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_keep: :last, buffer_size: 3})
+
       Counter.sync_queue(producer, [:a, :b])
-      GenStage.sync_notify(producer, :done)
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
 
       ref = make_ref()
       send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
       Counter.sync_queue(producer, [:c, :d, :e])
-      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done}}
+      assert_receive :sync
     end
   end
 

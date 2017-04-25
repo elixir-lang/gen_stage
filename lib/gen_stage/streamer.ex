@@ -19,7 +19,7 @@ defmodule GenStage.Streamer do
       {:suspended, {list, 0}, continuation} ->
         {:noreply, :lists.reverse(list), continuation}
       {status, {list, _}} ->
-        send(self(), :stop)
+        GenStage.async_info(self(), :stop)
         {:noreply, :lists.reverse(list), status}
     end
   end

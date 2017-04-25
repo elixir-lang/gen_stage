@@ -36,10 +36,8 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   @doc false
-  def notify(msg, {demands, _} = state) do
-    Enum.each(demands, fn {_, pid, ref, _selector} ->
-      Process.send(pid, {:"$gen_consumer", {self(), ref}, {:notification, msg}}, [:noconnect])
-    end)
+  def info(msg, state) do
+    send(self(), msg)
     {:ok, state}
   end
 

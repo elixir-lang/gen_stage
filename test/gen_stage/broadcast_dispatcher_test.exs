@@ -143,7 +143,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     assert_received {:"$gen_consumer", {_, ^ref2}, [%{key: "pref-1234"}, %{key: "pref-5678"}]}
   end
 
-  test "delivers notifications to all consumers" do
+  test "delivers info to current process" do
     pid  = self()
     ref1 = make_ref()
     ref2 = make_ref()
@@ -153,10 +153,8 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
     {:ok, 0, disp} = D.ask(3, {pid, ref1}, disp)
 
-    {:ok, notify_disp} = D.notify(:hello, disp)
+    {:ok, notify_disp} = D.info(:hello, disp)
     assert disp == notify_disp
-
-    assert_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
-    assert_received {:"$gen_consumer", {_, ^ref2}, {:notification, :hello}}
+    assert_received :hello
   end
 end
