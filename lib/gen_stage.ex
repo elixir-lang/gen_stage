@@ -513,7 +513,7 @@ defmodule GenStage do
         end
 
         def handle_subscribe(:producer, opts, from, producers) do
-          # We will only allow max_demand events every 5000 miliseconds
+          # We will only allow max_demand events every 5000 milliseconds
           pending = opts[:max_demand] || 1000
           interval = opts[:interval] || 5000
 
