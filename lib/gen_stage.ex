@@ -225,6 +225,13 @@ defmodule GenStage do
         {:consumer, :the_state_does_not_matter, subscribe_to: [{B, options}]}
       end
 
+  Also we can change the `c:init/1` callback for B,
+  and provide specified `:max_demand` option to the following:
+
+      def init(number) do
+        {:producer_consumer, number, subscribe_to: [{A, max_demand: 10}]}
+     end
+
   And we will no longer need to call `sync_subscribe/2`.
 
   Another advantage of this approach is that it makes it straight-forward
