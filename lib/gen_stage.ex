@@ -44,11 +44,10 @@ defmodule GenStage do
   `GenStage.Dispatcher` for more information.
 
   Many developers tend to create layers of stages, such as A, B and
-  C, for achieving concurrency. If all you want is concurrency, using
-  processes is enough. They are the primitive for achieving concurrency
-  in Elixir and the VM does all of the work of multiplexing them.
-  Instead, layers in GenStage must be created when there is a need for
-  back-pressure or to route the data in different ways.
+  C, for achieving concurrency. If all you want is concurrency, starting
+  multiple instances of the same stage is enough. Layers in GenStage must
+  be created when there is a need for back-pressure or to route the data
+  in different ways.
 
   For example, if you need the data to go over multiple steps but
   without a need for back-pressure or without a need to break the
@@ -64,12 +63,8 @@ defmodule GenStage do
                   \
                    [Consumer]
 
-  where "Consumer" are multiple processes that subscribe to the same
-  "Producer" and run exactly the same code, with all of transformation
-  steps from above. In such scenarios, you may even find the
-  `Task.async_stream/2` function that ships as part of Elixir to be
-  enough or achieve the flexibility you need with the `ConsumerSupervisor`
-  functionality that is included as part of `GenStage`.
+  where "Consumer" are multiple processes running the same code that
+  subscribe to the same "Producer".
 
   ## Example
 
@@ -261,25 +256,24 @@ defmodule GenStage do
 
   Having multiple consumers is often the easiest and simplest way to
   leverage concurrency in a GenStage pipeline, especially if events can
-  be processed out of order. For example, imagine a scenario where you
-  have a stream of incoming events and you need to access a number of
-  external services per event. Instead of building complex stages pipelines
-  that route events through services, it is simpler to implement a single
-  consumer that invokes different services based on the event. Then, to
-  leverage concurrency, you can start N of such consumer, where N is typically
-  the number of cores available (as returned by `System.schedulers_online/0`)
-  but can likely be increased if the consumers are mostly performing IO
-  operations.
+  be processed out of order.
 
-  Overall, the same guideline that applies to processes also applies to
-  GenStage: use processes/stages to model runtime properties, such as
-  concurrency and data-trasnfer, and not as code organization tools.
+  The same guideline that applies to processes also applies to GenStage:
+  use processes/stages to model runtime properties, such as concurrency and
+  data-trasnfer, and not as code organization tools.
 
   Another alternative to the scenario above is to use a `ConsumerSupervisor`
   for consuming the events instead of N consumers. The `ConsumerSupervisor`
-  will start a separate supervised process per event where the number of children
-  is at most `max_demand` and the average amount of children is
-  `(max_demand - min_demand) / 2`.
+  will communicate with the producer respecting the back-pressure properties
+  and start a separate supervised process per event. The number of children
+  concurrently running in a `ConsumerSupervisor` is at most `max_demand` and
+  the average amount of children is `(max_demand - min_demand) / 2`.
+  
+  If you don't need back-pressure at all, because the data is already in-memory,
+  a simpler solution is available directly in Elixir via `Task.async_stream/2`.
+  This function consumes a stream of data, with each entry running in a separate
+  task. The maximum number of tasks is configurable via the `:max_concurrency`
+  option.
 
   ## Buffering
 
