@@ -1514,11 +1514,12 @@ defmodule GenStage do
 
   ## Options
 
-    * `:demand` - configures the demand to `:forward` or `:accumulate`
-      mode. See `c:init/1` and `demand/2` for more information.
+    * `:demand` - sets the demand in producers to `:forward` or
+     `:accumulate` after subscription. Defaults to `:forward` so
+       the stream can receive items.
 
     * `:producers` - the processes to set the demand to `:forward`
-      on subscription. It defaults to the processes being subscribed
+      on initialization. It defaults to the processes being subscribed
       to. Sometimes the stream is subscribing to a `:producer_consumer`
       instead of a `:producer`, in such cases, you can set this option
       to either an empty list or the list of actual producers so their
@@ -1580,34 +1581,40 @@ defmodule GenStage do
 
   defp init_stream(subscriptions, options) do
     parent = self()
+    demand = options[:demand] || :forward
 
     {monitor_pid, monitor_ref} =
-      spawn_monitor(fn -> init_monitor(parent, subscriptions) end)
+      spawn_monitor(fn -> init_monitor(parent, demand) end)
     send(monitor_pid, {parent, monitor_ref})
+    send(monitor_pid, {monitor_ref, {:subscribe, subscriptions}})
 
     receive do
       {:DOWN, ^monitor_ref, _, _, reason} ->
         exit(reason)
-      {^monitor_ref, {:subscriptions, subscriptions}} ->
-        producers = options[:producers] || Enum.map(subscriptions, fn
-          {_, {:subscribed, pid, _, _, _, _}} -> pid
-        end)
-        demand = options[:demand] || :forward
-        for pid <- producers, do: demand(pid, demand)
+      {^monitor_ref, {:subscriptions, demand, subscriptions}} ->
+        if producers = options[:producers] do
+          for pid <- producers, do: demand(pid, demand)
+        else
+          demand_stream_subscriptions(demand, subscriptions)
+        end
         {:receive, monitor_pid, monitor_ref, subscriptions}
     end
   end
 
-  defp init_monitor(parent, subscriptions) do
+  defp demand_stream_subscriptions(demand, subscriptions) do
+    Enum.each(subscriptions, fn
+      {_, {:subscribed, pid, _, _, _, _}} -> demand(pid, demand)
+    end)
+  end
+
+  defp init_monitor(parent, demand) do
     parent_ref = Process.monitor(parent)
 
     receive do
       {:DOWN, ^parent_ref, _, _, reason} ->
         exit(reason)
       {^parent, monitor_ref} ->
-        subscriptions = subscriptions_monitor(parent, monitor_ref, subscriptions)
-        send(parent, {monitor_ref, {:subscriptions, subscriptions}})
-        loop_monitor(parent, parent_ref, monitor_ref, Map.keys(subscriptions))
+        loop_monitor(parent, parent_ref, monitor_ref, demand, [])
     end
   end
 
@@ -1630,15 +1637,19 @@ defmodule GenStage do
     end, %{}, subscriptions)
   end
 
-  defp loop_monitor(parent, parent_ref, monitor_ref, keys) do
+  defp loop_monitor(parent, parent_ref, monitor_ref, demand, keys) do
     receive do
+      {^monitor_ref, {:subscribe, pairs}} ->
+        subscriptions = subscriptions_monitor(parent, monitor_ref, pairs)
+        send(parent, {monitor_ref, {:subscriptions, demand, subscriptions}})
+        loop_monitor(parent, parent_ref, monitor_ref, demand, Map.keys(subscriptions) ++ keys)
       {:DOWN, ^parent_ref, _, _, reason} ->
         exit(reason)
       {:DOWN, ref, _, _, reason} ->
         if ref in keys do
           send(parent, {monitor_ref, {:DOWN, ref, reason}})
         end
-        loop_monitor(parent, parent_ref, monitor_ref, keys -- [ref])
+        loop_monitor(parent, parent_ref, monitor_ref, demand, keys -- [ref])
     end
   end
 
@@ -1709,8 +1720,19 @@ defmodule GenStage do
             receive_stream(monitor_pid, monitor_ref, Map.delete(subscriptions, inner_ref))
         end
 
-      {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, _} = reason} ->
+      {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, reason}} ->
         cancel_stream(inner_ref, reason, monitor_pid, monitor_ref, subscriptions)
+
+      {:"$gen_cast", {:"$subscribe", nil, to, opts}} ->
+        send(monitor_pid, {monitor_ref, {:subscribe, [stream_validate_opts({to, opts})]}})
+        receive do
+          {^monitor_ref, {:subscriptions, demand, new_subscriptions}} ->
+            demand_stream_subscriptions(demand, new_subscriptions)
+            receive_stream(monitor_pid, monitor_ref, Map.merge(subscriptions, new_subscriptions))
+
+          {^monitor_ref, {:DOWN, inner_ref, reason}} ->
+            cancel_stream(inner_ref, reason, monitor_pid, monitor_ref, subscriptions)
+        end
 
       {:DOWN, ^monitor_ref, _, _, reason} ->
         {:halt, {:exit, reason, monitor_pid, monitor_ref, subscriptions}}
