@@ -1435,18 +1435,29 @@ defmodule GenStage do
   that fast, it is recommended to pass a lower `:max_demand`
   value as an option.
 
+  It is also expected the enumerable is able to produce the whole
+  batch on demand or terminate. If the enumerable is a blocking one,
+  for example, because it needs to wait for data from another source,
+  it will block until the current batch is fully filled. GenStage and
+  Flow were created exactly to address such issue. So if you have a
+  blocking enumerable that you want to use in your Flow, then it must
+  be implemented with GenStage and integrated with `from_stages/2`.
+
   When the enumerable finishes or halts, the stage will exit with
-  `:normal` reason. This means that, if a consumer is subscribed
-  to the enumerable stage and the `:cancel` option is set to
+  `:normal` reason. This means that, if a consumer subscribes to
+  the enumerable stage and the `:cancel` option is set to
   `:permanent`, which is the default, the consumer will also exit
   with `:normal` reason. This behaviour can be changed by setting
   setting the `:cancel` option to either `:transient` or `:temporary`
-  as described in the `sync_subscribe/3` docs.
+  at the moment of subscription as described in the `sync_subscribe/3`
+  docs.
 
   Keep in mind that streams that require the use of the process
   inbox to work most likely won't behave as expected with this
   function since the mailbox is controlled by the stage process
-  itself.
+  itself. As explained above, stateful or blocking enumerables
+  are generally discouraged, as `GenStage` was designed precisely
+  to support exchange of data in such cases.
 
   ## Options
 
