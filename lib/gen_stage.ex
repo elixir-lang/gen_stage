@@ -202,9 +202,8 @@ defmodule GenStage do
   it to the supervisor.
 
   This approach works as long as the producer can be referenced when
-  the consumer starts--such as by name (for a named process) or by pid
-  for a running unnamed process. For example, assuming the process
-  `A` and `B` are started as follows:
+  the consumer starts - such as by name for a named process. For example,
+  assuming the process `A` and `B` are started as follows:
 
       # Let's call the stage in module A as A
       GenStage.start_link(A, 0, name: A)
@@ -219,14 +218,16 @@ defmodule GenStage do
         {:consumer, :the_state_does_not_matter, subscribe_to: [B]}
       end
 
-  or:
+  Subscription options as outlined in `sync_subscribe/3` can also be
+  given by making each subscription a tuple, with the process name or
+  pid as first element and the options as second:
 
       def init(:ok) do
         {:consumer, :the_state_does_not_matter, subscribe_to: [{B, options}]}
       end
 
-  Also we can change the `c:init/1` callback for B,
-  and provide specified `:max_demand` option to the following:
+  Similarly, we should change `B` to subscribe to `A` on `c:init/1`. Let's
+  also set `:max_demand` to 10 when we do so:
 
       def init(number) do
         {:producer_consumer, number, subscribe_to: [{A, max_demand: 10}]}
@@ -234,7 +235,7 @@ defmodule GenStage do
 
   And we will no longer need to call `sync_subscribe/2`.
 
-  Another advantage of this approach is that it makes it straight-forward
+  Another advantage of using `subscribe_to` is that it makes it straight-forward
   to leverage concurrency by simply starting multiple consumers that subscribe
   to their producer (or producer-consumer). This can be done in the example above
   by simply calling start link multiple times:
@@ -258,16 +259,21 @@ defmodule GenStage do
 
       Supervisor.start_link(children, strategy: :one_for_one)
 
-  In fact, having multiple consumers is often the easiest and simplest way to
+  Having multiple consumers is often the easiest and simplest way to
   leverage concurrency in a GenStage pipeline, especially if events can
   be processed out of order. For example, imagine a scenario where you
   have a stream of incoming events and you need to access a number of
-  external services per event. Instead of building complex stages that
-  route events through those services, one simple mechanism to leverage
-  concurrency is to start a producer and N consumers and invoke the external
-  services directly for each event in each consumer. N is typically the
-  number of cores (as returned by `System.schedulers_online/0`) but can
-  likely be increased if the consumers are mostly waiting on IO.
+  external services per event. Instead of building complex stages pipelines
+  that route events through services, it is simpler to implement a single
+  consumer that invokes different services based on the event. Then, to
+  leverage concurrency, you can start N of such consumer, where N is typically
+  the number of cores available (as returned by `System.schedulers_online/0`)
+  but can likely be increased if the consumers are mostly performing IO
+  operations.
+
+  Overall, the same guideline that applies to processes also applies to
+  GenStage: use processes/stages to model runtime properties, such as
+  concurrency and data-trasnfer, and not as code organization tools.
 
   Another alternative to the scenario above is to use a `ConsumerSupervisor`
   for consuming the events instead of N consumers. The `ConsumerSupervisor`
