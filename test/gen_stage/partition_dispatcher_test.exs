@@ -8,6 +8,10 @@ defmodule GenStage.PartitionDispatcherTest do
     state
   end
 
+  defp waiting_and_pending({_, _, waiting, pending, _, _, _}) do
+    {waiting, pending}
+  end
+
   test "subscribes, asks and cancels" do
     pid  = self()
     ref  = make_ref()
@@ -16,16 +20,16 @@ defmodule GenStage.PartitionDispatcherTest do
     # Subscribe, ask and cancel and leave some demand
     {:ok, 0, disp}  = D.subscribe([partition: 0], {pid, ref}, disp)
     {:ok, 10, disp} = D.ask(10, {pid, ref}, disp)
-    assert {_, _, 10, 0, _, _} = disp
+    assert {10, 0} = waiting_and_pending(disp)
     {:ok, 0, disp}  = D.cancel({pid, ref}, disp)
-    assert {_, _, 10, 10, _, _} = disp
+    assert {10, 10} = waiting_and_pending(disp)
 
     # Subscribe again and the same demand is back
     {:ok, 0, disp} = D.subscribe([partition: 1], {pid, ref}, disp)
     {:ok, 0, disp} = D.ask(5, {pid, ref}, disp)
-    assert {_, _, 10, 5, _, _} = disp
+    assert {10, 5} = waiting_and_pending(disp)
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
-    assert {_, _, 10, 10, _, _} = disp
+    assert {10, 10} = waiting_and_pending(disp)
   end
 
   test "subscribes, asks and dispatches" do
@@ -36,14 +40,14 @@ defmodule GenStage.PartitionDispatcherTest do
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
     {:ok, [], disp} = D.dispatch([1], 1, disp)
-    assert {_, _, 2, 0, _, _} = disp
+    assert {2, 0} = waiting_and_pending(disp)
     assert_received {:"$gen_consumer", {_, ^ref}, [1]}
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
-    assert {_, _, 5, 0, _, _} = disp
+    assert {5, 0} = waiting_and_pending(disp)
 
     {:ok, [9, 11], disp} = D.dispatch([2, 5, 6, 7, 8, 9, 11], 7, disp)
-    assert {_, _, 0, 0, _, _} = disp
+    assert {0, 0} = waiting_and_pending(disp)
     assert_received {:"$gen_consumer", {_, ^ref}, [2, 5, 6, 7, 8]}
   end
 
@@ -58,14 +62,14 @@ defmodule GenStage.PartitionDispatcherTest do
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
     {:ok, [], disp} = D.dispatch([1], 1, disp)
-    assert {_, _, 2, 0, _, _} = disp
+    assert {2, 0} = waiting_and_pending(disp)
     assert_received {:"$gen_consumer", {_, ^ref}, [1]}
 
     {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
-    assert {_, _, 5, 0, _, _} = disp
+    assert {5, 0} = waiting_and_pending(disp)
 
     {:ok, [15, 17], disp} = D.dispatch([5, 7, 9, 11, 13, 15, 17], 7, disp)
-    assert {_, _, 0, 0, _, _} = disp
+    assert {0, 0} = waiting_and_pending(disp)
     assert_received {:"$gen_consumer", {_, ^ref}, [5, 7, 9, 11, 13]}
   end
 
@@ -79,22 +83,22 @@ defmodule GenStage.PartitionDispatcherTest do
 
     {:ok, 5, disp} = D.ask(5, {pid, ref}, disp)
     {:ok, [], disp} = D.dispatch([1, 2, 5, 6, 7], 5, disp)
-    assert {_, _, 0, 0, _, _} = disp
+    assert {0, 0} = waiting_and_pending(disp)
     refute_received {:"$gen_consumer", {_, ^ref}, _}
 
     {:ok, [8, 9], disp} = D.dispatch([8, 9], 2, disp)
-    assert {_, _, 0, 0, _, _} = disp
+    assert {0, 0} = waiting_and_pending(disp)
 
     # Use another subscription to get events back
     pid = self()
     ref = make_ref()
     {:ok, 0, disp} = D.subscribe([partition: 0], {pid, ref}, disp)
     {:ok, 5, disp} = D.ask(5, {pid, ref}, disp)
-    assert {_, _, 5, 0, _, _} = disp
+    assert {5, 0} = waiting_and_pending(disp)
     assert_received {:"$gen_consumer", {_, ^ref}, [1, 2, 5, 6, 7]}
 
     {:ok, [], disp} = D.dispatch([1, 2], 2, disp)
-    assert {_, _, 3, 0, _, _} = disp
+    assert {3, 0} = waiting_and_pending(disp)
   end
 
   test "buffers events after subscription" do
@@ -104,23 +108,23 @@ defmodule GenStage.PartitionDispatcherTest do
     ref0 = make_ref()
     {:ok, 0, disp} = D.subscribe([partition: 0], {pid0, ref0}, disp)
     {:ok, 5, disp} = D.ask(5, {pid0, ref0}, disp)
-    assert {_, _, 5, 0, _, _} = disp
+    assert {5, 0} = waiting_and_pending(disp)
 
     pid1 = self()
     ref1 = make_ref()
     {:ok, 0, disp} = D.subscribe([partition: 1], {pid1, ref1}, disp)
     {:ok, 5, disp} = D.ask(5, {pid1, ref1}, disp)
-    assert {_, _, 10, 0, _, _} = disp
+    assert {10, 0} = waiting_and_pending(disp)
 
     # Send all events to the same partition, half of them will be buffered
     {:ok, [], disp} = D.dispatch([1, 2], 2, disp)
     {:ok, [], disp} = D.dispatch([5, 6, 7, 1, 2, 5, 6, 7], 8, disp)
-    assert {_, _, 0, 0, _, _} = disp
+    assert {0, 0} = waiting_and_pending(disp)
     assert_received {:"$gen_consumer", {_, ^ref0}, [1, 2]}
     assert_received {:"$gen_consumer", {_, ^ref0}, [5, 6, 7]}
 
     {:ok, 5, disp} = D.ask(5, {pid0, ref0}, disp)
-    assert {_, _, 5, 0, _, _} = disp
+    assert {5, 0} = waiting_and_pending(disp)
     assert_received {:"$gen_consumer", {_, ^ref0}, [1, 2, 5, 6, 7]}
   end
 
@@ -131,22 +135,23 @@ defmodule GenStage.PartitionDispatcherTest do
     ref1 = make_ref()
     {:ok, 0, disp} = D.subscribe([partition: 1], {pid1, ref1}, disp)
     {:ok, 5, disp} = D.ask(5, {pid1, ref1}, disp)
-    assert {_, _, 5, 0, _, _} = disp
+    assert {5, 0} = waiting_and_pending(disp)
 
     pid0 = self()
     ref0 = make_ref()
     {:ok, 0, disp} = D.subscribe([partition: 0], {pid0, ref0}, disp)
     {:ok, [], disp} = D.dispatch([1, 2, 5, 6, 7], 5, disp)
-    assert {_, _, 0, 0, _, _} = disp
+    assert {0, 0} = waiting_and_pending(disp)
     refute_received {:"$gen_consumer", {_, ^ref0}, _}
 
     # The notification should not count as an event
-    {:ok, disp} = D.notify(:hello, disp)
+    {:ok, disp} = D.info(:hello, disp)
     {:ok, 5, disp} = D.cancel({pid0, ref0}, disp)
-    assert {_, _, 5, 0, _, _} = disp
+    assert {5, 0} = waiting_and_pending(disp)
+    assert_received :hello
   end
 
-  test "delivers notifications to all consumers" do
+  test "delivers info to current process" do
     pid0  = self()
     ref0 = make_ref()
     pid1  = self()
@@ -157,37 +162,18 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, 0, disp} = D.subscribe([partition: 1], {pid1, ref1}, disp)
     {:ok, 3, disp} = D.ask(3, {pid1, ref1}, disp)
 
-    {:ok, notify_disp} = D.notify(:hello, disp)
+    {:ok, notify_disp} = D.info(:hello, disp)
     assert disp == notify_disp
-
-    assert_received {:"$gen_consumer", {_, ^ref0}, {:notification, :hello}}
-    assert_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
+    assert_received :hello
   end
 
-  test "queues notifications for non-existing consumers" do
-    pid0 = self()
-    ref0 = make_ref()
-    pid1 = self()
-    ref1 = make_ref()
+  test "does not queue info for non-existing consumers" do
     disp = dispatcher(partitions: 2)
-
-    {:ok, disp} = D.notify(:hello, disp)
-    refute_received {:"$gen_consumer", {_, ^ref0}, {:notification, :hello}}
-    refute_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
-
-    {:ok, 0, disp}  = D.subscribe([partition: 0], {pid0, ref0}, disp)
-    {:ok, 0, disp}  = D.subscribe([partition: 1], {pid0, ref1}, disp)
-    {:ok, 3, disp}  = D.ask(3, {pid0, ref0}, disp)
-    {:ok, 3, disp}  = D.ask(3, {pid1, ref1}, disp)
-    _ = disp
-
-    assert Process.info(self(), :messages) == {:messages, [
-      {:"$gen_consumer", {pid0, ref0}, {:notification, :hello}},
-      {:"$gen_consumer", {pid1, ref1}, {:notification, :hello}}
-    ]}
+    D.info(:hello, disp)
+    assert_received :hello
   end
 
-  test "queues notifications to backed up consumers" do
+  test "queues info to backed up consumers" do
     pid0 = self()
     ref0 = make_ref()
     pid1 = self()
@@ -199,16 +185,11 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, 3, disp}  = D.ask(3, {pid1, ref1}, disp)
     {:ok, [], disp} = D.dispatch([1, 2, 5], 3, disp)
 
-    {:ok, disp} = D.notify(:hello, disp)
-    refute_received {:"$gen_consumer", {_, ^ref0}, {:notification, :hello}}
-    assert_received {:"$gen_consumer", {_, ^ref1}, {:notification, :hello}}
+    {:ok, disp} = D.info(:hello, disp)
+    refute_received :hello
 
     {:ok, 5, _}  = D.ask(5, {pid0, ref0}, disp)
-
-    assert Process.info(self(), :messages) == {:messages, [
-      {:"$gen_consumer", {self(), ref0}, [1, 2, 5]},
-      {:"$gen_consumer", {self(), ref0}, {:notification, :hello}}
-    ]}
+    assert_received :hello
   end
 
   test "errors on init" do

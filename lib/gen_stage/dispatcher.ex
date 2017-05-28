@@ -91,15 +91,12 @@ defmodule GenStage.Dispatcher do
     {:ok, leftover_events :: [term], new_state} when new_state: term
 
   @doc """
-  Used to send a notification to all consumers.
+  Used to send an info message to the current process.
 
-  In case the dispatcher is doing buffering, notify must keep
-  the ordering guarantees. It is recommended for the notification
-  to be sent with `Process.send/3` and the `[:noconnect]` option
-  as the consumers are all monitored by the producer. For example:
-
-      Process.send(consumer, {consumer_ref, msg}, [:noconnect])
+  In case the dispatcher is doing buffering, the message must
+  only be sent after all currently buffered consumer messages are
+  delivered.
   """
-  @callback notify(msg :: term, state :: term) ::
+  @callback info(msg :: term, state :: term) ::
     {:ok, new_state} when new_state: term
 end

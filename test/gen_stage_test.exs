@@ -190,11 +190,6 @@ defmodule GenStageTest do
       {Keyword.get(opts, :consumer_demand, :automatic), recipient}
     end
 
-    def handle_info({{_pid, _ref}, {:producer, _} = msg}, recipient) do
-      send(recipient, msg)
-      {:noreply, [], recipient}
-    end
-
     def handle_info(other, recipient) do
       send(recipient, other)
       {:noreply, [], recipient}
@@ -581,64 +576,80 @@ defmodule GenStageTest do
     end
   end
 
-  describe "notifications" do
-    test "delivers notifications immediately when there is no buffer" do
-      {:ok, producer} = Counter.start_link({:producer, self()})
+  describe "info" do
+    test "delivers info to consumer" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
 
-      :ok = GenStage.sync_notify(producer, :sync)
-      assert_receive {{_, ^ref}, :sync}
+      :ok = GenStage.sync_info(consumer, :sync)
+      assert_receive :sync
 
-      :ok = GenStage.async_notify(producer, :async)
-      assert_receive {{_, ^ref}, :async}
+      :ok = GenStage.async_info(consumer, :async)
+      assert_receive :async
     end
 
-    test "delivers notifications eventually with infinity buffer size" do
+    test "delivers info to producer immediately when there is no buffer" do
+      {:ok, producer} = Counter.start_link({:producer, self()})
+
+      :ok = GenStage.sync_info(producer, :sync)
+      assert_receive :sync
+
+      :ok = GenStage.async_info(producer, :async)
+      assert_receive :async
+    end
+
+    test "delivers info to producer eventually with infinity buffer size" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: :infinity})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      Counter.sync_queue(producer, [:a, :b, :c])
-      GenStage.sync_notify(producer, :done)
 
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      Counter.sync_queue(producer, [:a, :b, :c])
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
+
+      GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b, :c]}
-      assert_receive {{_, ^ref}, :done}
+      assert_receive :sync
     end
 
-    test "delivers notifications eventually with one-item filled buffer" do
+    test "delivers info to producer eventually with one-item filled buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 3})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+
       Counter.sync_queue(producer, [:a])
-      GenStage.sync_notify(producer, :done)
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
 
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a]}
-      assert_receive {{_, ^ref}, :done}
+      assert_receive :sync
     end
 
-    test "delivers notifications eventually with mid filled buffer" do
+    test "delivers info to producer eventually with mid filled buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 3})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+
       Counter.sync_queue(producer, [:a, :b])
-      GenStage.sync_notify(producer, :done)
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
 
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b]}
-      assert_receive {{_, ^ref}, :done}
+      assert_receive :sync
     end
 
-    test "delivers notifications eventually with filled buffer" do
+    test "delivers info to producer eventually with filled buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 3})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      Counter.sync_queue(producer, [:a, :b, :c])
-      GenStage.sync_notify(producer, :done)
 
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer)
+      Counter.sync_queue(producer, [:a, :b, :c])
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
+
+      GenStage.sync_subscribe(consumer, to: producer)
       assert_receive {:consumed, [:a, :b, :c]}
-      assert_receive {{_, ^ref}, :done}
+      assert_receive :sync
     end
 
-    test "delivers notifications eventually with moving buffer" do
+    test "delivers info to producer eventually with moving buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 3})
 
       # Subscribe
@@ -647,36 +658,38 @@ defmodule GenStageTest do
 
       # Queue events and notification
       Counter.sync_queue(producer, [:a, :b, :c])
-      GenStage.sync_notify(producer, :done1)
+      GenStage.sync_info(producer, :sync1)
 
       # Ask for event and notification
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 2}}
       assert_receive {:"$gen_consumer", {_, ^ref}, [:a, :b]}
-      refute_received {{_, ^ref}, :done1}
+      refute_received :sync1
 
       # Queue more events and another notification
       Counter.sync_queue(producer, [:d, :e])
-      GenStage.sync_notify(producer, :done2)
+      GenStage.sync_info(producer, :sync2)
 
       # Ask the remaining events and notifications
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 1}}
       send producer, {:"$gen_producer", {self(), ref}, {:ask, 2}}
       assert_receive {:"$gen_consumer", {_, ^ref}, [:c]}
-      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done1}}
+      assert_receive :sync1
       assert_receive {:"$gen_consumer", {_, ^ref}, [:d, :e]}
-      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done2}}
+      assert_receive :sync2
     end
 
     @tag :capture_log
-    test "delivers notifications eventually when dropping buffer" do
+    test "delivers info to producer eventually when dropping buffer" do
       {:ok, producer} = Counter.start_link({:producer, self(), buffer_keep: :last, buffer_size: 3})
+
       Counter.sync_queue(producer, [:a, :b])
-      GenStage.sync_notify(producer, :done)
+      GenStage.sync_info(producer, :sync)
+      refute_received :sync
 
       ref = make_ref()
       send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
       Counter.sync_queue(producer, [:c, :d, :e])
-      assert_receive {:"$gen_consumer", {_, ^ref}, {:notification, :done}}
+      assert_receive :sync
     end
   end
 
@@ -996,6 +1009,25 @@ defmodule GenStageTest do
       assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, :oops}}
     end
 
+    test "handle_cancel/3 with normal transient subscription" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :transient)
+      GenStage.cancel({producer, ref}, :normal)
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, :normal}}
+    end
+
+    @tag :capture_log
+    test "handle_cancel/3 with non-normal transient subscription" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :transient)
+      GenStage.cancel({producer, ref}, self())
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:cancel, pid}} when pid == self()
+      assert_receive {:EXIT, ^consumer, pid} when pid == self()
+    end
+
     @tag :capture_log
     test "handle_cancel/3 with permanent subscription" do
       Process.flag(:trap_exit, true)
@@ -1014,6 +1046,18 @@ defmodule GenStageTest do
       Process.unlink(producer)
       Process.exit(producer, :kill)
       assert_receive {:consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
+    end
+
+    @tag :capture_log
+    test "handle_cancel/3 on producer down with transient subscription" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :transient)
+      Process.unlink(producer)
+      Process.exit(producer, :kill)
+      assert_receive {:consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
+      assert_receive {:EXIT, ^consumer, :killed}
     end
 
     @tag :capture_log
@@ -1160,6 +1204,27 @@ defmodule GenStageTest do
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
     end
 
+    test "consumer handle_cancel/3 on producer normal down with transient subscription" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Doubler.start_link({:producer_consumer, self()})
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :transient)
+      Process.unlink(producer)
+      Process.exit(producer, :shutdown)
+      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :shutdown}}
+    end
+
+    @tag :capture_log
+    test "consumer handle_cancel/3 on producer non-normal down with transient subscription" do
+      Process.flag(:trap_exit, true)
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, consumer} = Doubler.start_link({:producer_consumer, self()})
+      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :transient)
+      Process.unlink(producer)
+      Process.exit(producer, :kill)
+      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
+      assert_receive {:EXIT, ^consumer, :killed}
+    end
+
     @tag :capture_log
     test "consumer handle_cancel/3 on producer down with permanent subscription" do
       Process.flag(:trap_exit, true)
@@ -1255,19 +1320,19 @@ defmodule GenStageTest do
       refute_received {:DOWN, _, _, _, _}
     end
 
-    test "exits when there is no named producer and subscription is permanent" do
+    test "exits when there is no named producer and subscription is permanent/transient" do
       assert {:noproc, {GenStage, :init_stream, [_]}} =
              catch_exit(GenStage.stream([:unknown]) |> Enum.take(10))
     end
 
-    test "exits when producer is dead and subscription is permanent" do
+    test "exits when producer is dead and subscription is permanent/transient" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
       assert {:noproc, {GenStage, :close_stream, [_]}} =
              catch_exit(GenStage.stream([producer]) |> Enum.take(10))
     end
 
-    test "exits when producer does not ack and subscription is permanent" do
+    test "exits when producer does not ack and subscription is permanent/transient" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
           {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
@@ -1275,10 +1340,10 @@ defmodule GenStageTest do
         end
       end)
       assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) ==
-             {{:cancel, :no_thanks}, {GenStage, :close_stream, [%{}]}}
+             {:no_thanks, {GenStage, :close_stream, [%{}]}}
     end
 
-    test "exits when producer does not ack and lives and subscription is permanent" do
+    test "exits when producer does not ack and lives and subscription is permanent/transient" do
       {:ok, producer} = Task.start_link(fn ->
         receive do
           {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
@@ -1287,7 +1352,7 @@ defmodule GenStageTest do
         end
       end)
       assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) ==
-             {{:cancel, :no_thanks}, {GenStage, :close_stream, [%{}]}}
+             {:no_thanks, {GenStage, :close_stream, [%{}]}}
     end
 
     test "exits when there is no named producer and subscription is temporary" do
@@ -1321,40 +1386,22 @@ defmodule GenStageTest do
       assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
     end
 
-    test "sends termination message on done to permanent producer" do
+    test "sends termination message on done" do
       stream = Stream.iterate(0, & &1 + 1)
-      {:ok, producer} = GenStage.from_enumerable(stream, consumers: :permanent)
-      assert GenStage.stream([producer]) |> Enum.take(10) ==
-             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-      ref = Process.monitor(producer)
-      assert_receive {:DOWN, ^ref, _, _, _}
-    end
-
-    test "sends termination message on halt to permanent producer" do
-      stream = Stream.iterate(0, & &1 + 1) |> Stream.take(10)
-      {:ok, producer} = GenStage.from_enumerable(stream, consumers: :permanent)
-      assert GenStage.stream([producer]) |> Enum.to_list ==
-             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-      ref = Process.monitor(producer)
-      assert_receive {:DOWN, ^ref, _, _, _}
-    end
-
-    test "sends termination message on done to temporary producer" do
-      stream = Stream.iterate(0, & &1 + 1)
-      {:ok, producer} = GenStage.from_enumerable(stream, consumers: :temporary)
-      assert GenStage.stream([producer]) |> Enum.take(10) ==
+      {:ok, producer} = GenStage.from_enumerable(stream)
+      assert GenStage.stream([{producer, cancel: :transient}]) |> Enum.take(10) ==
              [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
       ref = Process.monitor(producer)
       refute_received {:DOWN, ^ref, _, _, _}
     end
 
-    test "sends termination message on halt to temporary producer" do
+    test "sends termination message on halt" do
       stream = Stream.iterate(0, & &1 + 1) |> Stream.take(10)
-      {:ok, producer} = GenStage.from_enumerable(stream, consumers: :temporary)
-      assert GenStage.stream([producer]) |> Enum.to_list ==
+      {:ok, producer} = GenStage.from_enumerable(stream)
+      assert GenStage.stream([{producer, cancel: :transient}]) |> Enum.to_list ==
              [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
       ref = Process.monitor(producer)
-      refute_received {:DOWN, ^ref, _, _, _}
+      assert_received {:DOWN, ^ref, _, _, _}
     end
 
     test "raises on bad options" do
@@ -1382,19 +1429,6 @@ defmodule GenStageTest do
       {:ok, producer} = GenStage.from_enumerable([], name: :gen_stage_from_enumerable)
       assert Process.info(producer, :registered_name) ==
              {:registered_name, :gen_stage_from_enumerable}
-    end
-
-    test "sends a message to the consumer when subscribing to a `done `producer" do
-      {:ok, producer} = GenStage.from_enumerable(1..5, consumers: :permanent)
-      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
-
-      batch = Enum.to_list(1..5)
-      assert_receive {:consumed, ^batch}
-      assert_receive {:producer, :done}
-
-      ref = Process.monitor(producer)
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
-      assert_receive {{_, ^ref}, {:producer, :done}}
     end
   end
 end
