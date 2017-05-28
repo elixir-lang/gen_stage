@@ -2,9 +2,15 @@
 
 ## v0.12.0
 
+### Enhancements
+
+  * Add `cancel: :transient` to subscription options which does terminate if the exit is `:normal`, `:shutdown`, or `{:shutdown, _}`
+  * Add `GenStage.sync_info/3` and `GenStage.async_info/2` which queues an information message to be delivered once the current queue is consumed
+
 ### Backwards incompatible changes
 
-  * Remove `:max_dynamic` from ConsumerSupervisor (it will be added to Elixir's DynamicSupervisor that will ship in Elixir v1.5)
+  * Remove `:max_dynamic` from ConsumerSupervisor
+  * The notification mechanism has been removed from GenStage. For termination, GenStage now uses proper exit signals and `cancel: :transient` has been added as a subscription option.
 
 ## v0.11.0
 

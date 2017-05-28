@@ -1,7 +1,7 @@
 defmodule GenStage.Mixfile do
   use Mix.Project
 
-  @version "0.11.0"
+  @version "0.12.0"
 
   def project do
     [app: :gen_stage,
@@ -9,7 +9,6 @@ defmodule GenStage.Mixfile do
      elixir: "~> 1.3",
      package: package(),
      description: "Producer and consumer pipelines with back-pressure for Elixir",
-     build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      deps: deps(),
      docs: [main: "GenStage", source_ref: "v#{@version}",

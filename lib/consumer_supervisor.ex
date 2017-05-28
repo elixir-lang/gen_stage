@@ -500,12 +500,8 @@ defmodule ConsumerSupervisor do
     end
   end
 
-  def handle_info({{_, _}, {:producer, reason}}, state) when reason in [:done, :halted] do
-    {:noreply, [], state}
-  end
-
   def handle_info(msg, state) do
-    :error_logger.error_msg('Supervisor received unexpected message: ~p~n', [msg])
+    :error_logger.error_msg('ConsumerSupervisor received unexpected message: ~p~n', [msg])
     {:noreply, [], state}
   end
 
