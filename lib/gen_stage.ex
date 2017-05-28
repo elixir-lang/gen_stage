@@ -1,4 +1,5 @@
 defmodule GenStage do
+  require IEx;
   @moduledoc ~S"""
   Stages are data-exchange steps that send and/or receive data
   from other stages.
@@ -1003,7 +1004,12 @@ defmodule GenStage do
   @callback format_status(:normal | :terminate, [pdict :: {term, term} | state :: term, ...]) ::
     status :: term
 
-  @optional_callbacks [handle_demand: 2, handle_events: 3, format_status: 2]
+  @doc """
+  """
+  @callback handle_metrics(:handle_demand | :handle_events | :handle_subscribe, metrics :: term, stageinfo ::term) ::
+  {:noreply}
+
+  @optional_callbacks [handle_demand: 2, handle_events: 3, format_status: 2, handle_metrics: 3]
 
   @doc false
   defmacro __using__(_) do
@@ -1062,8 +1068,14 @@ defmodule GenStage do
         {:ok, state}
       end
 
+      @doc false
+      def handle_metrics(_type, _args, _stageinfo) do
+        {:noreply}
+      end
+
       defoverridable [handle_call: 3, handle_info: 2, handle_subscribe: 4,
-                      handle_cancel: 3, handle_cast: 2, terminate: 2, code_change: 3]
+                      handle_cancel: 3, handle_cast: 2, terminate: 2, code_change: 3,
+                      handle_metrics: 3]
     end
   end
 
@@ -2139,6 +2151,7 @@ defmodule GenStage do
   ## Shared helpers
 
   defp noreply_callback(callback, args, %{mod: mod} = stage) do
+    {:noreply} = apply(mod, :handle_metrics, [callback, args, stage])
     handle_noreply_callback apply(mod, callback, args), stage
   end
 
@@ -2201,6 +2214,7 @@ defmodule GenStage do
   defp producer_subscribe(opts, from, stage) do
     %{mod: mod, state: state, dispatcher_state: dispatcher_state} = stage
 
+    {:noreply} = apply(mod, :handle_metrics, [:handle_subscribe, [:consumer], stage])
     case apply(mod, :handle_subscribe, [:consumer, opts, from, state]) do
       {:automatic, state} ->
         # Call the dispatcher after since it may generate demand and the
@@ -2499,6 +2513,7 @@ defmodule GenStage do
     do: split_events(events, limit, counter + 1, [event | acc])
 
   defp consumer_dispatch([{batch, ask} | batches], from, mod, state, stage, count, _hibernate?) do
+    {:noreply} = apply(mod, :handle_metrics, [:handle_events, [batch, from, state], stage])
     case mod.handle_events(batch, from, state) do
       {:noreply, events, state} when is_list(events) ->
         stage = dispatch_events(events, length(events), stage)
@@ -2558,6 +2573,7 @@ defmodule GenStage do
     %{mod: mod, state: state} = stage
     to = {producer_pid, ref}
 
+    {:noreply} = apply(mod, :handle_metrics, [:handle_subscribe, [:producer], stage])
     case apply(mod, :handle_subscribe, [:producer, opts, to, state]) do
       {:automatic, state} ->
         ask(to, max, [:noconnect])
