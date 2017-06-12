@@ -309,7 +309,7 @@ defmodule GenStage do
   time consumers ask for events. The size of the buffer is configured
   via the `:buffer_size` option returned by `init/1` and the default
   value is `10_000`. If the `buffer_size` is exceeded, an error is logged.
-  See the documentation for `c:init/1` for more detailed infromation about
+  See the documentation for `c:init/1` for more detailed information about
   the `:buffer_size` option.
 
   ### Buffering demand
@@ -365,7 +365,7 @@ defmodule GenStage do
   buffer only for cases where consumers crash without consuming all data.
 
   To handle such cases, we will use a two-element tuple as the broadcaster state
-  where the first elemeent is a queue and the second element is the pending
+  where the first element is a queue and the second element is the pending
   demand.  When events arrive and there are no consumers, we will store the
   event in the queue alongside information about the process that broadcasted
   the event. When consumers send demand and there are not enough events, we will
@@ -1128,7 +1128,7 @@ defmodule GenStage do
   `handle_info/2` callback.
 
   If the stage is a consumer, it does not have buffered events, so the
-  messaged is queued immediatelly.
+  messaged is queued immediately.
 
   This function will return `:ok` if the info message is successfully queued.
   """
@@ -1142,7 +1142,7 @@ defmodule GenStage do
   currently buffered events.
 
   If the stage is a consumer, it does not have buffered events, so the
-  messaged is queued immediatelly.
+  messaged is queued immediately.
 
   This call returns `:ok` regardless if the info has been successfully
   queued or not. It is typically called from the stage itself.
