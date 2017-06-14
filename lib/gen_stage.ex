@@ -490,7 +490,7 @@ defmodule GenStage do
   is sent upstream, avoiding the default behaviour where demand is
   sent after `c:handle_events/3`. Such can be done by implementing
   the `c:handle_subscribe/4` callback and returning `{:manual, state}`
-  instead of the default `{:automatic, state}`. Once the producer mode
+  instead of the default `{:automatic, state}`. Once the consumer mode
   is set to `:manual`, developers must use `GenStage.ask/3` to send
   demand upstream when necessary.
 
