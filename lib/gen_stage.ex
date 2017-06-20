@@ -494,7 +494,7 @@ defmodule GenStage do
   is set to `:manual`, developers must use `GenStage.ask/3` to send
   demand upstream when necessary.
 
-  Note that when `:max_demand` and `:min_demand` must be manually respected when
+  Note that `:max_demand` and `:min_demand` must be manually respected when
   manually asking for demand through `GenStage.ask/3`.
 
   For example, the `ConsumerSupervisor` module processes events
