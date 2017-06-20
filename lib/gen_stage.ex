@@ -495,7 +495,7 @@ defmodule GenStage do
   demand upstream when necessary.
 
   Note that `:max_demand` and `:min_demand` must be manually respected when
-  manually asking for demand through `GenStage.ask/3`.
+  asking for demand through `GenStage.ask/3`.
 
   For example, the `ConsumerSupervisor` module processes events
   asynchronously by starting a process for each event and this is achieved by
