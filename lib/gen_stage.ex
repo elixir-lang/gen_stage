@@ -1500,10 +1500,9 @@ defmodule GenStage do
       GenStage.stream([{producer, max_demand: 100}])
 
   If the producer process exits, the stream will exit with the same
-  reason. If it is expected that the producer will exit and the stream
-  should just halt when such happens, setting the cancel option to
-  either `:transient` or `:temporary` will avoid the stream for exiting
-  as described in the `sync_subscribe/3` docs:
+  reason. If you want the stream to halt instead, set the cancel option
+  to either `:transient` or `:temporary` as described in the
+  `sync_subscribe/3` docs:
 
       GenStage.stream([{producer, max_demand: 100, cancel: :transient}])
 
