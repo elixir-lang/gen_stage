@@ -367,7 +367,7 @@ defmodule GenStage do
   To handle such cases, we will use a two-element tuple as the broadcaster state
   where the first element is a queue and the second element is the pending
   demand.  When events arrive and there are no consumers, we will store the
-  event in the queue alongside information about the process that broadcasted
+  event in the queue alongside information about the process that broadcast
   the event. When consumers send demand and there are not enough events, we will
   increase the pending demand.  Once we have both data and demand, we
   acknowledge the process that has sent the event to the broadcaster and finally
@@ -457,7 +457,7 @@ defmodule GenStage do
 
   At this point, all consumers must have sent their demand which we were not
   able to fulfill. Now by calling `QueueBroadcaster.sync_notify/1`, the event
-  shall be broadcasted to all consumers at once as we have buffered the demand
+  shall be broadcast to all consumers at once as we have buffered the demand
   in the producer:
 
       QueueBroadcaster.sync_notify(:hello_world)
