@@ -1179,8 +1179,8 @@ defmodule GenStage do
   guarantee a subscription has effectively been established.
 
   This function will return `{:ok, subscription_tag}` as long as the
-  subscription message is sent. It may return `{:error, :not_a_consumer}` in
-  case the stage is not a consumer. `subscription_tag` is the second element
+  subscription message is sent. It will return `{:error, :not_a_consumer}`
+  when the stage is not a consumer. `subscription_tag` is the second element
   of the two-element tuple that will be passed to `c:handle_subscribe/4`.
 
   ## Options
