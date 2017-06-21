@@ -1514,7 +1514,7 @@ defmodule GenStage do
   enumerating the stream to subscribe and receive messages
   from producers. However it guarantees it won't remove or
   leave unwanted messages in the mailbox after enumeration
-  except if one of the producers come from a remote node.
+  unless one of the producers comes from a remote node.
   For more information, read the "Known limitations" section
   below.
 
