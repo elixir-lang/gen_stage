@@ -260,7 +260,7 @@ defmodule GenStage do
 
   The same guideline that applies to processes also applies to GenStage:
   use processes/stages to model runtime properties, such as concurrency and
-  data-trasnfer, and not as code organization tools.
+  data-transfer, and not as code organization tools.
 
   Another alternative to the scenario above is to use a `ConsumerSupervisor`
   for consuming the events instead of N consumers. The `ConsumerSupervisor`
