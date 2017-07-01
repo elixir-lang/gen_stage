@@ -1142,7 +1142,7 @@ defmodule GenStage do
   currently buffered events.
 
   If the stage is a consumer, it does not have buffered events, so the
-  messaged is queued immediately.
+  message is queued immediately.
 
   This call returns `:ok` regardless if the info has been successfully
   queued or not. It is typically called from the stage itself.
