@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.12.1
+
+### Enhancements
+
+  * Support Elixir v1.5 supervisor childspecs in GenStage and ConsumerSupervisor
+
+### Bug fixes
+
+  * Fix a bug where info messages would be sent out of order in producer consumers
+  * Fix a bug where handle_cancel would be invoked out of order in producer consumers
+
 ## v0.12.0
 
 ### Enhancements
