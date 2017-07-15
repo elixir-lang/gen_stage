@@ -2395,19 +2395,33 @@ defmodule GenStage do
     send(self(), msg)
     {:reply, :ok, stage}
   end
-  defp producer_info(msg, stage) do
+  defp producer_info(msg, %{type: :producer_consumer, events: demand_or_queue} = stage) do
+    stage =
+      case demand_or_queue do
+        demand when is_integer(demand)  ->
+          buffer_or_dispatch_info(msg, stage)
+        queue ->
+          %{stage | events: :queue.in({:info, msg}, queue)}
+      end
+    {:reply, :ok, stage}
+  end
+  defp producer_info(msg, %{type: :producer} = stage) do
+    {:reply, :ok, buffer_or_dispatch_info(msg, stage)}
+  end
+
+  defp buffer_or_dispatch_info(msg, stage) do
     %{buffer: {queue, count, infos},
       buffer_config: {max, _keep}} = stage
 
     case count do
       0 ->
-        {:reply, :ok, dispatch_info(msg, stage)}
+        dispatch_info(msg, stage)
       _ when is_reference(infos) ->
         queue = :queue.in({infos, msg}, queue)
-        {:reply, :ok, %{stage | buffer: {queue, count + 1, infos}}}
+        %{stage | buffer: {queue, count + 1, infos}}
       _ ->
         wheel = put_wheel(infos, count, max, msg)
-        {:reply, :ok, %{stage | buffer: {queue, count, wheel}}}
+        %{stage | buffer: {queue, count, wheel}}
     end
   end
 
@@ -2613,6 +2627,8 @@ defmodule GenStage do
 
   defp take_pc_events(queue, counter, stage) when counter > 0 do
     case :queue.out(queue) do
+      {{:value, {:info, msg}}, queue} ->
+        take_pc_events(queue, counter, buffer_or_dispatch_info(msg, stage))
       {{:value, {events, ref}}, queue} ->
         case send_pc_events(events, ref, stage) do
           {sent, {:noreply, stage}} ->

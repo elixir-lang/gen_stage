@@ -134,6 +134,11 @@ defmodule GenStageTest do
       send recipient, {:producer_consumed, events}
       {:noreply, Enum.flat_map(events, &[&1, &1]), recipient}
     end
+
+    def handle_info(other, state) do
+      is_pid(state) && send(state, other)
+      {:noreply, [], state}
+    end
   end
 
   defmodule Discarder do
@@ -584,6 +589,38 @@ defmodule GenStageTest do
       assert_receive :sync
 
       :ok = GenStage.async_info(consumer, :async)
+      assert_receive :async
+    end
+
+    test "delivers info to producer_consumer immediately when there is no incoming buffer" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, doubler} = Doubler.start_link({:producer_consumer, self(), subscribe_to: [producer]})
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [doubler]})
+
+      :ok = GenStage.sync_info(doubler, :sync)
+      assert_receive :sync
+
+      :ok = GenStage.async_info(doubler, :async)
+      assert_receive :async
+    end
+
+  test "delivers info to producer_consumer immediately when there is incoming buffer" do
+      {:ok, producer} = Counter.start_link({:producer, self()})
+      {:ok, doubler} = Doubler.start_link({:producer_consumer, self(), subscribe_to: [producer]})
+
+      # The producer received the subscription and hen we guarantee
+      # the producer sent events to the producer_consumer buffer
+      assert_receive {:producer_subscribed, _}
+      Counter.sync_queue(producer, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+
+      :ok = GenStage.sync_info(doubler, :sync)
+      refute_received :sync
+
+      :ok = GenStage.async_info(doubler, :async)
+      refute_received :async
+
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [doubler]})
+      assert_receive :sync
       assert_receive :async
     end
 
