@@ -1275,8 +1275,9 @@ defmodule GenStageTest do
 
     test "consumer handle_cancel/3 on producer down with temporary subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, consumer} = Doubler.start_link({:producer_consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
+      {:ok, producer_consumer} = Doubler.start_link({:producer_consumer, self()})
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
+      {:ok, ref} = GenStage.sync_subscribe(producer_consumer, to: producer, cancel: :temporary)
       Process.unlink(producer)
       Process.exit(producer, :kill)
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
@@ -1284,8 +1285,9 @@ defmodule GenStageTest do
 
     test "consumer handle_cancel/3 on producer normal down with transient subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, consumer} = Doubler.start_link({:producer_consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :transient)
+      {:ok, producer_consumer} = Doubler.start_link({:producer_consumer, self()})
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
+      {:ok, ref} = GenStage.sync_subscribe(producer_consumer, to: producer, cancel: :transient)
       Process.unlink(producer)
       Process.exit(producer, :shutdown)
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :shutdown}}
@@ -1295,24 +1297,26 @@ defmodule GenStageTest do
     test "consumer handle_cancel/3 on producer non-normal down with transient subscription" do
       Process.flag(:trap_exit, true)
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, consumer} = Doubler.start_link({:producer_consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :transient)
+      {:ok, producer_consumer} = Doubler.start_link({:producer_consumer, self()})
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
+      {:ok, ref} = GenStage.sync_subscribe(producer_consumer, to: producer, cancel: :transient)
       Process.unlink(producer)
       Process.exit(producer, :kill)
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
-      assert_receive {:EXIT, ^consumer, :killed}
+      assert_receive {:EXIT, ^producer_consumer, :killed}
     end
 
     @tag :capture_log
     test "consumer handle_cancel/3 on producer down with permanent subscription" do
       Process.flag(:trap_exit, true)
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, consumer} = Doubler.start_link({:producer_consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :permanent)
+      {:ok, producer_consumer} = Doubler.start_link({:producer_consumer, self()})
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
+      {:ok, ref} = GenStage.sync_subscribe(producer_consumer, to: producer, cancel: :permanent)
       Process.unlink(producer)
       Process.exit(producer, :kill)
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:down, :killed}}
-      assert_receive {:EXIT, ^consumer, :killed}
+      assert_receive {:EXIT, ^producer_consumer, :killed}
     end
 
     test "format_status/2" do
