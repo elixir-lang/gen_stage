@@ -602,6 +602,21 @@ defmodule GenStage do
     * `handle_demand/2` - must be implemented by `:producer` stages
     * `handle_events/3` - must be implemented by `:producer_consumer` and `:consumer` stages
 
+  `use GenStage` also defines a `child_spec/1` function, allowing the
+  defined module to be put under a supervision tree in Elixir v1.5+.
+  The generated `child_spec/1` can be customized with the following options:
+
+    * `:id` - the child specification id, defauts to the current module
+    * `:start` - how to start the child process (defaults to calling `__MODULE__.start_link/1`)
+    * `:restart` - when the child should be restarted, defaults to `:permanent`
+    * `:shutdown` - how to shut down the child
+
+  For example:
+
+      use GenStage, restart: :transient, shutdown: 10_000
+
+  See the `Supervisor` docs for more information.
+
   Although this module exposes functions similar to the ones found in
   the `GenServer` API, like `call/3` and `cast/2`, developers can also
   rely directly on GenServer functions such as `GenServer.multi_call/4`
@@ -1006,9 +1021,22 @@ defmodule GenStage do
   @optional_callbacks [handle_demand: 2, handle_events: 3, format_status: 2]
 
   @doc false
-  defmacro __using__(_) do
-    quote location: :keep do
+  defmacro __using__(opts) do
+    quote location: :keep, bind_quoted: [opts: opts] do
       @behaviour GenStage
+
+      spec = [
+        id: opts[:id] || __MODULE__,
+        start: Macro.escape(opts[:start]) || quote(do: {__MODULE__, :start_link, [arg]}),
+        restart: opts[:restart] || :permanent,
+        shutdown: opts[:shutdown] || 5000,
+        type: :worker
+      ]
+
+      @doc false
+      def child_spec(arg) do
+        %{unquote_splicing(spec)}
+      end
 
       @doc false
       def handle_call(msg, _from, state) do

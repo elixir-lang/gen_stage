@@ -4,7 +4,36 @@ defmodule ConsumerSupervisorTest do
   import Supervisor.Spec
 
   defmodule Simple do
+    use ConsumerSupervisor
     def init(args), do: args
+  end
+
+  test "generates child_spec/1" do
+    assert Simple.child_spec([:hello]) == %{
+      id: Simple,
+      restart: :permanent,
+      start: {Simple, :start_link, [[:hello]]},
+      type: :supervisor
+    }
+
+    defmodule Custom do
+      use ConsumerSupervisor,
+          id: :id,
+          restart: :temporary,
+          start: {:foo, :bar, []},
+          shutdown: 5000 # ignored
+
+      def init(arg) do
+        arg
+      end
+    end
+
+    assert Custom.child_spec([:hello]) == %{
+      id: :id,
+      restart: :temporary,
+      start: {:foo, :bar, []},
+      type: :supervisor
+    }
   end
 
   test "start_link/3 with non-ok init" do

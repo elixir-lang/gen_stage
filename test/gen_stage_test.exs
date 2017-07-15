@@ -215,6 +215,34 @@ defmodule GenStageTest do
     end
   end
 
+  test "generates child_spec/1" do
+    assert Counter.child_spec([:hello]) == %{
+      id: Counter,
+      restart: :permanent,
+      shutdown: 5000,
+      start: {Counter, :start_link, [[:hello]]},
+      type: :worker
+    }
+
+    defmodule Custom do
+      use GenStage,
+        id: :id,
+        restart: :temporary,
+        shutdown: :infinity,
+        start: {:foo, :bar, []}
+
+      def init(arg), do: {:producer, arg}
+    end
+
+    assert Custom.child_spec([:hello]) == %{
+      id: :id,
+      restart: :temporary,
+      shutdown: :infinity,
+      start: {:foo, :bar, []},
+      type: :worker
+    }
+  end
+
   describe "producer-to-consumer demand" do
     test "with default max and min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})

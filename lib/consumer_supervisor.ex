@@ -88,16 +88,34 @@ defmodule ConsumerSupervisor do
       options. e.g. `[Producer]` or `[{Producer, max_demand: 10, min_demand: 20}]`
   """
   @callback init(args :: term) ::
-    {:ok, [Supervisor.Spec.spec], options :: keyword()} | :ignore
+    {:ok, [:supervisor.child_spec], options :: keyword()} | :ignore
 
   defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
              children: %{}, producers: %{}, restarts: [], restarting: 0]
 
   @doc false
-  defmacro __using__(_) do
-    quote location: :keep do
+  @doc false
+  defmacro __using__(opts) do
+    quote location: :keep, bind_quoted: [opts: opts] do
       @behaviour ConsumerSupervisor
       import Supervisor.Spec
+
+      spec = [
+        id: opts[:id] || __MODULE__,
+        start: Macro.escape(opts[:start]) || quote(do: {__MODULE__, :start_link, [arg]}),
+        restart: opts[:restart] || :permanent,
+        type: :supervisor
+      ]
+
+      @doc false
+      def child_spec(arg) do
+        %{unquote_splicing(spec)}
+      end
+
+      defoverridable child_spec: 1
+
+      @doc false
+      def init(arg)
     end
   end
 
