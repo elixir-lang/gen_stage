@@ -101,6 +101,20 @@ defmodule ConsumerSupervisor do
     end
   end
 
+  defmodule Default do
+    @moduledoc false
+
+    def init({[{_, _, _, _, _, _} | _] = children, opts}) do
+      {:ok, {_, spec}} = Supervisor.Spec.supervise(children, opts)
+      {:ok, spec, opts}
+    end
+
+    def init({children, opts}) do
+      {:ok, {_, spec}} = Supervisor.init(children, opts)
+      {:ok, spec, opts}
+    end
+  end
+
   @doc """
   Starts a supervisor with the given children.
 
@@ -119,11 +133,8 @@ defmodule ConsumerSupervisor do
   """
   @spec start_link([Supervisor.Spec.spec], [option]) :: Supervisor.on_start
   def start_link(children, options) when is_list(children) do
-    # TODO: Do not call supervise but the shared spec validation logic
-    {:ok, {_, spec}} = Supervisor.Spec.supervise(children, options)
-    # TODO: Validate options in the regular Supervisor too
     spec_options = Keyword.take(options, [:strategy, :max_restarts, :max_seconds, :subscribe_to])
-    start_link(Supervisor.Default, {:ok, spec, spec_options}, options)
+    start_link(Default, {children, spec_options}, options)
   end
 
   @doc """

@@ -34,7 +34,7 @@ defmodule ConsumerSupervisorTest do
 
     {:ok, pid} = ConsumerSupervisor.start_link([worker(Foo, [])], strategy: :one_for_one)
     assert :proc_lib.initial_call(pid) ==
-           {:supervisor, Supervisor.Default, [:Argument__1]}
+           {:supervisor, ConsumerSupervisor.Default, [:Argument__1]}
   end
 
   if function_exported?(:supervisor, :get_callback_module, 1) do
@@ -43,7 +43,7 @@ defmodule ConsumerSupervisorTest do
       assert :supervisor.get_callback_module(pid) == Supervisor.Default
 
       {:ok, pid} = ConsumerSupervisor.start_link([worker(Foo, [])], strategy: :one_for_one)
-      assert :supervisor.get_callback_module(pid) == Supervisor.Default
+      assert :supervisor.get_callback_module(pid) == ConsumerSupervisor.Default
     end
   end
 
