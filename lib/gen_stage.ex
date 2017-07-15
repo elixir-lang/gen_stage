@@ -268,7 +268,7 @@ defmodule GenStage do
   and start a separate supervised process per event. The number of children
   concurrently running in a `ConsumerSupervisor` is at most `max_demand` and
   the average amount of children is `(max_demand - min_demand) / 2`.
-  
+
   If you don't need back-pressure at all, because the data is already in-memory,
   a simpler solution is available directly in Elixir via `Task.async_stream/2`.
   This function consumes a stream of data, with each entry running in a separate
@@ -2586,22 +2586,38 @@ defmodule GenStage do
     end
   end
 
-  defp consumer_cancel(ref, kind, reason, %{producers: producers, state: state} = stage) do
+  defp consumer_cancel(ref, kind, reason, %{producers: producers} = stage) do
     case Map.pop(producers, ref) do
       {nil, _producers} ->
         {:noreply, stage}
       {{producer_pid, mode, _}, producers} ->
         Process.demonitor(ref, [:flush])
         stage = %{stage | producers: producers}
-        case noreply_callback(:handle_cancel, [{kind, reason}, {producer_pid, ref}, state], stage) do
-          {:noreply, stage}
-              when mode == :permanent
-              when mode == :transient and not is_transient_shutdown(reason) ->
-            :error_logger.info_msg('GenStage consumer ~p is stopping after receiving cancel from producer ~p with reason: ~p~n', [name(), producer_pid, reason])
-            {:stop, reason, stage}
-          other ->
-            other
-        end
+        schedule_cancel(mode, {kind, reason}, {producer_pid, ref}, stage)
+    end
+  end
+
+  defp schedule_cancel(mode, kind_reason, pid_ref, %{type: :producer_consumer, events: demand_or_queue} = stage) do
+    case demand_or_queue do
+      demand when is_integer(demand)  ->
+        invoke_cancel(mode, kind_reason, pid_ref, stage)
+      queue ->
+        {:noreply, %{stage | events: :queue.in({:cancel, mode, kind_reason, pid_ref}, queue)}}
+    end
+  end
+  defp schedule_cancel(mode, kind_reason, pid_ref, stage) do
+    invoke_cancel(mode, kind_reason, pid_ref, stage)
+  end
+
+  defp invoke_cancel(mode, {_, reason} = kind_reason, {pid, _} = pid_ref, %{state: state} = stage) do
+    case noreply_callback(:handle_cancel, [kind_reason, pid_ref, state], stage) do
+      {:noreply, stage}
+          when mode == :permanent
+          when mode == :transient and not is_transient_shutdown(reason) ->
+        :error_logger.info_msg('GenStage consumer ~p is stopping after receiving cancel from producer ~p with reason: ~p~n', [name(), pid, reason])
+        {:stop, reason, stage}
+      other ->
+        other
     end
   end
 
@@ -2621,7 +2637,7 @@ defmodule GenStage do
         consumer_dispatch(batches, from, mod, state, stage, 0, false)
       %{} ->
         # We queued but producer was removed
-        consumer_dispatch([{events, 0}], {:pid, :ref}, mod, state, stage, 0, false)
+        consumer_dispatch([{events, 0}], {:pid, ref}, mod, state, stage, 0, false)
     end
   end
 
@@ -2629,6 +2645,17 @@ defmodule GenStage do
     case :queue.out(queue) do
       {{:value, {:info, msg}}, queue} ->
         take_pc_events(queue, counter, buffer_or_dispatch_info(msg, stage))
+
+      {{:value, {:cancel, mode, kind_reason, pid_ref}}, queue} ->
+        case invoke_cancel(mode, kind_reason, pid_ref, stage) do
+          {:noreply, stage} ->
+            take_pc_events(queue, counter, stage)
+          {:noreply, stage, :hibernate} ->
+            take_pc_events(queue, counter, stage)
+          {:stop, _, _} = stop ->
+            stop
+        end
+
       {{:value, {events, ref}}, queue} ->
         case send_pc_events(events, ref, stage) do
           {sent, {:noreply, stage}} ->
@@ -2638,6 +2665,7 @@ defmodule GenStage do
           {_, {:stop, _, _} = stop} ->
             stop
         end
+
       {:empty, _queue} ->
         {:noreply, %{stage | events: counter}}
     end

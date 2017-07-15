@@ -457,18 +457,27 @@ defmodule GenStageTest do
       assert_receive {:producer_consumer_subscribed, :producer, {^producer, ^ref}}
 
       GenStage.cancel({producer, ref}, :done)
-      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, :done}}
+      refute_received {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, :done}}
       refute_received {:producer_consumed, _}
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       GenStage.sync_subscribe(consumer, to: doubler, min_demand: 50, max_demand: 100)
 
       batch = Enum.to_list(0..99)
-      assert_receive {:producer_consumed, ^batch}
+      receive do
+        {:producer_consumed, ^batch} -> :ok
+      after
+        200 ->
+          batch = Enum.to_list(0..49)
+          assert_receive {:producer_consumed, ^batch}
+          batch = Enum.to_list(50..99)
+          assert_receive {:producer_consumed, ^batch}
+      end
       batch = Enum.flat_map(0..24, &[&1, &1])
       assert_receive {:consumed, ^batch}
       batch = Enum.flat_map(25..49, &[&1, &1])
       assert_receive {:consumed, ^batch}
+      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, :done}}
       refute_received {:producer_consumed, _}
     end
   end
@@ -1215,8 +1224,10 @@ defmodule GenStageTest do
 
     test "consumer handle_cancel/3 with temporary subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, consumer} = Doubler.start_link({:producer_consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
+      {:ok, producer_consumer} = Doubler.start_link({:producer_consumer, self()})
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
+
+      {:ok, ref} = GenStage.sync_subscribe(producer_consumer, to: producer, cancel: :temporary)
       GenStage.cancel({producer, ref}, :oops)
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, :oops}}
     end
@@ -1225,11 +1236,13 @@ defmodule GenStageTest do
     test "consumer handle_cancel/3 with permanent subscription" do
       Process.flag(:trap_exit, true)
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, consumer} = Doubler.start_link({:producer_consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :permanent)
+      {:ok, producer_consumer} = Doubler.start_link({:producer_consumer, self()})
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
+
+      {:ok, ref} = GenStage.sync_subscribe(producer_consumer, to: producer, cancel: :permanent)
       GenStage.cancel({producer, ref}, self())
       assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, pid}} when pid == self()
-      assert_receive {:EXIT, ^consumer, pid} when pid == self()
+      assert_receive {:EXIT, ^producer_consumer, pid} when pid == self()
     end
 
     test "consumer handle_cancel/3 on producer down with temporary subscription" do
