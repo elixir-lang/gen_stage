@@ -92,6 +92,55 @@ defmodule ConsumerSupervisorTest do
            :proc_lib.translate_initial_call(pid)
   end
 
+  describe "init/2" do
+    test "supports old child spec" do
+      expected = {
+        :ok,
+        [{Foo, {Foo, :start_link, []}, :permanent, 5000, :worker, [Foo]}],
+        [strategy: :one_for_one]
+      }
+      assert expected == ConsumerSupervisor.init(worker(Foo, []), [strategy: :one_for_one])
+    end
+
+    if function_exported? Supervisor, :init, 2 do
+      test "supports new child spec as tuple" do
+        expected = {
+          :ok,
+          [%{id: Task, restart: :temporary, start: {Task, :start_link, [[:foo, :bar]]}}],
+          [strategy: :one_for_one]
+        }
+        assert expected == ConsumerSupervisor.init({Task, [:foo, :bar]}, [strategy: :one_for_one])
+      end
+
+      test "supports new child spec as atom" do
+        expected = {
+          :ok,
+          [%{id: Task, restart: :temporary, start: {Task, :start_link, [[]]}}],
+          [strategy: :one_for_one]
+        }
+        assert expected == ConsumerSupervisor.init(Task, [strategy: :one_for_one])
+      end
+    end
+  end
+
+  if function_exported? Supervisor, :init, 2 do
+    test "start_link/3 with new syntax" do
+      spec = {:ok, [%{id: Foo, restart: :temporary, start: {Foo, :start_link, [[]]}}], [strategy: :one_for_one]}
+      {:ok, pid} = ConsumerSupervisor.start_link(Simple, spec, name: __MODULE__)
+
+      # Sets up a link
+      {:links, links} = Process.info(self(), :links)
+      assert pid in links
+
+      # A name
+      assert Process.whereis(__MODULE__) == pid
+
+      # And the initial call
+      assert {:supervisor, ConsumerSupervisorTest.Simple, 1} =
+             :proc_lib.translate_initial_call(pid)
+    end
+  end
+
   ## Code change
 
   test "code_change/3 with non-ok init" do

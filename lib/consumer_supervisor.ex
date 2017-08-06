@@ -123,14 +123,8 @@ defmodule ConsumerSupervisor do
   defmodule Default do
     @moduledoc false
 
-    def init({[{_, _, _, _, _, _} | _] = children, opts}) do
-      {:ok, {_, spec}} = Supervisor.Spec.supervise(children, opts)
-      {:ok, spec, opts}
-    end
-
-    def init({children, opts}) do
-      {:ok, {_, spec}} = Supervisor.init(children, opts)
-      {:ok, spec, opts}
+    def init({[template], opts}) do
+      ConsumerSupervisor.init(template, opts)
     end
   end
 
@@ -263,6 +257,24 @@ defmodule ConsumerSupervisor do
     call(supervisor, :count_children)
   end
 
+  @doc """
+  Receives a template to initialize and a set of options.
+
+  This is typically invoked at the end of the init/1 callback of module-based supervisors.
+
+  This function returns a the child specification and the supervisor flags.
+
+  """
+  def init({_, _, _, _, _, _} = template, opts) do
+    {:ok, [template], opts}
+  end
+  if function_exported? Supervisor, :init, 2 do
+    def init(template, opts) when is_tuple(template) or is_map(template) or is_atom(template) do
+      {:ok, {_, [template]}} = Supervisor.init([template], opts)
+      {:ok, [template], opts}
+    end
+  end
+
   @compile {:inline, call: 2}
 
   defp call(supervisor, req) do
@@ -302,7 +314,7 @@ defmodule ConsumerSupervisor do
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
          :ok <- validate_seconds(max_seconds) do
-      {:ok, %{state | template: child, strategy: strategy,
+      {:ok, %{state | template: normalize_child_spec(child), strategy: strategy,
                       max_restarts: max_restarts, max_seconds: max_seconds}, opts}
     end
   end
@@ -784,4 +796,16 @@ defmodule ConsumerSupervisor do
     [data: [{~c"State", state}],
      supervisor: [{~c"Callback", mod}]]
   end
+
+  defp normalize_child_spec(%{id: id, start: start} = child),
+    do: {
+      id,
+      start,
+      Map.get(child, :restart, :permanent),
+      Map.get(child, :shutdown, 5_000),
+      Map.get(child, :type, :worker),
+      Map.get(child, :modules, [])
+    }
+  defp normalize_child_spec({_, _, _, _, _, _} = child),
+    do: child
 end
