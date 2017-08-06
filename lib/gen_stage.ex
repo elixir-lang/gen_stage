@@ -1091,7 +1091,8 @@ defmodule GenStage do
       end
 
       defoverridable [handle_call: 3, handle_info: 2, handle_subscribe: 4,
-                      handle_cancel: 3, handle_cast: 2, terminate: 2, code_change: 3]
+                      handle_cancel: 3, handle_cast: 2, terminate: 2, code_change: 3,
+                      child_spec: 1]
     end
   end
 
