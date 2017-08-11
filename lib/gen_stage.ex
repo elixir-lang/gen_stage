@@ -828,9 +828,9 @@ defmodule GenStage do
         # events if we aren't.
         events =
           if length(state.events) >= demand do
-            events
+            state.events
           else
-            fetch_events()
+            # fetch_events()
           end
 
         # We dispatch only the requested number of events.
