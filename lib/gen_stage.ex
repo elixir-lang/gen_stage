@@ -878,7 +878,7 @@ defmodule GenStage do
 
       def handle_subscribe(:producer, _options, from, state) do
         new_state = %{state | subscription: from}
-        {:manual, new_state
+        {:manual, new_state}
       end
 
   """
