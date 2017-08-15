@@ -67,7 +67,8 @@ defmodule ConsumerSupervisor do
                   {:strategy, Supervisor.Spec.strategy} |
                   {:max_restarts, non_neg_integer} |
                   {:max_seconds, non_neg_integer} |
-                  {:max_dynamic, non_neg_integer | :infinity}
+                  {:max_dynamic, non_neg_integer | :infinity} |
+                  {:subscribe_to, [GenStage.stage | {GenStage.stage, keyword()}]}
 
   @doc """
   Callback invoked to start the supervisor and during hot code upgrades.
