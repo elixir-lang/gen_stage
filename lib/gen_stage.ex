@@ -194,7 +194,7 @@ defmodule GenStage do
   simpler to subscribe a consumer to its producer on its `c:init/1`
   callback. This way, if the consumer crashes, restarting the consumer
   will automatically re-invoke its `c:init/1` callback and resubscribe
-  it to the supervisor.
+  it to the producer.
 
   This approach works as long as the producer can be referenced when
   the consumer starts - such as by name for a named process. For example,
