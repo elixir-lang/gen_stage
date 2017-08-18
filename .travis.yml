@@ -8,7 +8,7 @@ notifications:
   recipients:
     - jose.valim@plataformatec.com.br
 otp_release:
-  - 18.3
+  - 18.0
   - 19.3
   - 20.0
 after_script:
