@@ -28,20 +28,17 @@ defmodule ConsumerSupervisor do
 
       defmodule Consumer do
         def start_link() do
-          import Supervisor.Spec
-
-          children = [
-            worker(Printer, [], restart: :temporary)
-          ]
-
-          ConsumerSupervisor.start_link(children, strategy: :one_for_one,
-                                                  subscribe_to: [{Producer, max_demand: 50}])
+          children = [Printer]
+          opts = [strategy: :one_for_one, subscribe_to: [{Producer, max_demand: 50}]]
+          ConsumerSupervisor.start_link(children, opts)
         end
       end
 
   Then in the `Printer` module:
 
       defmodule Printer do
+        use Task
+
         def start_link(event) do
           Task.start_link(fn ->
             IO.inspect {self(), event}

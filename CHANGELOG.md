@@ -1,10 +1,17 @@
 # Changelog
 
+## v0.12.2
+
+### Enhancements
+
+  * Support Elixir v1.5 supervisor childspecs in ConsumerSupervisor
+  * Mark `GenStage.child_spec/1` overridable
+
 ## v0.12.1
 
 ### Enhancements
 
-  * Support Elixir v1.5 supervisor childspecs in GenStage and ConsumerSupervisor
+  * Define Elixir v1.5 childspecs in GenStage and ConsumerSupervisor
 
 ### Bug fixes
 
