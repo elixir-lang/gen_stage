@@ -23,7 +23,7 @@ defmodule GenStage.BroadcastDispatcher do
 
       def init(:ok) do
         {:consumer, :ok, subscribe_to:
-          [{producer, selector: fn %{key: key} -> String.starts_with?(key, "foo-") end}]}`
+          [{producer, selector: fn %{key: key} -> String.starts_with?(key, "foo-") end}]}
       end
 
   """
