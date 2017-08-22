@@ -226,7 +226,7 @@ defmodule GenStage do
 
       def init(number) do
         {:producer_consumer, number, subscribe_to: [{A, max_demand: 10}]}
-     end
+      end
 
   And we will no longer need to call `sync_subscribe/2`.
 
