@@ -10,21 +10,25 @@ defmodule ConsumerSupervisor do
   `:subscribe_to` from `init/1` or explicitly with `GenStage.sync_subscribe/3`
   and `GenStage.async_subscribe/2`.
 
-  Once subscribed, the supervisor will ask the producer for `max_demand` events
+  Once subscribed, the supervisor will ask the producer for `:max_demand` events
   and start child processes as events arrive. As child processes terminate, the
-  supervisor will accumulate demand and request more events once `min_demand`
+  supervisor will accumulate demand and request more events once `:min_demand`
   is reached. This allows the `ConsumerSupervisor` to work similar to a pool,
   except a child process is started per event. The minimum amount of concurrent
-  children per producer is specified by `min_demand` and the `maximum` is given
-  by `max_demand`.
+  children per producer is specified by `:min_demand` and the maximum is given
+  by `:max_demand`.
 
   ## Example
 
   Let's define a GenStage consumer as a `ConsumerSupervisor` that subscribes
   to a producer named `Producer` and starts a new process for each event
   received from the producer. Each new process will be started by calling
-  `Printer.start_link/1`, which simply starts a task that will print the
-  incoming event to the terminal.
+  `Printer.start_link/2`, which simply starts a task that will print the
+  incoming event to the terminal. `Printer.start_link/2` is called because
+  the `Printer` child specification defaults to starting a `Printer` with
+  `Printer.start_link([])` (see the documentation for `Supervisor`)
+  but the `ConsumerSupervisor` adds the event as another argument when starting
+  the child, effectively calling `Printer.start_link([], event)`.
 
       defmodule Consumer do
         def start_link() do
@@ -39,9 +43,9 @@ defmodule ConsumerSupervisor do
       defmodule Printer do
         use Task
 
-        def start_link(event) do
+        def start_link([], event) do
           Task.start_link(fn ->
-            IO.inspect {self(), event}
+            IO.inspect({self(), event})
           end)
         end
       end
@@ -83,7 +87,8 @@ defmodule ConsumerSupervisor do
 
     * `:subscribe_to` - a list of producers to subscribe to. Each element
       represents the producer or a tuple with the producer and the subscription
-      options. e.g. `[Producer]` or `[{Producer, max_demand: 10, min_demand: 20}]`
+      options, for example, `[Producer]` or `[{Producer, max_demand: 10, min_demand: 20}]`.
+
   """
   @callback init(args :: term) ::
     {:ok, [:supervisor.child_spec], options :: keyword()} | :ignore
@@ -91,7 +96,6 @@ defmodule ConsumerSupervisor do
   defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
              children: %{}, producers: %{}, restarts: [], restarting: 0]
 
-  @doc false
   @doc false
   defmacro __using__(opts) do
     quote location: :keep, bind_quoted: [opts: opts] do
@@ -134,8 +138,11 @@ defmodule ConsumerSupervisor do
   `c:init/1` callback.
 
   The options can also be used to register a supervisor name.
-  The supported values are described under the `Name Registration`
+  The supported values are described under the "Name Registration"
   section in the `GenServer` module docs.
+
+  The child processes specified in `children` will be started by appending
+  the event to process to the existing function arguments in the child specification.
 
   Note that the consumer supervisor is linked to the parent process
   and will exit not only on crashes but also if the parent process
@@ -148,21 +155,21 @@ defmodule ConsumerSupervisor do
   end
 
   @doc """
-  Starts a consumer supervisor module with the given `arg`.
+  Starts a consumer supervisor module with the given `args`.
 
-  To start the supervisor, the `init/1` callback will be invoked in the given
-  module, with `arg` passed to it. The `init/1` callback must return a
+  To start the supervisor, the `c:init/1` callback will be invoked in the given
+  module, with `args` passed to it. The `c:init/1` callback must return a
   supervision specification which can be created with the help of the
-  `Supervisor.Spec` module.
+  `Supervisor` module.
 
-  If the `init/1` callback returns `:ignore`, this function returns
+  If the `c:init/1` callback returns `:ignore`, this function returns
   `:ignore` as well and the supervisor terminates with reason `:normal`.
   If it fails or returns an incorrect value, this function returns
   `{:error, term}` where `term` is a term with information about the
   error, and the supervisor terminates with reason `term`.
 
   The `:name` option can also be given in order to register a supervisor
-  name, the supported values are described under the `Name Registration`
+  name. The supported values are described under the "Name Registration"
   section in the `GenServer` module docs.
   """
   @spec start_link(module, any, [option]) :: Supervisor.on_start
@@ -180,10 +187,10 @@ defmodule ConsumerSupervisor do
   count towards the demand of any of them.
 
   If the child process starts, function returns `{:ok, child}` or
-  `{:ok, child, info}`, the pid is added to the supervisor and the
+  `{:ok, child, info}`, the pid is added to the supervisor, and the
   function returns the same value.
 
-  If the child process starts, function returns ignore, an error tuple
+  If the child process start function returns `:ignore`, an error tuple,
   or an erroneous value, or if it fails, the child is discarded and
   `:ignore` or `{:error, error}` where `error` is a term containing
   information about the error is returned.
@@ -223,6 +230,7 @@ defmodule ConsumerSupervisor do
       specification
 
     * `modules` - as defined in the child specification
+
   """
   @spec which_children(Supervisor.supervisor) ::
         [{:undefined, pid | :restarting, Supervisor.Spec.worker, Supervisor.Spec.modules}]
@@ -235,7 +243,7 @@ defmodule ConsumerSupervisor do
 
   The map contains the following keys:
 
-    * `:specs` - always 1 as consumer supervisors have a single specification
+    * `:specs` - always `1` as consumer supervisors have a single specification
 
     * `:active` - the count of all actively running child processes managed by
       this supervisor
@@ -257,15 +265,32 @@ defmodule ConsumerSupervisor do
   @doc """
   Receives a template to initialize and a set of options.
 
-  This is typically invoked at the end of the init/1 callback of module-based supervisors.
+  This is typically invoked at the end of the `c:init/1` callback of module-based supervisors.
 
   This function returns a the child specification and the supervisor flags.
+
+  ## Examples
+
+  Using the child specification changes introduced in Elixir 1.5:
+
+      defmodule MyConsumerSupervisor do
+        use ConsumerSupervisor
+
+        def start_link() do
+          ConsumerSupervisor.start_link(__MODULE__, :no_args)
+        end
+
+        def init(:no_args) do
+          ConsumerSupervisor.init(MyConsumer, strategy: :one_for_one, subscribe_to: MyProducer)
+        end
+      end
 
   """
   def init({_, _, _, _, _, _} = template, opts) do
     {:ok, [template], opts}
   end
-  if function_exported? Supervisor, :init, 2 do
+
+  if function_exported?(Supervisor, :init, 2) do
     def init(template, opts) when is_tuple(template) or is_map(template) or is_atom(template) do
       {:ok, {_, [template]}} = Supervisor.init([template], opts)
       {:ok, [template], opts}
@@ -280,6 +305,7 @@ defmodule ConsumerSupervisor do
 
   ## Callbacks
 
+  @doc false
   def init({mod, args, name}) do
     Process.put(:"$initial_call", {:supervisor, mod, 1})
     Process.flag(:trap_exit, true)
