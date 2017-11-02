@@ -1018,81 +1018,39 @@ defmodule GenStage do
   @callback format_status(:normal | :terminate, [pdict :: {term, term} | state :: term, ...]) ::
     status :: term
 
-  @optional_callbacks [handle_demand: 2, handle_events: 3, format_status: 2]
+  @optional_callbacks [
+    # GenStage
+    handle_subscribe: 4,
+    handle_cancel: 3,
+    handle_demand: 2,
+    handle_events: 3,
+
+    # GenServer
+    code_change: 3,
+    format_status: 2,
+    handle_call: 3,
+    handle_cast: 2,
+    handle_info: 2,
+    terminate: 2
+  ]
 
   @doc false
   defmacro __using__(opts) do
-    quote location: :keep, bind_quoted: [opts: opts] do
+    quote location: :keep do
       @behaviour GenStage
-
-      spec = [
-        id: opts[:id] || __MODULE__,
-        start: Macro.escape(opts[:start]) || quote(do: {__MODULE__, :start_link, [arg]}),
-        restart: opts[:restart] || :permanent,
-        shutdown: opts[:shutdown] || 5000,
-        type: :worker
-      ]
+      @opts unquote(opts)
 
       @doc false
       def child_spec(arg) do
-        %{unquote_splicing(spec)}
+        default = %{
+          id: __MODULE__,
+          start: {__MODULE__, :start_link, [arg]}
+        }
+
+        Supervisor.child_spec(default, @opts)
       end
 
-      @doc false
-      def handle_call(msg, _from, state) do
-        # We do this to trick Dialyzer to not complain about non-local returns.
-        reason = {:bad_call, msg}
-        case :erlang.phash2(1, 1) do
-          0 -> exit(reason)
-          1 -> {:stop, reason, state}
-        end
-      end
-
-      @doc false
-      def handle_info(msg, state) do
-        proc =
-          case Process.info(self(), :registered_name) do
-            {_, []}   -> self()
-            {_, name} -> name
-          end
-        :error_logger.error_msg('~p ~p received unexpected message in handle_info/2: ~p~n',
-                                [__MODULE__, proc, msg])
-        {:noreply, [], state}
-      end
-
-      @doc false
-      def handle_cast(msg, state) do
-        # We do this to trick Dialyzer to not complain about non-local returns.
-        reason = {:bad_cast, msg}
-        case :erlang.phash2(1, 1) do
-          0 -> exit(reason)
-          1 -> {:stop, reason, state}
-        end
-      end
-
-      @doc false
-      def handle_subscribe(_kind, _opts, _from, state) do
-        {:automatic, state}
-      end
-
-      @doc false
-      def handle_cancel(_reason, _from, state) do
-        {:noreply, [], state}
-      end
-
-      @doc false
-      def terminate(_reason, _state) do
-        :ok
-      end
-
-      @doc false
-      def code_change(_old, state, _extra) do
-        {:ok, state}
-      end
-
-      defoverridable [handle_call: 3, handle_info: 2, handle_subscribe: 4,
-                      handle_cancel: 3, handle_cast: 2, terminate: 2, code_change: 3,
-                      child_spec: 1]
+      defoverridable child_spec: 1
     end
   end
 
@@ -2010,7 +1968,7 @@ defmodule GenStage do
   ## Producer messages
 
   def handle_info({:"$gen_producer", _, _} = msg, %{type: :consumer} = stage) do
-    :error_logger.error_msg('GenStage consumer ~p received $gen_producer message: ~p~n', [name(), msg])
+    :error_logger.error_msg('GenStage consumer ~tp received $gen_producer message: ~tp~n', [name(), msg])
     {:noreply, stage}
   end
 
@@ -2018,7 +1976,7 @@ defmodule GenStage do
                   %{consumers: consumers} = stage) do
     case consumers do
       %{^ref => _} ->
-        :error_logger.error_msg('GenStage producer ~p received duplicated subscription from: ~p~n', [name(), from])
+        :error_logger.error_msg('GenStage producer ~tp received duplicated subscription from: ~tp~n', [name(), from])
         send_noconnect(consumer_pid, {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}})
         {:noreply, stage}
       %{} ->
@@ -2053,7 +2011,7 @@ defmodule GenStage do
   ## Consumer messages
 
   def handle_info({:"$gen_consumer", _, _} = msg, %{type: :producer} = stage) do
-    :error_logger.error_msg('GenStage producer ~p received $gen_consumer message: ~p~n', [name(), msg])
+    :error_logger.error_msg('GenStage producer ~tp received $gen_consumer message: ~tp~n', [name(), msg])
     {:noreply, stage}
   end
 
@@ -2101,14 +2059,22 @@ defmodule GenStage do
 
   @doc false
   def terminate(reason, %{mod: mod, state: state}) do
-    mod.terminate(reason, state)
+    if function_exported?(mod, :terminate, 2) do
+      mod.terminate(reason, state)
+    else
+      :ok
+    end
   end
 
   @doc false
   def code_change(old_vsn, %{mod: mod, state: state} = stage, extra) do
-    case mod.code_change(old_vsn, state, extra) do
-      {:ok, state} -> {:ok, %{stage | state: state}}
-      other -> other
+    if function_exported?(mod, :code_change, 3) do
+      case mod.code_change(old_vsn, state, extra) do
+        {:ok, state} -> {:ok, %{stage | state: state}}
+        other -> other
+      end
+    else
+      {:ok, state}
     end
   end
 
@@ -2166,6 +2132,24 @@ defmodule GenStage do
 
   ## Shared helpers
 
+  defp noreply_callback(:handle_info, [msg, state], %{mod: mod} = stage) do
+    if function_exported?(mod, :handle_info, 2) do
+      handle_noreply_callback mod.handle_info(msg, state), stage
+    else
+      log = '** Undefined handle_info in ~tp~n** Unhandled message: ~tp~n'
+      :error_logger.warning_msg(log, [mod, msg])
+      {:noreply, %{stage | state: state}}
+    end
+  end
+
+  defp noreply_callback(:handle_cancel, [subscription, from, state], %{mod: mod} = stage) do
+    if function_exported?(mod, :handle_cancel, 3) do
+      handle_noreply_callback mod.handle_cancel(subscription, from, state), stage
+    else
+      {:noreply, %{stage | state: state}}
+    end
+  end
+
   defp noreply_callback(callback, args, %{mod: mod} = stage) do
     handle_noreply_callback apply(mod, callback, args), stage
   end
@@ -2199,7 +2183,7 @@ defmodule GenStage do
     {:noreply, stage}
   end
   defp producer_demand(_mode, %{type: type} = stage) when type != :producer do
-    :error_logger.error_msg('Demand mode can only be set for producers, GenStage ~p is a ~ts', [name(), type])
+    :error_logger.error_msg('Demand mode can only be set for producers, GenStage ~tp is a ~ts', [name(), type])
     {:noreply, stage}
   end
   defp producer_demand(:forward, %{events: events} = stage) do
@@ -2229,7 +2213,7 @@ defmodule GenStage do
   defp producer_subscribe(opts, from, stage) do
     %{mod: mod, state: state, dispatcher_state: dispatcher_state} = stage
 
-    case apply(mod, :handle_subscribe, [:consumer, opts, from, state]) do
+    case maybe_subscribe(mod, :consumer, opts, from, state) do
       {:automatic, state} ->
         # Call the dispatcher after since it may generate demand and the
         # main module must know the consumer is subscribed.
@@ -2238,6 +2222,14 @@ defmodule GenStage do
         {:stop, reason, %{stage | state: state}}
       other ->
         {:stop, {:bad_return_value, other}, stage}
+    end
+  end
+
+  defp maybe_subscribe(mod, type, opts, from, state) do
+    if function_exported?(mod, :handle_subscribe, 4) do
+      mod.handle_subscribe(type, opts, from, state)
+    else
+      {:automatic, state}
     end
   end
 
@@ -2298,7 +2290,7 @@ defmodule GenStage do
     stage
   end
   defp dispatch_events(events, _length, %{type: :consumer} = stage) do
-    :error_logger.error_msg('GenStage consumer ~p cannot dispatch events (an empty list must be returned): ~p~n', [name(), events])
+    :error_logger.error_msg('GenStage consumer ~tp cannot dispatch events (an empty list must be returned): ~tp~n', [name(), events])
     stage
   end
   defp dispatch_events(events, _length, %{consumers: consumers} = stage) when map_size(consumers) == 0 do
@@ -2372,7 +2364,7 @@ defmodule GenStage do
       0 ->
         :ok
       excess ->
-        :error_logger.warning_msg('GenStage producer ~p has discarded ~p events from buffer', [name(), excess])
+        :error_logger.warning_msg('GenStage producer ~tp has discarded ~tp events from buffer', [name(), excess])
     end
 
     stage = %{stage | buffer: {queue, counter, infos}}
@@ -2514,7 +2506,7 @@ defmodule GenStage do
     {old_demand, batch_size} =
       case old_demand - batch_size do
         diff when diff < 0 ->
-          :error_logger.error_msg('GenStage consumer ~p has received ~p events in excess from: ~p~n',
+          :error_logger.error_msg('GenStage consumer ~tp has received ~tp events in excess from: ~tp~n',
                                   [name(), abs(diff), from])
           {0, old_demand}
         diff ->
@@ -2570,7 +2562,7 @@ defmodule GenStage do
     do: consumer_subscribe(nil, to, [], stage)
 
   defp consumer_subscribe(_cancel, to, _opts, %{type: :producer} = stage) do
-    :error_logger.error_msg('GenStage producer ~p cannot be subscribed to another stage: ~p~n', [name(), to])
+    :error_logger.error_msg('GenStage producer ~tp cannot be subscribed to another stage: ~tp~n', [name(), to])
     {:reply, {:error, :not_a_consumer}, stage}
   end
 
@@ -2591,7 +2583,7 @@ defmodule GenStage do
        end
     else
       {:error, message} ->
-        :error_logger.error_msg('GenStage consumer ~p subscribe received invalid option: ~ts~n', [name(), message])
+        :error_logger.error_msg('GenStage consumer ~tp subscribe received invalid option: ~ts~n', [name(), message])
         {:reply, {:error, {:bad_opts, message}}, stage}
     end
   end
@@ -2600,7 +2592,7 @@ defmodule GenStage do
     %{mod: mod, state: state} = stage
     to = {producer_pid, ref}
 
-    case apply(mod, :handle_subscribe, [:producer, opts, to, state]) do
+    case maybe_subscribe(mod, :producer, opts, to, state) do
       {:automatic, state} ->
         ask(to, max, [:noconnect])
         stage = put_in stage.producers[ref], {producer_pid, cancel, {max, min, max}}
@@ -2643,7 +2635,7 @@ defmodule GenStage do
       {:noreply, stage}
           when mode == :permanent
           when mode == :transient and not is_transient_shutdown(reason) ->
-        :error_logger.info_msg('GenStage consumer ~p is stopping after receiving cancel from producer ~p with reason: ~p~n', [name(), pid, reason])
+        :error_logger.info_msg('GenStage consumer ~tp is stopping after receiving cancel from producer ~tp with reason: ~tp~n', [name(), pid, reason])
         {:stop, reason, stage}
       other ->
         other

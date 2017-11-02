@@ -218,10 +218,7 @@ defmodule GenStageTest do
   test "generates child_spec/1" do
     assert Counter.child_spec([:hello]) == %{
       id: Counter,
-      restart: :permanent,
-      shutdown: 5000,
       start: {Counter, :start_link, [[:hello]]},
-      type: :worker
     }
 
     defmodule Custom do
@@ -238,8 +235,7 @@ defmodule GenStageTest do
       id: :id,
       restart: :temporary,
       shutdown: :infinity,
-      start: {:foo, :bar, []},
-      type: :worker
+      start: {:foo, :bar, []}
     }
   end
 

@@ -36,9 +36,9 @@ defmodule GenStage.DemandDispatcher do
     max = max || counter
 
     if counter > max do
-      :error_logger.warning_msg('GenStage producer DemandDispatcher expects a maximum demand of ~p. ' ++
+      :error_logger.warning_msg('GenStage producer DemandDispatcher expects a maximum demand of ~tp. ' ++
                                 'Using different maximum demands will overload greedy consumers. ' ++
-                                'Got demand for ~p events from ~p~n', [max, counter, pid])
+                                'Got demand for ~tp events from ~tp~n', [max, counter, pid])
     end
 
     {current, demands} = pop_demand(ref, demands)

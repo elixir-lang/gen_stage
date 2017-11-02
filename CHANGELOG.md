@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.13.0-dev
+
+### Enhancements
+
+  * No longer define default implementations for callbacks, instead declare them as `@optional_callbacks`
+
 ## v0.12.2
 
 ### Enhancements

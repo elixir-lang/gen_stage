@@ -405,7 +405,7 @@ defmodule ConsumerSupervisor do
       :ignore ->
         start_events(extras, from, child, errors+1, acc, state)
       {:error, reason} ->
-        :error_logger.error_msg('ConsumerSupervisor failed to start child from: ~p with reason: ~p~n',
+        :error_logger.error_msg('ConsumerSupervisor failed to start child from: ~tp with reason: ~tp~n',
           [from, reason])
         report_error(:start_error, reason, :undefined, args, child, state)
         start_events(extras, from , child, errors+1, acc, state)
@@ -420,7 +420,7 @@ defmodule ConsumerSupervisor do
     case producers do
       %{^ref => {to, count, pending, min, max}} ->
         if count + events > max do
-          :error_logger.error_msg('ConsumerSupervisor has received ~p events in excess from: ~p~n',
+          :error_logger.error_msg('ConsumerSupervisor has received ~tp events in excess from: ~tp~n',
                                   [count + events - max, {pid, ref}])
         end
 
@@ -567,7 +567,7 @@ defmodule ConsumerSupervisor do
   end
 
   def handle_info(msg, state) do
-    :error_logger.error_msg('ConsumerSupervisor received unexpected message: ~p~n', [msg])
+    :error_logger.error_msg('ConsumerSupervisor received unexpected message: ~tp~n', [msg])
     {:noreply, [], state}
   end
 
