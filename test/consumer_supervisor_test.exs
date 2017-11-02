@@ -8,30 +8,32 @@ defmodule ConsumerSupervisorTest do
     def init(args), do: args
   end
 
-  test "generates child_spec/1" do
-    assert Simple.child_spec([:hello]) == %{
-      id: Simple,
-      start: {Simple, :start_link, [[:hello]]},
-      type: :supervisor
-    }
+  if function_exported?(Supervisor, :init, 2) do
+    test "generates child_spec/1" do
+      assert Simple.child_spec([:hello]) == %{
+        id: Simple,
+        start: {Simple, :start_link, [[:hello]]},
+        type: :supervisor
+      }
 
-    defmodule Custom do
-      use ConsumerSupervisor,
-          id: :id,
-          restart: :temporary,
-          start: {:foo, :bar, []}
+      defmodule Custom do
+        use ConsumerSupervisor,
+            id: :id,
+            restart: :temporary,
+            start: {:foo, :bar, []}
 
-      def init(arg) do
-        arg
+        def init(arg) do
+          arg
+        end
       end
-    end
 
-    assert Custom.child_spec([:hello]) == %{
-      id: :id,
-      restart: :temporary,
-      start: {:foo, :bar, []},
-      type: :supervisor
-    }
+      assert Custom.child_spec([:hello]) == %{
+        id: :id,
+        restart: :temporary,
+        start: {:foo, :bar, []},
+        type: :supervisor
+      }
+    end
   end
 
   test "start_link/3 with non-ok init" do
@@ -121,7 +123,7 @@ defmodule ConsumerSupervisorTest do
     end
   end
 
-  if function_exported? Supervisor, :init, 2 do
+  if function_exported?(Supervisor, :init, 2) do
     test "start_link/3 with new syntax" do
       spec = {:ok, [%{id: Foo, restart: :temporary, start: {Foo, :start_link, [[]]}}], [strategy: :one_for_one]}
       {:ok, pid} = ConsumerSupervisor.start_link(Simple, spec, name: __MODULE__)
