@@ -98,23 +98,25 @@ defmodule ConsumerSupervisor do
 
   @doc false
   defmacro __using__(opts) do
-    quote location: :keep, bind_quoted: [opts: opts] do
+    quote location: :keep do
       @behaviour ConsumerSupervisor
+      @opts unquote(opts)
       import Supervisor.Spec
 
-      spec = [
-        id: opts[:id] || __MODULE__,
-        start: Macro.escape(opts[:start]) || quote(do: {__MODULE__, :start_link, [arg]}),
-        restart: opts[:restart] || :permanent,
-        type: :supervisor
-      ]
+      if Code.ensure_loaded?(Supervisor) and function_exported?(Supervisor, :init, 2) do
+        @doc false
+        def child_spec(arg) do
+          default = %{
+            id: __MODULE__,
+            start: {__MODULE__, :start_link, [arg]},
+            type: :supervisor
+          }
 
-      @doc false
-      def child_spec(arg) do
-        %{unquote_splicing(spec)}
+          Supervisor.child_spec(default, @opts)
+        end
+
+        defoverridable child_spec: 1
       end
-
-      defoverridable child_spec: 1
 
       @doc false
       def init(arg)
@@ -290,7 +292,7 @@ defmodule ConsumerSupervisor do
     {:ok, [template], opts}
   end
 
-  if function_exported?(Supervisor, :init, 2) do
+  if Code.ensure_loaded?(Supervisor) and function_exported?(Supervisor, :init, 2) do
     def init(template, opts) when is_tuple(template) or is_map(template) or is_atom(template) do
       {:ok, {_, [template]}} = Supervisor.init([template], opts)
       {:ok, [template], opts}

@@ -215,28 +215,30 @@ defmodule GenStageTest do
     end
   end
 
-  test "generates child_spec/1" do
-    assert Counter.child_spec([:hello]) == %{
-      id: Counter,
-      start: {Counter, :start_link, [[:hello]]},
-    }
+    if function_exported?(Supervisor, :init, 2) do
+    test "generates child_spec/1" do
+      assert Counter.child_spec([:hello]) == %{
+        id: Counter,
+        start: {Counter, :start_link, [[:hello]]},
+      }
 
-    defmodule Custom do
-      use GenStage,
+      defmodule Custom do
+        use GenStage,
+          id: :id,
+          restart: :temporary,
+          shutdown: :infinity,
+          start: {:foo, :bar, []}
+
+        def init(arg), do: {:producer, arg}
+      end
+
+      assert Custom.child_spec([:hello]) == %{
         id: :id,
         restart: :temporary,
         shutdown: :infinity,
         start: {:foo, :bar, []}
-
-      def init(arg), do: {:producer, arg}
+      }
     end
-
-    assert Custom.child_spec([:hello]) == %{
-      id: :id,
-      restart: :temporary,
-      shutdown: :infinity,
-      start: {:foo, :bar, []}
-    }
   end
 
   describe "producer-to-consumer demand" do

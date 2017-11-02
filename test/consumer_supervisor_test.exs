@@ -11,7 +11,6 @@ defmodule ConsumerSupervisorTest do
   test "generates child_spec/1" do
     assert Simple.child_spec([:hello]) == %{
       id: Simple,
-      restart: :permanent,
       start: {Simple, :start_link, [[:hello]]},
       type: :supervisor
     }
@@ -20,8 +19,7 @@ defmodule ConsumerSupervisorTest do
       use ConsumerSupervisor,
           id: :id,
           restart: :temporary,
-          start: {:foo, :bar, []},
-          shutdown: 5000 # ignored
+          start: {:foo, :bar, []}
 
       def init(arg) do
         arg
@@ -102,7 +100,7 @@ defmodule ConsumerSupervisorTest do
       assert expected == ConsumerSupervisor.init(worker(Foo, []), [strategy: :one_for_one])
     end
 
-    if function_exported? Supervisor, :init, 2 do
+    if function_exported?(Supervisor, :init, 2) do
       test "supports new child spec as tuple" do
         expected = {
           :ok,
