@@ -719,7 +719,7 @@ defmodule GenStage do
   @type type :: :producer | :consumer | :producer_consumer
 
  @typedoc "Option values used by the `init*` functions"
-  @type option :: {:max_demand, 1..non_neg_integer} |
+  @type option :: {:max_demand, non_neg_integer} |
                   {:min_demand, non_neg_integer}
 
   @typedoc "Options used by the `init*` functions"
