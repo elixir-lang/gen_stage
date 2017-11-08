@@ -718,8 +718,12 @@ defmodule GenStage do
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer
 
-  @typedoc "The supported init options."
-  @type options :: keyword()
+ @typedoc "Option values used by the `init*` functions"
+  @type option :: {:max_demand, 1..non_neg_integer} |
+                  {:min_demand, non_neg_integer}
+
+  @typedoc "Options used by the `init*` functions"
+  @type options :: [option]
 
   @typedoc "The stage."
   @type stage :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
