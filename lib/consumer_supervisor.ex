@@ -51,7 +51,8 @@ defmodule ConsumerSupervisor do
   Then in the `Printer` module:
 
       defmodule Printer do
-
+        use Task
+        
         def start_link([], event) do
           Task.start_link(fn ->
             IO.inspect({self(), event})
