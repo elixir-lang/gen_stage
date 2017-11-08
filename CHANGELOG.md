@@ -4,6 +4,7 @@
 
 ### Enhancements
 
+  * Mirror `ConsumerSupervisor.init/2` after `Supervisor.init/2`
   * No longer define default implementations for callbacks, instead declare them as `@optional_callbacks`
 
 ## v0.12.2
