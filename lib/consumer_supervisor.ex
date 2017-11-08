@@ -31,19 +31,23 @@ defmodule ConsumerSupervisor do
   the child, effectively calling `Printer.start_link([], event)`.
 
       defmodule Consumer do
-        def start_link() do
-          children = [Printer]
+        use ConsumerSupervisor
+
+        def start_link(arg) do
+          ConsumerSupervisor.start_link(__MODULE__, arg)
+        end
+
+        def init(_arg) do
+          children = [%{id: Printer, start: {Printer, :start_link, []}}]
           opts = [strategy: :one_for_one, subscribe_to: [{Producer, max_demand: 50}]]
-          ConsumerSupervisor.start_link(children, opts)
+          ConsumerSupervisor.init(children, opts)
         end
       end
 
   Then in the `Printer` module:
 
       defmodule Printer do
-        use Task
-
-        def start_link([], event) do
+        def start_link(event) do
           Task.start_link(fn ->
             IO.inspect({self(), event})
           end)
@@ -279,12 +283,12 @@ defmodule ConsumerSupervisor do
       defmodule MyConsumerSupervisor do
         use ConsumerSupervisor
 
-        def start_link() do
-          ConsumerSupervisor.start_link(__MODULE__, :no_args)
+        def start_link(arg) do
+          ConsumerSupervisor.start_link(__MODULE__, arg)
         end
 
-        def init(:no_args) do
-          ConsumerSupervisor.init(MyConsumer, strategy: :one_for_one, subscribe_to: MyProducer)
+        def init(_arg) do
+          ConsumerSupervisor.init([MyConsumer], strategy: :one_for_one, subscribe_to: MyProducer)
         end
       end
 
