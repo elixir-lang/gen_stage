@@ -125,8 +125,8 @@ defmodule ConsumerSupervisor do
   defmodule Default do
     @moduledoc false
 
-    def init({[template], opts}) do
-      ConsumerSupervisor.init(template, opts)
+    def init(args) do
+      args
     end
   end
 
@@ -151,8 +151,10 @@ defmodule ConsumerSupervisor do
   """
   @spec start_link([Supervisor.Spec.spec], [option]) :: Supervisor.on_start
   def start_link(children, options) when is_list(children) do
-    spec_options = Keyword.take(options, [:strategy, :max_restarts, :max_seconds, :subscribe_to])
-    start_link(Default, {children, spec_options}, options)
+    {sup_options, start_options} =
+      Keyword.split(options, [:strategy, :max_restarts, :max_seconds, :subscribe_to])
+
+    start_link(Default, init(children, sup_options), start_options)
   end
 
   @doc """
@@ -287,15 +289,20 @@ defmodule ConsumerSupervisor do
       end
 
   """
-  def init({_, _, _, _, _, _} = template, opts) do
+  def init([{_, _, _, _, _, _} = template], opts) do
     {:ok, [template], opts}
   end
 
   if Code.ensure_loaded?(Supervisor) and function_exported?(Supervisor, :init, 2) do
-    def init(template, opts) when is_tuple(template) or is_map(template) or is_atom(template) do
+    def init([template], opts) when is_tuple(template) or is_map(template) or is_atom(template) do
       {:ok, {_, [template]}} = Supervisor.init([template], opts)
       {:ok, [template], opts}
     end
+  end
+
+  def init(not_a_list, opts) when not is_list(not_a_list) do
+    IO.warn "ConsumerSupervisor.init/1 expects a list with a single element"
+    init([not_a_list], opts)
   end
 
   @compile {:inline, call: 2}
@@ -821,14 +828,14 @@ defmodule ConsumerSupervisor do
      supervisor: [{~c"Callback", mod}]]
   end
 
-  defp normalize_child_spec(%{id: id, start: start} = child),
+  defp normalize_child_spec(%{id: id, start: {mod, _, _} = start} = child),
     do: {
       id,
       start,
       Map.get(child, :restart, :permanent),
       Map.get(child, :shutdown, 5_000),
       Map.get(child, :type, :worker),
-      Map.get(child, :modules, [])
+      Map.get(child, :modules, [mod])
     }
   defp normalize_child_spec({_, _, _, _, _, _} = child),
     do: child

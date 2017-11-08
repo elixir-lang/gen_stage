@@ -99,7 +99,7 @@ defmodule ConsumerSupervisorTest do
         [{Foo, {Foo, :start_link, []}, :permanent, 5000, :worker, [Foo]}],
         [strategy: :one_for_one]
       }
-      assert expected == ConsumerSupervisor.init(worker(Foo, []), [strategy: :one_for_one])
+      assert expected == ConsumerSupervisor.init([worker(Foo, [])], [strategy: :one_for_one])
     end
 
     if function_exported?(Supervisor, :init, 2) do
@@ -109,7 +109,7 @@ defmodule ConsumerSupervisorTest do
           [%{id: Task, restart: :temporary, start: {Task, :start_link, [[:foo, :bar]]}}],
           [strategy: :one_for_one]
         }
-        assert expected == ConsumerSupervisor.init({Task, [:foo, :bar]}, [strategy: :one_for_one])
+        assert expected == ConsumerSupervisor.init([{Task, [:foo, :bar]}], [strategy: :one_for_one])
       end
 
       test "supports new child spec as atom" do
@@ -118,7 +118,7 @@ defmodule ConsumerSupervisorTest do
           [%{id: Task, restart: :temporary, start: {Task, :start_link, [[]]}}],
           [strategy: :one_for_one]
         }
-        assert expected == ConsumerSupervisor.init(Task, [strategy: :one_for_one])
+        assert expected == ConsumerSupervisor.init([Task], [strategy: :one_for_one])
       end
     end
   end
