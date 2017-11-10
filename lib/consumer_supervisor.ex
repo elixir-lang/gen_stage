@@ -90,7 +90,7 @@ defmodule ConsumerSupervisor do
 
     * `:subscribe_to` - a list of producers to subscribe to. Each element
       represents the producer or a tuple with the producer and the subscription
-      options, for example, `[Producer]` or `[{Producer, max_demand: 10, min_demand: 20}]`.
+      options, for example, `[Producer]` or `[{Producer, max_demand: 20, min_demand: 10}]`.
 
   """
   @callback init(args :: term) ::
