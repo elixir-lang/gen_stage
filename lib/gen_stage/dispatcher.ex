@@ -29,7 +29,7 @@ defmodule GenStage.Dispatcher do
 
   """
 
- @typedoc "Options used by the `init*` functions"
+ @typedoc "Options used by `init/1`"
  @type options :: keyword
     
   @doc """

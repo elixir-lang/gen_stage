@@ -718,7 +718,7 @@ defmodule GenStage do
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer
 
-  @typedoc "Options used by the `sync_subscribe/` functions"
+  @typedoc "Options used by the `subscribe*` functions"
   @type subscription_options :: keyword
     
   @typedoc "Option values used by the `init*` functions when stage type is `:producer_consumer`"
