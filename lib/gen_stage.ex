@@ -722,7 +722,7 @@ defmodule GenStage do
   @type subscription_options :: keyword
     
   @typedoc "Option values used by the `init*` functions when stage type is `:producer_consumer`"
-  @type producer_consumer_option :: {:buffer_size, non_neg_integer} |
+  @type producer_consumer_option :: {:buffer_size, non_neg_integer | :infinity} |
                            {:buffer_keep, :first | :last} |
                            {:dispatcher, module | {module, GenStage.Dispatcher.options}}
 
