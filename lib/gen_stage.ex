@@ -820,23 +820,14 @@ defmodule GenStage do
   """
 
   @callback init(args :: term) ::
-  {type, state} |
-  {type, state, [producer_option]} |
-  :ignore |
-  {:stop, reason :: any} when state: any, type: :producer
-
-  @callback init(args :: term) ::
-  {type, state} |
-  {type, state, [producer_consumer_option]} |
-  :ignore |
-  {:stop, reason :: any} when state: any, type: :producer_consumer
-
-  @callback init(args :: term) ::
-  {type, state} |
-  {type, state, [consumer_option]} |
-  :ignore |
-  {:stop, reason :: any} when state: any, type: :consumer
-
+    {:producer, state} |
+    {:producer, state, [producer_option]} |
+    {:producer_consumer, state} |
+    {:producer_consumer, state, [producer_consumer_option]} |
+    {:consumer, state} |
+    {:consumer, state, [consumer_option]} |
+    :ignore |
+    {:stop, reason :: any} when state: any
 
   @doc """
   Invoked on `:producer` stages.
