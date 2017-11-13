@@ -29,10 +29,13 @@ defmodule GenStage.Dispatcher do
 
   """
 
+ @typedoc "Options used by `init/1`"
+ @type options :: keyword
+    
   @doc """
   Called on initialization with the options given on `c:GenStage.init/1`.
   """
-  @callback init(opts :: keyword()) :: {:ok, state} when state: any
+  @callback init(opts :: options) :: {:ok, state} when state: any
 
   @doc """
   Called every time the producer gets a new subscriber.

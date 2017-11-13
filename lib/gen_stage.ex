@@ -718,8 +718,20 @@ defmodule GenStage do
   @typedoc "The supported stage types."
   @type type :: :producer | :consumer | :producer_consumer
 
-  @typedoc "The supported init options."
-  @type options :: keyword()
+  @typedoc "Options used by the `subscribe*` functions"
+  @type subscription_options :: keyword
+    
+  @typedoc "Option values used by the `init*` functions when stage type is `:producer_consumer`"
+  @type producer_consumer_option :: {:buffer_size, non_neg_integer | :infinity} |
+                           {:buffer_keep, :first | :last} |
+                           {:dispatcher, module | {module, GenStage.Dispatcher.options}}
+
+  @typedoc "Option values used by the `init*` functions when stage type is `:producer`"
+  @type producer_option :: {:demand, :forward | :accumulate} | producer_consumer_option
+  
+  @typedoc "Option values used by the `init*` functions when stage type is `:consumer`"
+  @type consumer_option :: {:subscribe_to, [module | {module, subscription_options}]} | producer_consumer_option
+
 
   @typedoc "The stage."
   @type stage :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
@@ -806,11 +818,25 @@ defmodule GenStage do
       and the subscription options (as defined in `sync_subscribe/2`).
 
   """
+
   @callback init(args :: term) ::
-    {type, state} |
-    {type, state, options} |
-    :ignore |
-    {:stop, reason :: any} when state: any
+  {type, state} |
+  {type, state, [producer_option]} |
+  :ignore |
+  {:stop, reason :: any} when state: any, type: :producer
+
+  @callback init(args :: term) ::
+  {type, state} |
+  {type, state, [producer_consumer_option]} |
+  :ignore |
+  {:stop, reason :: any} when state: any, type: :producer_consumer
+
+  @callback init(args :: term) ::
+  {type, state} |
+  {type, state, [consumer_option]} |
+  :ignore |
+  {:stop, reason :: any} when state: any, type: :consumer
+
 
   @doc """
   Invoked on `:producer` stages.
@@ -882,7 +908,7 @@ defmodule GenStage do
       end
 
   """
-  @callback handle_subscribe(producer_or_consumer :: :producer | :consumer, options, from, state :: term) ::
+  @callback handle_subscribe(producer_or_consumer :: :producer | :consumer, subscription_options, from, state :: term) ::
     {:automatic | :manual, new_state} |
     {:stop, reason, new_state} when new_state: term, reason: term
 
@@ -1200,7 +1226,7 @@ defmodule GenStage do
         selector: fn %{key: key} -> String.starts_with?(key, "foo-") end)
 
   """
-  @spec sync_subscribe(stage, options, timeout) ::
+  @spec sync_subscribe(stage, subscription_options, timeout) ::
         {:ok, subscription_tag} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
   def sync_subscribe(stage, opts, timeout \\ 5_000) do
     sync_subscribe(stage, nil, opts, timeout)
@@ -1213,7 +1239,7 @@ defmodule GenStage do
 
   See `sync_subscribe/3` for examples and options.
   """
-  @spec sync_resubscribe(stage, subscription_tag, term, options, timeout) ::
+  @spec sync_resubscribe(stage, subscription_tag, term, subscription_options, timeout) ::
         {:ok, subscription_tag} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t}}
   def sync_resubscribe(stage, subscription_tag, reason, opts, timeout \\ 5000) do
     sync_subscribe(stage, {subscription_tag, reason}, opts, timeout)
@@ -1238,7 +1264,7 @@ defmodule GenStage do
 
   This function accepts the same options as `sync_subscribe/4`.
   """
-  @spec async_subscribe(stage, options) :: :ok
+  @spec async_subscribe(stage, subscription_options) :: :ok
   def async_subscribe(stage, opts) do
     async_subscribe(stage, nil, opts)
   end
@@ -1249,7 +1275,7 @@ defmodule GenStage do
 
   See `async_subscribe/2` for examples and options.
   """
-  @spec async_resubscribe(stage, subscription_tag, reason :: term, options) :: :ok
+  @spec async_resubscribe(stage, subscription_tag, reason :: term, subscription_options) :: :ok
   def async_resubscribe(stage, subscription_tag, reason, opts) do
     async_subscribe(stage, {subscription_tag, reason}, opts)
   end
