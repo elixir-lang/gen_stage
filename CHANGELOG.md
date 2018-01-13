@@ -1,11 +1,17 @@
 # Changelog
 
-## v0.13.0-dev
+## v0.13.0 (2018-01-13)
+
+Note: this is the last version to support Elixir v1.3 and v1.4.
 
 ### Enhancements
 
   * Mirror `ConsumerSupervisor.init/2` after `Supervisor.init/2`
   * No longer define default implementations for callbacks, instead declare them as `@optional_callbacks`
+
+### Bug fixes
+
+  * Ensure `ConsumerSupervisor` does not send demand when restarting a child
 
 ## v0.12.2
 

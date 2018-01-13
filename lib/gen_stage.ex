@@ -198,7 +198,7 @@ defmodule GenStage do
 
   This approach works as long as the producer can be referenced when
   the consumer starts - such as by name for a named process. For example,
-  assuming the process `A` and `B` are started as follows:
+  if we change the process `A` and `B` to be started as follows:
 
       # Let's call the stage in module A as A
       GenStage.start_link(A, 0, name: A)
@@ -252,15 +252,22 @@ defmodule GenStage do
         worker(C, [])
       ]
 
-      Supervisor.start_link(children, strategy: :one_for_one)
+      Supervisor.start_link(children, strategy: :rest_for_one)
 
   Having multiple consumers is often the easiest and simplest way to
   leverage concurrency in a GenStage pipeline, especially if events can
   be processed out of order.
 
-  The same guideline that applies to processes also applies to GenStage:
-  use processes/stages to model runtime properties, such as concurrency and
-  data-transfer, and not as code organization tools.
+  Also note that we set the supervision strategy to `:rest_for_one`. This
+  is important because if the producer A terminates, all of the other
+  processes will terminate too, since they are consuming events produced
+  by A. In this scenario, the supervisor will see multiple processing shutting
+  down at the same time, and conclude there are too many failures in a short
+  interval. However, if the strategy is `:rest_for_one`, the supervisor will
+  shut down the rest of tree, and already expect the remaining process to fail.
+  One downside of `:rest_for_one` though is that if a `C` process dies, any other
+  `C` process after it will die too. You can solve this by putting them under
+  their own supervisor.
 
   Another alternative to the scenario above is to use a `ConsumerSupervisor`
   for consuming the events instead of N consumers. The `ConsumerSupervisor`
@@ -269,11 +276,29 @@ defmodule GenStage do
   concurrently running in a `ConsumerSupervisor` is at most `max_demand` and
   the average amount of children is `(max_demand - min_demand) / 2`.
 
-  If you don't need back-pressure at all, because the data is already in-memory,
-  a simpler solution is available directly in Elixir via `Task.async_stream/2`.
-  This function consumes a stream of data, with each entry running in a separate
-  task. The maximum number of tasks is configurable via the `:max_concurrency`
-  option.
+  ## Usage guidelines
+
+  As you get familiar with GenStage, you may want to organize your stages
+  according to your business domain. For example, stage A does step 1 in
+  your company workflow, stage B does step 2 and so forth. That's an anti-
+  pattern.
+
+  The same guideline that applies to processes also applies to GenStage:
+  use processes/stages to model runtime properties, such as concurrency and
+  data-transfer, and not for code organization or domain design purposes.
+  For the latter, you should use modules and functions.
+
+  If your domain has to process the data in multiple steps, you should write
+  that logic in separate modules and not directly in a `GenStage`. You only add
+  stages according to the runtime needs, typically when you need to provide back-
+  pressure or leverage concurrency. This way you are free to experiment with
+  different `GenStage` pipelines without touching your business rules.
+
+  Finally, if you don't need back-pressure at all and you just need to process
+  data that is already in-memory in parallel, a simpler solution is available
+  directly in Elixir via `Task.async_stream/2`. This function consumes a stream
+  of data, with each entry running in a separate task. The maximum number of tasks
+  is configurable via the `:max_concurrency` option.
 
   ## Buffering
 
