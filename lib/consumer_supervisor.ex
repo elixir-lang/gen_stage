@@ -492,10 +492,10 @@ defmodule ConsumerSupervisor do
     case children do
       %{^pid => [producer | _] = info} ->
         :ok = terminate_children(%{pid => info}, state)
-        {:reply, :ok, [], delete_child(producer, pid, state)}
+        {:reply, :ok, [], delete_child_and_maybe_ask(producer, pid, state)}
       %{^pid => {:restarting, [producer | _]} = info} ->
         :ok = terminate_children(%{pid => info}, state)
-        {:reply, :ok, [], delete_child(producer, pid, state)}
+        {:reply, :ok, [], delete_child_and_maybe_ask(producer, pid, state)}
       %{} ->
         {:reply, {:error, :not_found}, [], state}
     end
@@ -721,13 +721,13 @@ defmodule ConsumerSupervisor do
     restart_child(producer, pid, args, child, state)
   end
   defp maybe_restart_child(_, :normal, producer, pid, _args, _child, state) do
-    {:ok, delete_child(producer, pid, state)}
+    {:ok, delete_child_and_maybe_ask(producer, pid, state)}
   end
   defp maybe_restart_child(_, :shutdown, producer, pid, _args, _child, state) do
-    {:ok, delete_child(producer, pid, state)}
+    {:ok, delete_child_and_maybe_ask(producer, pid, state)}
   end
   defp maybe_restart_child(_, {:shutdown, _}, producer, pid, _args, _child, state) do
-    {:ok, delete_child(producer, pid, state)}
+    {:ok, delete_child_and_maybe_ask(producer, pid, state)}
   end
   defp maybe_restart_child(:transient, reason, producer, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
@@ -735,13 +735,13 @@ defmodule ConsumerSupervisor do
   end
   defp maybe_restart_child(:temporary, reason, producer, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
-    {:ok, delete_child(producer, pid, state)}
+    {:ok, delete_child_and_maybe_ask(producer, pid, state)}
   end
 
-  defp delete_child(:dynamic, pid, %{children: children} = state) do
+  defp delete_child_and_maybe_ask(:dynamic, pid, %{children: children} = state) do
     %{state | children: Map.delete(children, pid)}
   end
-  defp delete_child(ref, pid, %{children: children} = state) do
+  defp delete_child_and_maybe_ask(ref, pid, %{children: children} = state) do
     children = Map.delete(children, pid)
     maybe_ask(ref, pid, 0, 1, children, state)
   end
@@ -758,7 +758,7 @@ defmodule ConsumerSupervisor do
         end
       {:shutdown, state} ->
         report_error(:shutdown, :reached_max_restart_intensity, pid, args, child, state)
-        {:shutdown, delete_child(producer, pid, state)}
+        {:shutdown, delete_child_and_maybe_ask(producer, pid, state)}
     end
   end
 
@@ -784,11 +784,13 @@ defmodule ConsumerSupervisor do
 
     case start_child(m, f, args) do
       {:ok, pid, _} ->
-        {:ok, save_child(restart, producer, pid, args, delete_child(producer, current_pid, state))}
+        state = %{state | children: Map.delete(state.children, current_pid)}
+        {:ok, save_child(restart, producer, pid, args, state)}
       {:ok, pid} ->
-        {:ok, save_child(restart, producer, pid, args, delete_child(producer, current_pid, state))}
+        state = %{state | children: Map.delete(state.children, current_pid)}
+        {:ok, save_child(restart, producer, pid, args, state)}
       :ignore ->
-        {:ok, delete_child(producer, current_pid, state)}
+        {:ok, delete_child_and_maybe_ask(producer, current_pid, state)}
       {:error, reason} ->
         report_error(:start_error, reason, {:restarting, current_pid}, args, child, state)
         state = restart_child(current_pid, state)

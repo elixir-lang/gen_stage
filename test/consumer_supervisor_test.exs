@@ -788,8 +788,12 @@ defmodule ConsumerSupervisorTest do
       opts = [to: producer, cancel: :temporary, max_demand: 1, min_demand: 0]
       assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
 
-      Producer.sync_queue(producer, [{:restart, :error}, :ok2, :ok2])
+      Producer.sync_queue(producer, [{:restart, :error}, :ok2, :ok2, :ok2])
       assert_receive {:child_started, child1}
+      assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
+      assert [{:undefined, ^child1, :worker, [Consumer]}] =
+        ConsumerSupervisor.which_children(sup)
+
       assert_kill child1, :shutdown
       assert %{workers: 1, active: 0} = ConsumerSupervisor.count_children(sup)
       assert [{:undefined, :restarting, :worker, [Consumer]}] =
@@ -800,6 +804,12 @@ defmodule ConsumerSupervisorTest do
       assert_receive {:child_started, child2}
       assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
       assert [{:undefined, ^child2, :worker, [Consumer]}] =
+        ConsumerSupervisor.which_children(sup)
+
+      assert_kill child2, :shutdown
+      assert_receive {:child_started, child3}
+      assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
+      assert [{:undefined, ^child3, :worker, [Consumer]}] =
         ConsumerSupervisor.which_children(sup)
 
       refute_receive {:child_started, _}
