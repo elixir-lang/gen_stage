@@ -689,15 +689,15 @@ defmodule ConsumerSupervisor do
   end
   defp wait_children(restart, shutdown, pids, size, timer, stacks) do
     receive do
+      {:DOWN, _ref, :process, pid, {:shutdown, _}} ->
+        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer, stacks)
       {:DOWN, _ref, :process, pid, :shutdown} ->
-        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer,
-                      stacks)
+        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer, stacks)
       {:DOWN, _ref, :process, pid, :normal} when restart != :permanent ->
-        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer,
-                      stacks)
+        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer, stacks)
       {:DOWN, _ref, :process, pid, reason} ->
-        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer,
-                      Map.put(stacks, pid, reason))
+        stacks = Map.put(stacks, pid, reason)
+        wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer, stacks)
       {:timeout, ^timer, :kill} ->
         for {pid, _} <- pids, do: Process.exit(pid, :kill)
         wait_children(restart, shutdown, pids, size, nil, stacks)
