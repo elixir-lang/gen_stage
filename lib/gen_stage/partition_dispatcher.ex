@@ -219,7 +219,8 @@ defmodule GenStage.PartitionDispatcher do
         :undefined ->
           Logger.error fn ->
             "Unknown partition #{inspect partition} computed for GenStage/Flow event " <>
-              "#{inspect event}. The known partitions are #{inspect Map.keys(partitions)}"
+              "#{inspect event}. The known partitions are #{inspect Map.keys(partitions)}. " <>
+              "See the :partitions option to set your own. This event has been discarded."
           end
         current ->
           Process.put(partition, [event | current])
