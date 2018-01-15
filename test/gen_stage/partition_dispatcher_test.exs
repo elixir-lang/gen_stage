@@ -192,6 +192,19 @@ defmodule GenStage.PartitionDispatcherTest do
     assert_received :hello
   end
 
+  test "logs on unknown partition" do
+    pid = self()
+    ref = make_ref()
+    disp = dispatcher(partitions: [:foo, :bar], hash: &{&1, :oops})
+
+    {:ok, 0, disp} = D.subscribe([partition: :foo], {pid, ref}, disp)
+    {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
+
+    error = ExUnit.CaptureLog.capture_log(fn -> D.dispatch([1, 2, 5], 3, disp) end)
+    assert error =~ "[error] Unknown partition :oops computed for GenStage/Flow event 1"
+    assert error =~ "The known partitions are [:bar, :foo]"
+  end
+
   test "errors on init" do
     assert_raise ArgumentError, ~r/the enumerable of :partitions is required/, fn ->
       dispatcher([])

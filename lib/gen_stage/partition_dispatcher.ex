@@ -58,6 +58,8 @@ defmodule GenStage.PartitionDispatcher do
   @behaviour GenStage.Dispatcher
   @init {nil, nil, 0}
 
+  require Logger
+
   @doc false
   def init(opts) do
     partitions =
@@ -212,7 +214,16 @@ defmodule GenStage.PartitionDispatcher do
 
     for event <- deliver_now do
       {event, partition} = hash.(event)
-      Process.put(partition, [event | Process.get(partition)])
+
+      case :erlang.get(partition) do
+        :undefined ->
+          Logger.error fn ->
+            "Unknown partition #{inspect partition} computed for GenStage/Flow event " <>
+              "#{inspect event}. The known partitions are #{inspect Map.keys(partitions)}"
+          end
+        current ->
+          Process.put(partition, [event | current])
+      end
     end
 
     partitions =
