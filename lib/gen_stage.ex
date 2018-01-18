@@ -748,16 +748,25 @@ defmodule GenStage do
                            {:min_demand, integer} |
                            {:max_demand, integer}
 
-  @typedoc "Option values used by the `init*` functions when stage type is `:producer`"
-  @type producer_option :: {:demand, :forward | :accumulate}
+  @typedoc "Option values used by the `init*` specific to `:producer` type"
+  @type producer_only_option :: {:demand, :forward | :accumulate}
 
-  @typedoc "Option values used by the `init*` functions when stage type is `:producer` or `:producer_consumer`"
+  @typedoc "Option values used by the `init*` common to `:producer` and `:producer_consumer` types"
   @type producer_and_producer_consumer_option :: {:buffer_size, non_neg_integer | :infinity} |
                            {:buffer_keep, :first | :last} |
                            {:dispatcher, module | {module, GenStage.Dispatcher.options}}
 
-  @typedoc "Option values used by the `init*` functions when stage type is `:consumer` or `:producer_consumer`"
+  @typedoc "Option values used by the `init*` common to `:consumer` and `:producer_consumer` types"
   @type consumer_and_producer_consumer_option :: {:subscribe_to, [module | {module, subscription_options}]}
+
+  @typedoc "Option values used by the `init*` functions when stage type is `:producer`"
+  @type producer_option :: producer_only_option | producer_and_producer_consumer_option
+
+  @typedoc "Option values used by the `init*` functions when stage type is `:consumer`"
+  @type consumer_option :: consumer_and_producer_consumer_option
+
+  @typedoc "Option values used by the `init*` functions when stage type is `:producer_consumer`"
+  @type producer_consumer_option :: producer_and_producer_consumer_option | consumer_and_producer_consumer_option
 
   @typedoc "The stage."
   @type stage :: pid | atom | {:global, term} | {:via, module, term} | {atom, node}
@@ -847,14 +856,11 @@ defmodule GenStage do
 
   @callback init(args :: term) ::
     {:producer, state} |
-    {:producer, state, [producer_option | producer_and_producer_consumer_option]} |
+    {:producer, state, [producer_option]} |
     {:producer_consumer, state} |
-    {:producer_consumer, state, [
-        producer_and_producer_consumer_option |
-        consumer_and_producer_consumer_option
-      ]} |
+    {:producer_consumer, state, [producer_consumer_option]} |
     {:consumer, state} |
-    {:consumer, state, [consumer_and_producer_consumer_option]} |
+    {:consumer, state, [consumer_option]} |
     :ignore |
     {:stop, reason :: any} when state: any
 
