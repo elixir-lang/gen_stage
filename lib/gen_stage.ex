@@ -744,7 +744,9 @@ defmodule GenStage do
   @type type :: :producer | :consumer | :producer_consumer
 
   @typedoc "Options used by the `subscribe*` functions"
-  @type subscription_options :: keyword
+  @type subscription_options :: {:cancel, :permanent | :transient | :temporary} |
+                           {:min_demand, integer} |
+                           {:max_demand, integer}
 
   @typedoc "Option values used by the `init*` functions when stage type is `:producer`"
   @type producer_option :: {:demand, :forward | :accumulate}
