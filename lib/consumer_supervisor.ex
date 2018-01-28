@@ -344,11 +344,13 @@ defmodule ConsumerSupervisor do
     {strategy, opts}     = Keyword.pop(opts, :strategy)
     {max_restarts, opts} = Keyword.pop(opts, :max_restarts, 3)
     {max_seconds, opts}  = Keyword.pop(opts, :max_seconds, 5)
+    template = normalize_template(child)
 
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
-         :ok <- validate_seconds(max_seconds) do
-      {:ok, %{state | template: normalize_child_spec(child), strategy: strategy,
+         :ok <- validate_seconds(max_seconds),
+         :ok <- validate_template(template) do
+      {:ok, %{state | template: template, strategy: strategy,
                       max_restarts: max_restarts, max_seconds: max_seconds}, opts}
     end
   end
@@ -356,8 +358,8 @@ defmodule ConsumerSupervisor do
     {:error, "supervisor's init expects a keywords list as options"}
   end
 
-  defp validate_specs([_]) do
-    :ok # TODO: Do proper spec validation
+  defp validate_specs([_] = children) do
+    :supervisor.check_childspecs(children)
   end
   defp validate_specs(_children) do
     {:error, "consumer supervisor expects a list with a single item as a template"}
@@ -833,7 +835,7 @@ defmodule ConsumerSupervisor do
      supervisor: [{~c"Callback", mod}]]
   end
 
-  defp normalize_child_spec(%{id: id, start: {mod, _, _} = start} = child),
+  defp normalize_template(%{id: id, start: {mod, _, _} = start} = child),
     do: {
       id,
       start,
@@ -842,6 +844,23 @@ defmodule ConsumerSupervisor do
       Map.get(child, :type, :worker),
       Map.get(child, :modules, [mod])
     }
-  defp normalize_child_spec({_, _, _, _, _, _} = child),
+  defp normalize_template({_, _, _, _, _, _} = child),
     do: child
+
+  defp validate_template({_, _, :permanent, _, _, _}) do
+    error = """
+    a child specification with :restart set to :permanent \
+    is not supported in ConsumerSupervisor
+
+    Set the :restart option either to :temporary, so children \
+    spawned from events are never restarted, or :transient, \
+    so they are restarted only on abnormal exits
+    """
+
+    {:error, error}
+  end
+
+  defp validate_template({_, _, _, _, _, _}) do
+    :ok
+  end
 end
