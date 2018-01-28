@@ -1,8 +1,20 @@
 # Changelog
 
-## v0.13.0 (2018-01-13)
+## v0.13.1 (2018-01-28)
 
 Note: this is the last version to support Elixir v1.3 and v1.4.
+
+### Enhancements
+
+  * Log error on unknown partitions
+
+### Bug fixes
+
+  * Do not allow restart: :permanent in `ConsumerSupervisor` to avoid common pitfalls
+  * Improve and fix types to avoid dialyzer warnings
+  * Avoid conflict with user specified `@opts`
+
+## v0.13.0 (2018-01-13)
 
 ### Enhancements
 
