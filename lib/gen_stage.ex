@@ -1090,6 +1090,7 @@ defmodule GenStage do
   defmacro __using__(opts) do
     quote location: :keep, bind_quoted: [opts: opts] do
       @behaviour GenStage
+
       if Code.ensure_loaded?(Supervisor) and function_exported?(Supervisor, :init, 2) do
         @doc false
         def child_spec(arg) do
