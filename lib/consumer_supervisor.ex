@@ -809,7 +809,7 @@ defmodule ConsumerSupervisor do
   end
 
   defp report_error(error, reason, pid, args, child, %{name: name}) do
-    :error_logger.error_report(:supervision_report,
+    :error_logger.error_report(:supervisor_report,
       supervisor: name,
       errorContext: error,
       reason: reason,
