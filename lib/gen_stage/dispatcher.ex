@@ -29,9 +29,9 @@ defmodule GenStage.Dispatcher do
 
   """
 
- @typedoc "Options used by `init/1`"
- @type options :: keyword
-    
+  @typedoc "Options used by `init/1`"
+  @type options :: keyword
+
   @doc """
   Called on initialization with the options given on `c:GenStage.init/1`.
   """
@@ -41,7 +41,8 @@ defmodule GenStage.Dispatcher do
   Called every time the producer gets a new subscriber.
   """
   @callback subscribe(opts :: keyword(), from :: {pid, reference}, state :: term) ::
-    {:ok, demand :: non_neg_integer, new_state} when new_state: term
+              {:ok, demand :: non_neg_integer, new_state}
+            when new_state: term
 
   @doc """
   Called every time a subscription is cancelled or the consumer goes down.
@@ -50,7 +51,8 @@ defmodule GenStage.Dispatcher do
   previously given in subscribe.
   """
   @callback cancel(from :: {pid, reference}, state :: term) ::
-    {:ok, demand :: non_neg_integer, new_state} when new_state: term
+              {:ok, demand :: non_neg_integer, new_state}
+            when new_state: term
 
   @doc """
   Called every time a consumer sends demand.
@@ -63,7 +65,8 @@ defmodule GenStage.Dispatcher do
   reference previously given in subscribe.
   """
   @callback ask(demand :: pos_integer, from :: {pid, reference}, state :: term) ::
-    {:ok, actual_demand :: non_neg_integer, new_state} when new_state: term
+              {:ok, actual_demand :: non_neg_integer, new_state}
+            when new_state: term
 
   @doc """
   Called every time a producer wants to dispatch an event.
@@ -91,7 +94,8 @@ defmodule GenStage.Dispatcher do
 
   """
   @callback dispatch(events :: nonempty_list(term), length :: pos_integer, state :: term) ::
-    {:ok, leftover_events :: [term], new_state} when new_state: term
+              {:ok, leftover_events :: [term], new_state}
+            when new_state: term
 
   @doc """
   Used to send an info message to the current process.
@@ -100,6 +104,5 @@ defmodule GenStage.Dispatcher do
   only be sent after all currently buffered consumer messages are
   delivered.
   """
-  @callback info(msg :: term, state :: term) ::
-    {:ok, new_state} when new_state: term
+  @callback info(msg :: term, state :: term) :: {:ok, new_state} when new_state: term
 end

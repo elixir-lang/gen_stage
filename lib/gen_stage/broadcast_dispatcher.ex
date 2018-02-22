@@ -72,18 +72,19 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   def dispatch(events, length, {demands, waiting}) do
-    {deliver_now, deliver_later, waiting} =
-      split_events(events, length, waiting)
+    {deliver_now, deliver_later, waiting} = split_events(events, length, waiting)
 
     for {_, pid, ref, selector} <- demands do
       selected =
         case filter_and_count(deliver_now, selector) do
           {selected, 0} ->
             selected
+
           {selected, discarded} ->
             send(self(), {:"$gen_producer", {pid, ref}, {:ask, discarded}})
             selected
         end
+
       Process.send(pid, {:"$gen_consumer", {self(), ref}, selected}, [:noconnect])
       :ok
     end
@@ -94,9 +95,11 @@ defmodule GenStage.BroadcastDispatcher do
   defp filter_and_count(messages, nil) do
     {messages, 0}
   end
+
   defp filter_and_count(messages, selector) do
     filter_and_count(messages, selector, [], 0)
   end
+
   defp filter_and_count([message | messages], selector, acc, count) do
     if selector.(message) do
       filter_and_count(messages, selector, [message | acc], count)
@@ -104,6 +107,7 @@ defmodule GenStage.BroadcastDispatcher do
       filter_and_count(messages, selector, acc, count + 1)
     end
   end
+
   defp filter_and_count([], _selector, acc, count) do
     {:lists.reverse(acc), count}
   end
@@ -112,33 +116,42 @@ defmodule GenStage.BroadcastDispatcher do
     case Keyword.get(opts, :selector) do
       nil ->
         nil
+
       selector when is_function(selector, 1) ->
         selector
+
       other ->
-        raise ArgumentError, ":selector option must be passed a unary function, got: #{inspect other}"
+        raise ArgumentError,
+              ":selector option must be passed a unary function, got: #{inspect(other)}"
     end
   end
 
-  defp get_min([]),
-    do: 0
+  defp get_min([]), do: 0
+
   defp get_min([{acc, _, _, _} | demands]),
     do: demands |> Enum.reduce(acc, fn {val, _, _, _}, acc -> min(val, acc) end) |> max(0)
 
   defp split_events(events, length, counter) when length <= counter do
     {events, [], counter - length}
   end
+
   defp split_events(events, _length, counter) do
     {now, later} = Enum.split(events, counter)
     {now, later, 0}
   end
 
-  defp adjust_demand(0, demands),
-    do: demands
-  defp adjust_demand(min, demands),
-    do: Enum.map(demands, fn {counter, pid, key, selector} -> {counter - min, pid, key, selector} end)
+  defp adjust_demand(0, demands) do
+    demands
+  end
 
-  defp add_demand(counter, pid, ref, selector, demands) when
-       is_integer(counter) and is_pid(pid) and (is_nil(selector) or is_function(selector, 1)) do
+  defp adjust_demand(min, demands) do
+    Enum.map(demands, fn {counter, pid, key, selector} ->
+      {counter - min, pid, key, selector}
+    end)
+  end
+
+  defp add_demand(counter, pid, ref, selector, demands)
+       when is_integer(counter) and is_pid(pid) and (is_nil(selector) or is_function(selector, 1)) do
     [{counter, pid, ref, selector} | demands]
   end
 

@@ -10,8 +10,8 @@ defmodule GenStage.DemandDispatcherTest do
   end
 
   test "subscribes and cancels" do
-    pid  = self()
-    ref  = make_ref()
+    pid = self()
+    ref = make_ref()
     disp = dispatcher([])
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
@@ -22,8 +22,8 @@ defmodule GenStage.DemandDispatcherTest do
   end
 
   test "subscribes, asks and cancels" do
-    pid  = self()
-    ref  = make_ref()
+    pid = self()
+    ref = make_ref()
     disp = dispatcher([])
 
     # Subscribe, ask and cancel and leave some demand
@@ -48,8 +48,8 @@ defmodule GenStage.DemandDispatcherTest do
   end
 
   test "subscribes, asks and dispatches" do
-    pid  = self()
-    ref  = make_ref()
+    pid = self()
+    ref = make_ref()
     disp = dispatcher([])
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
 
@@ -73,7 +73,7 @@ defmodule GenStage.DemandDispatcherTest do
   end
 
   test "subscribes, asks multiple consumers" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     ref3 = make_ref()
@@ -96,7 +96,7 @@ defmodule GenStage.DemandDispatcherTest do
   end
 
   test "subscribes, asks and dispatches to multiple consumers" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     disp = dispatcher([])
@@ -139,7 +139,7 @@ defmodule GenStage.DemandDispatcherTest do
   end
 
   test "delivers info to current process" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     disp = dispatcher([])
@@ -154,7 +154,7 @@ defmodule GenStage.DemandDispatcherTest do
   end
 
   test "warns on demand mismatch" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     disp = dispatcher([])
@@ -162,10 +162,13 @@ defmodule GenStage.DemandDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
 
-    assert capture_log(fn ->
-      {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
-      {:ok, 4, disp} = D.ask(4, {pid, ref2}, disp)
-      disp
-    end) =~ "GenStage producer DemandDispatcher expects a maximum demand of 3"
+    log =
+      capture_log(fn ->
+        {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
+        {:ok, 4, disp} = D.ask(4, {pid, ref2}, disp)
+        disp
+      end)
+
+    assert log =~ "GenStage producer DemandDispatcher expects a maximum demand of 3"
   end
 end

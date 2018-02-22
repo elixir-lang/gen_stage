@@ -67,12 +67,13 @@ defmodule ConsumerSupervisor do
   @behaviour GenStage
 
   @typedoc "Options used by the `start*` functions"
-  @type option :: {:registry, atom} |
-                  {:name, Supervisor.name} |
-                  {:strategy, Supervisor.Spec.strategy} |
-                  {:max_restarts, non_neg_integer} |
-                  {:max_seconds, non_neg_integer} |
-                  {:subscribe_to, [GenStage.stage | {GenStage.stage, keyword()}]}
+  @type option ::
+          {:registry, atom}
+          | {:name, Supervisor.name()}
+          | {:strategy, Supervisor.Spec.strategy()}
+          | {:max_restarts, non_neg_integer}
+          | {:max_seconds, non_neg_integer}
+          | {:subscribe_to, [GenStage.stage() | {GenStage.stage(), keyword()}]}
 
   @doc """
   Callback invoked to start the supervisor and during hot code upgrades.
@@ -94,10 +95,22 @@ defmodule ConsumerSupervisor do
 
   """
   @callback init(args :: term) ::
-    {:ok, [:supervisor.child_spec], options :: keyword()} | :ignore
+              {:ok, [:supervisor.child_spec()], options :: keyword()}
+              | :ignore
 
-  defstruct [:name, :mod, :args, :template, :max_restarts, :max_seconds, :strategy,
-             children: %{}, producers: %{}, restarts: [], restarting: 0]
+  defstruct [
+    :name,
+    :mod,
+    :args,
+    :template,
+    :max_restarts,
+    :max_seconds,
+    :strategy,
+    children: %{},
+    producers: %{},
+    restarts: [],
+    restarting: 0
+  ]
 
   @doc false
   defmacro __using__(opts) do
@@ -152,7 +165,7 @@ defmodule ConsumerSupervisor do
   and will exit not only on crashes but also if the parent process
   exits with `:normal` reason.
   """
-  @spec start_link([Supervisor.Spec.spec], [option]) :: Supervisor.on_start
+  @spec start_link([Supervisor.Spec.spec()], [option]) :: Supervisor.on_start()
   def start_link(children, options) when is_list(children) do
     {sup_options, start_options} =
       Keyword.split(options, [:strategy, :max_restarts, :max_seconds, :subscribe_to])
@@ -178,7 +191,7 @@ defmodule ConsumerSupervisor do
   name. The supported values are described under the "Name Registration"
   section in the `GenServer` module docs.
   """
-  @spec start_link(module, any, [option]) :: Supervisor.on_start
+  @spec start_link(module, any, [option]) :: Supervisor.on_start()
   def start_link(mod, args, opts \\ []) do
     GenStage.start_link(__MODULE__, {mod, args, opts[:name]}, opts)
   end
@@ -201,7 +214,7 @@ defmodule ConsumerSupervisor do
   `:ignore` or `{:error, error}` where `error` is a term containing
   information about the error is returned.
   """
-  @spec start_child(Supervisor.supervisor, [term]) :: Supervisor.on_start_child
+  @spec start_child(Supervisor.supervisor(), [term]) :: Supervisor.on_start_child()
   def start_child(supervisor, args) when is_list(args) do
     call(supervisor, {:start_child, args})
   end
@@ -212,7 +225,7 @@ defmodule ConsumerSupervisor do
   If successful, the function returns `:ok`. If there is no
   such pid, the function returns `{:error, :not_found}`.
   """
-  @spec terminate_child(Supervisor.supervisor, pid) :: :ok | {:error, :not_found}
+  @spec terminate_child(Supervisor.supervisor(), pid) :: :ok | {:error, :not_found}
   def terminate_child(supervisor, pid) when is_pid(pid) do
     call(supervisor, {:terminate_child, pid})
   end
@@ -238,8 +251,9 @@ defmodule ConsumerSupervisor do
     * `modules` - as defined in the child specification
 
   """
-  @spec which_children(Supervisor.supervisor) ::
-        [{:undefined, pid | :restarting, Supervisor.Spec.worker, Supervisor.Spec.modules}]
+  @spec which_children(Supervisor.supervisor()) :: [
+          {:undefined, pid | :restarting, Supervisor.Spec.worker(), Supervisor.Spec.modules()}
+        ]
   def which_children(supervisor) do
     call(supervisor, :which_children)
   end
@@ -261,9 +275,12 @@ defmodule ConsumerSupervisor do
       is still alive
 
   """
-  @spec count_children(Supervisor.supervisor) ::
-        %{specs: non_neg_integer, active: non_neg_integer,
-          supervisors: non_neg_integer, workers: non_neg_integer}
+  @spec count_children(Supervisor.supervisor()) :: %{
+          specs: non_neg_integer,
+          active: non_neg_integer,
+          supervisors: non_neg_integer,
+          workers: non_neg_integer
+        }
   def count_children(supervisor) do
     call(supervisor, :count_children)
   end
@@ -304,7 +321,7 @@ defmodule ConsumerSupervisor do
   end
 
   def init(not_a_list, opts) when not is_list(not_a_list) do
-    IO.warn "ConsumerSupervisor.init/1 expects a list with a single element"
+    IO.warn("ConsumerSupervisor.init/1 expects a list with a single element")
     init([not_a_list], opts)
   end
 
@@ -326,34 +343,46 @@ defmodule ConsumerSupervisor do
         case validate_specs(children) do
           :ok ->
             state = %ConsumerSupervisor{mod: mod, args: args, name: name || {self(), mod}}
+
             case init(state, children, opts) do
               {:ok, state, opts} -> {:consumer, state, opts}
               {:error, message} -> {:stop, {:bad_opts, message}}
             end
+
           {:error, message} ->
             {:stop, {:bad_specs, message}}
         end
+
       :ignore ->
         :ignore
+
       other ->
         {:stop, {:bad_return_value, other}}
     end
   end
 
   defp init(state, [child], opts) when is_list(opts) do
-    {strategy, opts}     = Keyword.pop(opts, :strategy)
+    {strategy, opts} = Keyword.pop(opts, :strategy)
     {max_restarts, opts} = Keyword.pop(opts, :max_restarts, 3)
-    {max_seconds, opts}  = Keyword.pop(opts, :max_seconds, 5)
+    {max_seconds, opts} = Keyword.pop(opts, :max_seconds, 5)
     template = normalize_template(child)
 
     with :ok <- validate_strategy(strategy),
          :ok <- validate_restarts(max_restarts),
          :ok <- validate_seconds(max_seconds),
          :ok <- validate_template(template) do
-      {:ok, %{state | template: template, strategy: strategy,
-                      max_restarts: max_restarts, max_seconds: max_seconds}, opts}
+      state = %{
+        state
+        | template: template,
+          strategy: strategy,
+          max_restarts: max_restarts,
+          max_seconds: max_seconds
+      }
+
+      {:ok, state, opts}
     end
   end
+
   defp init(_state, [_], _opts) do
     {:error, "supervisor's init expects a keywords list as options"}
   end
@@ -361,6 +390,7 @@ defmodule ConsumerSupervisor do
   defp validate_specs([_] = children) do
     :supervisor.check_childspecs(children)
   end
+
   defp validate_specs(_children) do
     {:error, "consumer supervisor expects a list with a single item as a template"}
   end
@@ -402,39 +432,52 @@ defmodule ConsumerSupervisor do
     {_, ref} = from
     {_, {m, f, args}, restart, _, _, _} = child
     args = args ++ [extra]
+
     case start_child(m, f, args) do
       {:ok, pid, _} when restart == :temporary ->
         acc = [{pid, [ref | :undefined]} | acc]
         start_events(extras, from, child, errors, acc, state)
-      {:ok, pid, _}  ->
+
+      {:ok, pid, _} ->
         acc = [{pid, [ref | args]} | acc]
         start_events(extras, from, child, errors, acc, state)
+
       {:ok, pid} when restart == :temporary ->
         acc = [{pid, [ref | :undefined]} | acc]
         start_events(extras, from, child, errors, acc, state)
+
       {:ok, pid} ->
         acc = [{pid, [ref | args]} | acc]
         start_events(extras, from, child, errors, acc, state)
+
       :ignore ->
-        start_events(extras, from, child, errors+1, acc, state)
+        start_events(extras, from, child, errors + 1, acc, state)
+
       {:error, reason} ->
-        :error_logger.error_msg('ConsumerSupervisor failed to start child from: ~tp with reason: ~tp~n',
-          [from, reason])
+        :error_logger.error_msg(
+          'ConsumerSupervisor failed to start child from: ~tp with reason: ~tp~n',
+          [from, reason]
+        )
+
         report_error(:start_error, reason, :undefined, args, child, state)
-        start_events(extras, from , child, errors+1, acc, state)
+        start_events(extras, from, child, errors + 1, acc, state)
     end
   end
+
   defp start_events([], _, _, errors, acc, _) do
     {acc, errors}
   end
 
   defp maybe_ask(ref, pid, events, down, children, state) do
     %{producers: producers} = state
+
     case producers do
       %{^ref => {to, count, pending, min, max}} ->
         if count + events > max do
-          :error_logger.error_msg('ConsumerSupervisor has received ~tp events in excess from: ~tp~n',
-                                  [count + events - max, {pid, ref}])
+          :error_logger.error_msg(
+            'ConsumerSupervisor has received ~tp events in excess from: ~tp~n',
+            [count + events - max, {pid, ref}]
+          )
         end
 
         pending =
@@ -442,6 +485,7 @@ defmodule ConsumerSupervisor do
             ask when ask >= min ->
               GenStage.ask(to, ask)
               0
+
             ask ->
               ask
           end
@@ -449,6 +493,7 @@ defmodule ConsumerSupervisor do
         count = count + events - down
         producers = Map.put(producers, ref, {to, count, pending, min, max})
         %{state | children: children, producers: producers}
+
       %{} ->
         %{state | children: children}
     end
@@ -466,6 +511,7 @@ defmodule ConsumerSupervisor do
             {:restarting, _} -> :restarting
             _ -> pid
           end
+
         {:undefined, maybe_pid, type, mods}
       end
 
@@ -476,12 +522,14 @@ defmodule ConsumerSupervisor do
     %{children: children, template: child, restarting: restarting} = state
     {_, _, _, _, type, _} = child
 
-    specs  = map_size(children)
+    specs = map_size(children)
     active = specs - restarting
-    reply  =
+
+    reply =
       case type do
         :supervisor ->
           %{specs: 1, active: active, workers: 0, supervisors: specs}
+
         :worker ->
           %{specs: 1, active: active, workers: specs, supervisors: 0}
       end
@@ -494,9 +542,11 @@ defmodule ConsumerSupervisor do
       %{^pid => [producer | _] = info} ->
         :ok = terminate_children(%{pid => info}, state)
         {:reply, :ok, [], delete_child_and_maybe_ask(producer, pid, state)}
+
       %{^pid => {:restarting, [producer | _]} = info} ->
         :ok = terminate_children(%{pid => info}, state)
         {:reply, :ok, [], delete_child_and_maybe_ask(producer, pid, state)}
+
       %{} ->
         {:reply, {:error, :not_found}, [], state}
     end
@@ -508,11 +558,14 @@ defmodule ConsumerSupervisor do
 
   defp handle_start_child({_, {m, f, args}, restart, _, _, _}, extra, state) do
     args = args ++ extra
+
     case reply = start_child(m, f, args) do
       {:ok, pid, _} ->
         {:reply, reply, [], save_child(restart, :dynamic, pid, args, state)}
+
       {:ok, pid} ->
         {:reply, reply, [], save_child(restart, :dynamic, pid, args, state)}
+
       _ ->
         {:reply, reply, [], state}
     end
@@ -523,7 +576,7 @@ defmodule ConsumerSupervisor do
       apply(m, f, a)
     catch
       kind, reason ->
-        {:error, exit_reason(kind, reason, System.stacktrace)}
+        {:error, exit_reason(kind, reason, System.stacktrace())}
     else
       {:ok, pid, extra} when is_pid(pid) -> {:ok, pid, extra}
       {:ok, pid} when is_pid(pid) -> {:ok, pid}
@@ -535,12 +588,13 @@ defmodule ConsumerSupervisor do
 
   defp save_child(:temporary, producer, pid, _, state),
     do: put_in(state.children[pid], [producer | :undefined])
+
   defp save_child(_, producer, pid, args, state),
     do: put_in(state.children[pid], [producer | args])
 
-  defp exit_reason(:exit, reason, _),      do: reason
+  defp exit_reason(:exit, reason, _), do: reason
   defp exit_reason(:error, reason, stack), do: {reason, stack}
-  defp exit_reason(:throw, value, stack),  do: {{:nocatch, value}, stack}
+  defp exit_reason(:throw, value, stack), do: {{:nocatch, value}, stack}
 
   @doc false
   def handle_cast(_msg, state) do
@@ -550,10 +604,8 @@ defmodule ConsumerSupervisor do
   @doc false
   def handle_info({:EXIT, pid, reason}, state) do
     case maybe_restart_child(pid, reason, state) do
-      {:ok, state} ->
-        {:noreply, [], state}
-      {:shutdown, state} ->
-        {:stop, :shutdown, state}
+      {:ok, state} -> {:noreply, [], state}
+      {:shutdown, state} -> {:stop, :shutdown, state}
     end
   end
 
@@ -568,6 +620,7 @@ defmodule ConsumerSupervisor do
         case restart_child(producer, pid, args, child, state) do
           {:ok, state} ->
             {:noreply, [], state}
+
           {:shutdown, state} ->
             {:stop, :shutdown, state}
         end
@@ -594,11 +647,14 @@ defmodule ConsumerSupervisor do
               {:ok, state, _} -> {:ok, state}
               {:error, message} -> {:error, {:bad_opts, message}}
             end
+
           {:error, message} ->
             {:error, {:bad_specs, message}}
         end
+
       :ignore ->
         {:ok, state}
+
       error ->
         error
     end
@@ -620,9 +676,11 @@ defmodule ConsumerSupervisor do
         :brutal_kill ->
           for {pid, _} <- pids, do: Process.exit(pid, :kill)
           wait_children(restart, shutdown, pids, size, nil, stacks)
+
         :infinity ->
           for {pid, _} <- pids, do: Process.exit(pid, :shutdown)
           wait_children(restart, shutdown, pids, size, nil, stacks)
+
         time ->
           for {pid, _} <- pids, do: Process.exit(pid, :shutdown)
           timer = :erlang.start_timer(time, self(), :kill)
@@ -637,19 +695,22 @@ defmodule ConsumerSupervisor do
   end
 
   defp monitor_children(children, restart) do
-    Enum.reduce children, {%{}, %{}}, fn
+    Enum.reduce(children, {%{}, %{}}, fn
       {_, {:restarting, _}}, {pids, stacks} ->
         {pids, stacks}
+
       {pid, _}, {pids, stacks} ->
         case monitor_child(pid) do
           :ok ->
             {Map.put(pids, pid, true), stacks}
+
           {:error, :normal} when restart != :permanent ->
             {pids, stacks}
+
           {:error, reason} ->
             {pids, Map.put(stacks, pid, reason)}
         end
-    end
+    end)
   end
 
   defp monitor_child(pid) do
@@ -669,36 +730,51 @@ defmodule ConsumerSupervisor do
   defp wait_children(_restart, _shutdown, _pids, 0, nil, stacks) do
     stacks
   end
+
   defp wait_children(_restart, _shutdown, _pids, 0, timer, stacks) do
     _ = :erlang.cancel_timer(timer)
+
     receive do
       {:timeout, ^timer, :kill} -> :ok
     after
       0 -> :ok
     end
+
     stacks
   end
+
   defp wait_children(restart, :brutal_kill, pids, size, timer, stacks) do
     receive do
       {:DOWN, _ref, :process, pid, :killed} ->
-        wait_children(restart, :brutal_kill, Map.delete(pids, pid), size - 1, timer,
-                      stacks)
+        wait_children(restart, :brutal_kill, Map.delete(pids, pid), size - 1, timer, stacks)
+
       {:DOWN, _ref, :process, pid, reason} ->
-        wait_children(restart, :brutal_kill, Map.delete(pids, pid), size - 1, timer,
-                      Map.put(stacks, pid, reason))
+        wait_children(
+          restart,
+          :brutal_kill,
+          Map.delete(pids, pid),
+          size - 1,
+          timer,
+          Map.put(stacks, pid, reason)
+        )
     end
   end
+
   defp wait_children(restart, shutdown, pids, size, timer, stacks) do
     receive do
       {:DOWN, _ref, :process, pid, {:shutdown, _}} ->
         wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer, stacks)
+
       {:DOWN, _ref, :process, pid, :shutdown} ->
         wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer, stacks)
+
       {:DOWN, _ref, :process, pid, :normal} when restart != :permanent ->
         wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer, stacks)
+
       {:DOWN, _ref, :process, pid, reason} ->
         stacks = Map.put(stacks, pid, reason)
         wait_children(restart, shutdown, Map.delete(pids, pid), size - 1, timer, stacks)
+
       {:timeout, ^timer, :kill} ->
         for {pid, _} <- pids, do: Process.exit(pid, :kill)
         wait_children(restart, shutdown, pids, size, nil, stacks)
@@ -709,9 +785,10 @@ defmodule ConsumerSupervisor do
     %{children: children, template: child} = state
     {_, _, restart, _, _, _} = child
 
-     case children do
+    case children do
       %{^pid => [producer | args]} ->
         maybe_restart_child(restart, reason, producer, pid, args, child, state)
+
       %{} ->
         {:ok, state}
     end
@@ -721,19 +798,24 @@ defmodule ConsumerSupervisor do
     report_error(:child_terminated, reason, pid, args, child, state)
     restart_child(producer, pid, args, child, state)
   end
+
   defp maybe_restart_child(_, :normal, producer, pid, _args, _child, state) do
     {:ok, delete_child_and_maybe_ask(producer, pid, state)}
   end
+
   defp maybe_restart_child(_, :shutdown, producer, pid, _args, _child, state) do
     {:ok, delete_child_and_maybe_ask(producer, pid, state)}
   end
+
   defp maybe_restart_child(_, {:shutdown, _}, producer, pid, _args, _child, state) do
     {:ok, delete_child_and_maybe_ask(producer, pid, state)}
   end
+
   defp maybe_restart_child(:transient, reason, producer, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
     restart_child(producer, pid, args, child, state)
   end
+
   defp maybe_restart_child(:temporary, reason, producer, pid, args, child, state) do
     report_error(:child_terminated, reason, pid, args, child, state)
     {:ok, delete_child_and_maybe_ask(producer, pid, state)}
@@ -742,6 +824,7 @@ defmodule ConsumerSupervisor do
   defp delete_child_and_maybe_ask(:dynamic, pid, %{children: children} = state) do
     %{state | children: Map.delete(children, pid)}
   end
+
   defp delete_child_and_maybe_ask(ref, pid, %{children: children} = state) do
     children = Map.delete(children, pid)
     maybe_ask(ref, pid, 0, 1, children, state)
@@ -753,10 +836,12 @@ defmodule ConsumerSupervisor do
         case restart_child(strategy, producer, pid, args, child, state) do
           {:ok, state} ->
             {:ok, state}
+
           {:try_again, state} ->
             send(self(), {:"$gen_restart", pid})
             {:ok, state}
         end
+
       {:shutdown, state} ->
         report_error(:shutdown, :reached_max_restart_intensity, pid, args, child, state)
         {:shutdown, delete_child_and_maybe_ask(producer, pid, state)}
@@ -765,9 +850,9 @@ defmodule ConsumerSupervisor do
 
   defp add_restart(state) do
     %{max_seconds: max_seconds, max_restarts: max_restarts, restarts: restarts} = state
-    now      = :erlang.monotonic_time(1)
-    restarts = add_restart([now|restarts], now, max_seconds)
-    state    = %{state | restarts: restarts}
+    now = :erlang.monotonic_time(1)
+    restarts = add_restart([now | restarts], now, max_seconds)
+    state = %{state | restarts: restarts}
 
     if length(restarts) <= max_restarts do
       {:ok, state}
@@ -787,15 +872,18 @@ defmodule ConsumerSupervisor do
       {:ok, pid, _} ->
         state = %{state | children: Map.delete(state.children, current_pid)}
         {:ok, save_child(restart, producer, pid, args, state)}
+
       {:ok, pid} ->
         state = %{state | children: Map.delete(state.children, current_pid)}
         {:ok, save_child(restart, producer, pid, args, state)}
+
       :ignore ->
         {:ok, delete_child_and_maybe_ask(producer, current_pid, state)}
+
       {:error, reason} ->
         report_error(:start_error, reason, {:restarting, current_pid}, args, child, state)
         state = restart_child(current_pid, state)
-        {:try_again, update_in(state.restarting, & &1 + 1)}
+        {:try_again, update_in(state.restarting, &(&1 + 1))}
     end
   end
 
@@ -803,13 +891,15 @@ defmodule ConsumerSupervisor do
     case children do
       %{^pid => {:restarting, _}} ->
         state
+
       %{^pid => info} ->
         %{state | children: Map.put(children, pid, {:restarting, info})}
     end
   end
 
   defp report_error(error, reason, pid, args, child, %{name: name}) do
-    :error_logger.error_report(:supervisor_report,
+    :error_logger.error_report(
+      :supervisor_report,
       supervisor: name,
       errorContext: error,
       reason: reason,
@@ -818,12 +908,14 @@ defmodule ConsumerSupervisor do
   end
 
   defp extract_child(pid, args, {id, {m, f, _}, restart, shutdown, type, _}) do
-    [pid: pid,
-     id: id,
-     mfargs: {m, f, args},
-     restart_type: restart,
-     shutdown: shutdown,
-     child_type: type]
+    [
+      pid: pid,
+      id: id,
+      mfargs: {m, f, args},
+      restart_type: restart,
+      shutdown: shutdown,
+      child_type: type
+    ]
   end
 
   def format_status(:terminate, [_pdict, state]) do
@@ -831,8 +923,10 @@ defmodule ConsumerSupervisor do
   end
 
   def format_status(_, [_pdict, %{mod: mod} = state]) do
-    [data: [{~c"State", state}],
-     supervisor: [{~c"Callback", mod}]]
+    [
+      data: [{~c"State", state}],
+      supervisor: [{~c"Callback", mod}]
+    ]
   end
 
   defp normalize_template(%{id: id, start: {mod, _, _} = start} = child),
@@ -844,8 +938,8 @@ defmodule ConsumerSupervisor do
       Map.get(child, :type, :worker),
       Map.get(child, :modules, [mod])
     }
-  defp normalize_template({_, _, _, _, _, _} = child),
-    do: child
+
+  defp normalize_template({_, _, _, _, _, _} = child), do: child
 
   defp validate_template({_, _, :permanent, _, _, _}) do
     error = """

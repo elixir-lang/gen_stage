@@ -13,15 +13,15 @@ defmodule GenStage.PartitionDispatcherTest do
   end
 
   test "subscribes, asks and cancels" do
-    pid  = self()
-    ref  = make_ref()
+    pid = self()
+    ref = make_ref()
     disp = dispatcher(partitions: 2)
 
     # Subscribe, ask and cancel and leave some demand
-    {:ok, 0, disp}  = D.subscribe([partition: 0], {pid, ref}, disp)
+    {:ok, 0, disp} = D.subscribe([partition: 0], {pid, ref}, disp)
     {:ok, 10, disp} = D.ask(10, {pid, ref}, disp)
     assert {10, 0} = waiting_and_pending(disp)
-    {:ok, 0, disp}  = D.cancel({pid, ref}, disp)
+    {:ok, 0, disp} = D.cancel({pid, ref}, disp)
     assert {10, 10} = waiting_and_pending(disp)
 
     # Subscribe again and the same demand is back
@@ -33,8 +33,8 @@ defmodule GenStage.PartitionDispatcherTest do
   end
 
   test "subscribes, asks and dispatches" do
-    pid  = self()
-    ref  = make_ref()
+    pid = self()
+    ref = make_ref()
     disp = dispatcher(partitions: 1)
     {:ok, 0, disp} = D.subscribe([partition: 0], {pid, ref}, disp)
 
@@ -52,11 +52,14 @@ defmodule GenStage.PartitionDispatcherTest do
   end
 
   test "subscribes, asks and dispatches to custom partitions" do
-    pid  = self()
-    ref  = make_ref()
-    disp = dispatcher(partitions: [:odd, :even], hash: fn event ->
+    pid = self()
+    ref = make_ref()
+
+    hash_fun = fn event ->
       {event, if(rem(event, 2) == 0, do: :even, else: :odd)}
-    end)
+    end
+
+    disp = dispatcher(partitions: [:odd, :even], hash: hash_fun)
 
     {:ok, 0, disp} = D.subscribe([partition: :odd], {pid, ref}, disp)
 
@@ -152,9 +155,9 @@ defmodule GenStage.PartitionDispatcherTest do
   end
 
   test "delivers info to current process" do
-    pid0  = self()
+    pid0 = self()
     ref0 = make_ref()
-    pid1  = self()
+    pid1 = self()
     ref1 = make_ref()
     disp = dispatcher(partitions: 2)
 
@@ -180,15 +183,15 @@ defmodule GenStage.PartitionDispatcherTest do
     ref1 = make_ref()
     disp = dispatcher(partitions: 2)
 
-    {:ok, 0, disp}  = D.subscribe([partition: 0], {pid0, ref0}, disp)
-    {:ok, 0, disp}  = D.subscribe([partition: 1], {pid0, ref1}, disp)
-    {:ok, 3, disp}  = D.ask(3, {pid1, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe([partition: 0], {pid0, ref0}, disp)
+    {:ok, 0, disp} = D.subscribe([partition: 1], {pid0, ref1}, disp)
+    {:ok, 3, disp} = D.ask(3, {pid1, ref1}, disp)
     {:ok, [], disp} = D.dispatch([1, 2, 5], 3, disp)
 
     {:ok, disp} = D.info(:hello, disp)
     refute_received :hello
 
-    {:ok, 5, _}  = D.ask(5, {pid0, ref0}, disp)
+    {:ok, 5, _} = D.ask(5, {pid0, ref0}, disp)
     assert_received :hello
   end
 
@@ -214,7 +217,7 @@ defmodule GenStage.PartitionDispatcherTest do
   test "errors on subscribe" do
     pid = self()
     ref = make_ref()
-    disp = dispatcher([partitions: 2])
+    disp = dispatcher(partitions: 2)
 
     assert_raise ArgumentError, ~r/the :partition option is required when subscribing/, fn ->
       D.subscribe([], {pid, ref}, disp)
