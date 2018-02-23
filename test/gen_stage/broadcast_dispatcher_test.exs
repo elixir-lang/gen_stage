@@ -9,8 +9,8 @@ defmodule GenStage.BroadcastDispatcherTest do
   end
 
   test "subscribes and cancels" do
-    pid  = self()
-    ref  = make_ref()
+    pid = self()
+    ref = make_ref()
     disp = dispatcher([])
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
@@ -21,7 +21,7 @@ defmodule GenStage.BroadcastDispatcherTest do
   end
 
   test "multiple subscriptions with early demand" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     disp = dispatcher([])
@@ -43,7 +43,7 @@ defmodule GenStage.BroadcastDispatcherTest do
   end
 
   test "multiple subscriptions with late demand" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     disp = dispatcher([])
@@ -65,7 +65,7 @@ defmodule GenStage.BroadcastDispatcherTest do
   end
 
   test "subscribes, asks and dispatches to multiple consumers" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     ref3 = make_ref()
@@ -122,7 +122,7 @@ defmodule GenStage.BroadcastDispatcherTest do
   end
 
   test "subscribing with a selector function" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     disp = dispatcher([])
@@ -135,16 +135,21 @@ defmodule GenStage.BroadcastDispatcherTest do
 
     {:ok, 0, disp} = D.ask(4, {pid, ref2}, disp)
     {:ok, 4, disp} = D.ask(4, {pid, ref1}, disp)
-    {:ok, [], _disp} = D.dispatch([%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}, %{key: "foo0000"}], 4, disp)
+
+    events = [%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}, %{key: "foo0000"}]
+    {:ok, [], _disp} = D.dispatch(events, 4, disp)
 
     assert_received {:"$gen_producer", {_, ^ref1}, {:ask, 1}}
     assert_received {:"$gen_producer", {_, ^ref2}, {:ask, 2}}
-    assert_received {:"$gen_consumer", {_, ^ref1}, [%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}]}
+
+    assert_received {:"$gen_consumer", {_, ^ref1},
+                     [%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}]}
+
     assert_received {:"$gen_consumer", {_, ^ref2}, [%{key: "pref-1234"}, %{key: "pref-5678"}]}
   end
 
   test "delivers info to current process" do
-    pid  = self()
+    pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
     disp = dispatcher([])

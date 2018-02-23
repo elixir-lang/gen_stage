@@ -4,15 +4,20 @@ defmodule GenStage.Mixfile do
   @version "0.13.1"
 
   def project do
-    [app: :gen_stage,
-     version: @version,
-     elixir: "~> 1.3",
-     package: package(),
-     description: "Producer and consumer pipelines with back-pressure for Elixir",
-     start_permanent: Mix.env == :prod,
-     deps: deps(),
-     docs: [main: "GenStage", source_ref: "v#{@version}",
-            source_url: "https://github.com/elixir-lang/gen_stage"]]
+    [
+      app: :gen_stage,
+      version: @version,
+      elixir: "~> 1.3",
+      package: package(),
+      description: "Producer and consumer pipelines with back-pressure for Elixir",
+      start_permanent: Mix.env() == :prod,
+      deps: deps(),
+      docs: [
+        main: "GenStage",
+        source_ref: "v#{@version}",
+        source_url: "https://github.com/elixir-lang/gen_stage"
+      ]
+    ]
   end
 
   def application do
@@ -20,13 +25,17 @@ defmodule GenStage.Mixfile do
   end
 
   defp deps do
-    [{:ex_doc, "~> 0.12", only: :docs},
-     {:inch_ex, ">= 0.4.0", only: :docs}]
+    [
+      {:ex_doc, "~> 0.12", only: :docs},
+      {:inch_ex, ">= 0.4.0", only: :docs}
+    ]
   end
 
   defp package do
-    %{licenses: ["Apache 2"],
+    %{
+      licenses: ["Apache 2"],
       maintainers: ["José Valim", "James Fish"],
-      links: %{"GitHub" => "https://github.com/elixir-lang/gen_stage"}}
+      links: %{"GitHub" => "https://github.com/elixir-lang/gen_stage"}
+    }
   end
 end

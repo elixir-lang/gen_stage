@@ -36,9 +36,12 @@ defmodule GenStage.DemandDispatcher do
     max = max || counter
 
     if counter > max do
-      :error_logger.warning_msg('GenStage producer DemandDispatcher expects a maximum demand of ~tp. ' ++
-                                'Using different maximum demands will overload greedy consumers. ' ++
-                                'Got demand for ~tp events from ~tp~n', [max, counter, pid])
+      warning =
+        'GenStage producer DemandDispatcher expects a maximum demand of ~tp. ' ++
+          'Using different maximum demands will overload greedy consumers. ' ++
+          'Got demand for ~tp events from ~tp~n'
+
+      :error_logger.warning_msg(warning, [max, counter, pid])
     end
 
     {current, demands} = pop_demand(ref, demands)
@@ -57,12 +60,13 @@ defmodule GenStage.DemandDispatcher do
   defp dispatch_demand([], _length, demands) do
     {[], demands}
   end
+
   defp dispatch_demand(events, _length, [{0, _, _} | _] = demands) do
     {events, demands}
   end
+
   defp dispatch_demand(events, length, [{counter, pid, ref} | demands]) do
-    {deliver_now, deliver_later, length, counter} =
-      split_events(events, length, counter)
+    {deliver_now, deliver_later, length, counter} = split_events(events, length, counter)
     Process.send(pid, {:"$gen_consumer", {self(), ref}, deliver_now}, [:noconnect])
     demands = add_demand(counter, pid, ref, demands)
     dispatch_demand(deliver_later, length, demands)
@@ -71,17 +75,23 @@ defmodule GenStage.DemandDispatcher do
   defp split_events(events, length, counter) when length <= counter do
     {events, [], 0, counter - length}
   end
+
   defp split_events(events, length, counter) do
     {now, later} = Enum.split(events, counter)
     {now, later, length - counter, 0}
   end
 
-  defp add_demand(counter, pid, ref, [{c, _, _} | _] = demands) when counter > c,
-    do: [{counter, pid, ref} | demands]
-  defp add_demand(counter, pid, ref, [demand | demands]),
-    do: [demand | add_demand(counter, pid, ref, demands)]
-  defp add_demand(counter, pid, ref, []) when is_integer(counter),
-    do: [{counter, pid, ref}]
+  defp add_demand(counter, pid, ref, [{c, _, _} | _] = demands) when counter > c do
+    [{counter, pid, ref} | demands]
+  end
+
+  defp add_demand(counter, pid, ref, [demand | demands]) do
+    [demand | add_demand(counter, pid, ref, demands)]
+  end
+
+  defp add_demand(counter, pid, ref, []) when is_integer(counter) do
+    [{counter, pid, ref}]
+  end
 
   defp pop_demand(ref, demands) do
     {{current, _pid, ^ref}, rest} = List.keytake(demands, ref, 2)

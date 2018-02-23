@@ -11,16 +11,16 @@ defmodule ConsumerSupervisorTest do
   if function_exported?(Supervisor, :init, 2) do
     test "generates child_spec/1" do
       assert Simple.child_spec([:hello]) == %{
-        id: Simple,
-        start: {Simple, :start_link, [[:hello]]},
-        type: :supervisor
-      }
+               id: Simple,
+               start: {Simple, :start_link, [[:hello]]},
+               type: :supervisor
+             }
 
       defmodule Custom do
         use ConsumerSupervisor,
-            id: :id,
-            restart: :temporary,
-            start: {:foo, :bar, []}
+          id: :id,
+          restart: :temporary,
+          start: {:foo, :bar, []}
 
         def init(arg) do
           arg
@@ -28,11 +28,11 @@ defmodule ConsumerSupervisorTest do
       end
 
       assert Custom.child_spec([:hello]) == %{
-        id: :id,
-        restart: :temporary,
-        start: {:foo, :bar, []},
-        type: :supervisor
-      }
+               id: :id,
+               restart: :temporary,
+               start: {:foo, :bar, []},
+               type: :supervisor
+             }
     end
   end
 
@@ -40,42 +40,53 @@ defmodule ConsumerSupervisorTest do
     Process.flag(:trap_exit, true)
     worker = worker(Foo, [], restart: :transient)
 
-    assert ConsumerSupervisor.start_link(Simple, {:ok, [], []}) ==
-           {:error, {:bad_specs, "consumer supervisor expects a list with a single item as a template"}}
-    assert ConsumerSupervisor.start_link(Simple, {:ok, [1, 2], []}) ==
-           {:error, {:bad_specs, "consumer supervisor expects a list with a single item as a template"}}
+    error = {:bad_specs, "consumer supervisor expects a list with a single item as a template"}
+    assert ConsumerSupervisor.start_link(Simple, {:ok, [], []}) == {:error, error}
+
+    error = {:bad_specs, "consumer supervisor expects a list with a single item as a template"}
+    assert ConsumerSupervisor.start_link(Simple, {:ok, [1, 2], []}) == {:error, error}
+
     assert ConsumerSupervisor.start_link(Simple, {:ok, [worker], nil}) ==
-           {:error, {:bad_opts, "supervisor's init expects a keywords list as options"}}
+             {:error, {:bad_opts, "supervisor's init expects a keywords list as options"}}
+
     assert ConsumerSupervisor.start_link(Simple, {:ok, [worker], []}) ==
-           {:error, {:bad_opts, "supervisor expects a strategy to be given"}}
+             {:error, {:bad_opts, "supervisor expects a strategy to be given"}}
+
     assert ConsumerSupervisor.start_link(Simple, {:ok, [worker], [strategy: :unknown]}) ==
-           {:error, {:bad_opts, "unknown supervision strategy for consumer supervisor"}}
+             {:error, {:bad_opts, "unknown supervision strategy for consumer supervisor"}}
+
     assert ConsumerSupervisor.start_link(Simple, :unknown) ==
-           {:error, {:bad_return_value, :unknown}}
-    assert ConsumerSupervisor.start_link(Simple, :ignore) ==
-           :ignore
+             {:error, {:bad_return_value, :unknown}}
+
+    assert ConsumerSupervisor.start_link(Simple, :ignore) == :ignore
   end
 
   test "start_link/3 with bad child_spec" do
     Process.flag(:trap_exit, true)
 
     init = {:ok, [worker(Foo, [])], [strategy: :one_for_one]}
+
     assert {:error, {:bad_opts, "a child specification with :restart set to :permanent" <> _}} =
-           ConsumerSupervisor.start_link(Simple, init)
+             ConsumerSupervisor.start_link(Simple, init)
 
     init = {:ok, [worker(Foo, [], shutdown: :invalid)], [strategy: :one_for_one]}
+
     assert {:error, {:bad_specs, {:invalid_shutdown, :invalid}}} =
-           ConsumerSupervisor.start_link(Simple, init)
+             ConsumerSupervisor.start_link(Simple, init)
   end
 
   test "sets initial call to the same as a regular supervisor" do
     {:ok, pid} = Supervisor.start_link([], strategy: :one_for_one)
-    assert :proc_lib.initial_call(pid) ==
-           {:supervisor, Supervisor.Default, [:Argument__1]}
+    assert :proc_lib.initial_call(pid) == {:supervisor, Supervisor.Default, [:Argument__1]}
 
-    {:ok, pid} = ConsumerSupervisor.start_link([worker(Foo, [], restart: :transient)], strategy: :one_for_one)
+    {:ok, pid} =
+      ConsumerSupervisor.start_link(
+        [worker(Foo, [], restart: :transient)],
+        strategy: :one_for_one
+      )
+
     assert :proc_lib.initial_call(pid) ==
-           {:supervisor, ConsumerSupervisor.Default, [:Argument__1]}
+             {:supervisor, ConsumerSupervisor.Default, [:Argument__1]}
   end
 
   if function_exported?(:supervisor, :get_callback_module, 1) do
@@ -83,7 +94,9 @@ defmodule ConsumerSupervisorTest do
       {:ok, pid} = Supervisor.start_link([], strategy: :one_for_one)
       assert :supervisor.get_callback_module(pid) == Supervisor.Default
 
-      {:ok, pid} = ConsumerSupervisor.start_link([worker(Foo, [], restart: :transient)], strategy: :one_for_one)
+      children = [worker(Foo, [], restart: :transient)]
+      {:ok, pid} = ConsumerSupervisor.start_link(children, strategy: :one_for_one)
+
       assert :supervisor.get_callback_module(pid) == ConsumerSupervisor.Default
     end
   end
@@ -100,8 +113,7 @@ defmodule ConsumerSupervisorTest do
     assert Process.whereis(__MODULE__) == pid
 
     # And the initial call
-    assert {:supervisor, ConsumerSupervisorTest.Simple, 1} =
-           :proc_lib.translate_initial_call(pid)
+    assert {:supervisor, ConsumerSupervisorTest.Simple, 1} = :proc_lib.translate_initial_call(pid)
   end
 
   describe "init/2" do
@@ -111,7 +123,8 @@ defmodule ConsumerSupervisorTest do
         [{Foo, {Foo, :start_link, []}, :permanent, 5000, :worker, [Foo]}],
         [strategy: :one_for_one]
       }
-      assert expected == ConsumerSupervisor.init([worker(Foo, [])], [strategy: :one_for_one])
+
+      assert expected == ConsumerSupervisor.init([worker(Foo, [])], strategy: :one_for_one)
     end
 
     if function_exported?(Supervisor, :init, 2) do
@@ -121,7 +134,8 @@ defmodule ConsumerSupervisorTest do
           [%{id: Task, restart: :temporary, start: {Task, :start_link, [[:foo, :bar]]}}],
           [strategy: :one_for_one]
         }
-        assert expected == ConsumerSupervisor.init([{Task, [:foo, :bar]}], [strategy: :one_for_one])
+
+        assert expected == ConsumerSupervisor.init([{Task, [:foo, :bar]}], strategy: :one_for_one)
       end
 
       test "supports new child spec as atom" do
@@ -130,14 +144,17 @@ defmodule ConsumerSupervisorTest do
           [%{id: Task, restart: :temporary, start: {Task, :start_link, [[]]}}],
           [strategy: :one_for_one]
         }
-        assert expected == ConsumerSupervisor.init([Task], [strategy: :one_for_one])
+
+        assert expected == ConsumerSupervisor.init([Task], strategy: :one_for_one)
       end
     end
   end
 
   if function_exported?(Supervisor, :init, 2) do
     test "start_link/3 with new syntax" do
-      spec = {:ok, [%{id: Foo, restart: :temporary, start: {Foo, :start_link, [[]]}}], [strategy: :one_for_one]}
+      children = [%{id: Foo, restart: :temporary, start: {Foo, :start_link, [[]]}}]
+      spec = {:ok, children, [strategy: :one_for_one]}
+
       {:ok, pid} = ConsumerSupervisor.start_link(Simple, spec, name: __MODULE__)
 
       # Sets up a link
@@ -149,7 +166,7 @@ defmodule ConsumerSupervisorTest do
 
       # And the initial call
       assert {:supervisor, ConsumerSupervisorTest.Simple, 1} =
-             :proc_lib.translate_initial_call(pid)
+               :proc_lib.translate_initial_call(pid)
     end
   end
 
@@ -159,20 +176,23 @@ defmodule ConsumerSupervisorTest do
     worker = worker(Task, [:timer, :sleep, [:infinity]], restart: :transient)
     {:ok, pid} = ConsumerSupervisor.start_link(Simple, {:ok, [worker], strategy: :one_for_one})
 
-    assert fake_upgrade(pid, {:ok, [], []}) ==
-           {:error, {:error, {:bad_specs, "consumer supervisor expects a list with a single item as a template"}}}
-    assert fake_upgrade(pid, {:ok, [1, 2], []}) ==
-           {:error, {:error, {:bad_specs, "consumer supervisor expects a list with a single item as a template"}}}
-    assert fake_upgrade(pid, {:ok, [worker], nil}) ==
-           {:error, {:error, {:bad_opts, "supervisor's init expects a keywords list as options"}}}
-    assert fake_upgrade(pid, {:ok, [worker], []}) ==
-           {:error, {:error, {:bad_opts, "supervisor expects a strategy to be given"}}}
-    assert fake_upgrade(pid, {:ok, [worker], [strategy: :unknown]}) ==
-           {:error, {:error, {:bad_opts, "unknown supervision strategy for consumer supervisor"}}}
-    assert fake_upgrade(pid, :unknown) ==
-           {:error, :unknown}
-    assert fake_upgrade(pid, :ignore) ==
-           :ok
+    error = {:bad_specs, "consumer supervisor expects a list with a single item as a template"}
+    assert fake_upgrade(pid, {:ok, [], []}) == {:error, {:error, error}}
+
+    error = {:bad_specs, "consumer supervisor expects a list with a single item as a template"}
+    assert fake_upgrade(pid, {:ok, [1, 2], []}) == {:error, {:error, error}}
+
+    error = {:bad_opts, "supervisor's init expects a keywords list as options"}
+    assert fake_upgrade(pid, {:ok, [worker], nil}) == {:error, {:error, error}}
+
+    error = {:bad_opts, "supervisor expects a strategy to be given"}
+    assert fake_upgrade(pid, {:ok, [worker], []}) == {:error, {:error, error}}
+
+    error = {:bad_opts, "unknown supervision strategy for consumer supervisor"}
+    assert fake_upgrade(pid, {:ok, [worker], [strategy: :unknown]}) == {:error, {:error, error}}
+
+    assert fake_upgrade(pid, :unknown) == {:error, :unknown}
+    assert fake_upgrade(pid, :ignore) == :ok
   end
 
   test "code_change/3 with ok init" do
@@ -200,27 +220,27 @@ defmodule ConsumerSupervisorTest do
 
   ## start_child/2
 
-  def start_link(:ok3),     do: {:ok, spawn_link(fn -> :timer.sleep(:infinity) end), :extra}
-  def start_link(:ok2),     do: {:ok, spawn_link(fn -> :timer.sleep(:infinity) end)}
-  def start_link(:error),   do: {:error, :found}
-  def start_link(:ignore),  do: :ignore
+  def start_link(:ok3), do: {:ok, spawn_link(fn -> :timer.sleep(:infinity) end), :extra}
+  def start_link(:ok2), do: {:ok, spawn_link(fn -> :timer.sleep(:infinity) end)}
+  def start_link(:error), do: {:error, :found}
+  def start_link(:ignore), do: :ignore
   def start_link(:unknown), do: :unknown
 
   def start_link(:try_again, notify) do
     if Process.get(:try_again) do
       Process.put(:try_again, false)
-      send notify, {:try_again, false}
+      send(notify, {:try_again, false})
       {:error, :try_again}
     else
       Process.put(:try_again, true)
-      send notify, {:try_again, true}
+      send(notify, {:try_again, true})
       start_link(:ok2)
     end
   end
 
   def start_link(:non_local, :throw), do: throw(:oops)
   def start_link(:non_local, :error), do: raise("oops")
-  def start_link(:non_local, :exit),  do: exit(:oops)
+  def start_link(:non_local, :exit), do: exit(:oops)
 
   def start_link(:restart, value) do
     if Process.get({:restart, value}) do
@@ -246,12 +266,9 @@ defmodule ConsumerSupervisorTest do
     children = [worker(__MODULE__, [:non_local], restart: :transient)]
     {:ok, pid} = ConsumerSupervisor.start_link(children, strategy: :one_for_one)
 
-    assert {:error, {{:nocatch, :oops}, [_|_]}} =
-           ConsumerSupervisor.start_child(pid, [:throw])
-    assert {:error, {%RuntimeError{}, [_|_]}} =
-           ConsumerSupervisor.start_child(pid, [:error])
-    assert {:error, :oops} =
-           ConsumerSupervisor.start_child(pid, [:exit])
+    assert {:error, {{:nocatch, :oops}, [_ | _]}} = ConsumerSupervisor.start_child(pid, [:throw])
+    assert {:error, {%RuntimeError{}, [_ | _]}} = ConsumerSupervisor.start_child(pid, [:error])
+    assert {:error, :oops} = ConsumerSupervisor.start_child(pid, [:exit])
   end
 
   test "temporary child is not restarted regardless of reason" do
@@ -286,43 +303,59 @@ defmodule ConsumerSupervisorTest do
 
   test "child is restarted with different values" do
     children = [worker(__MODULE__, [:restart], restart: :transient)]
-    {:ok, pid} = ConsumerSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 100_000)
+
+    {:ok, pid} =
+      ConsumerSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 100_000)
 
     assert {:ok, child1} = ConsumerSupervisor.start_child(pid, [:ok2])
+
     assert [{:undefined, ^child1, :worker, [ConsumerSupervisorTest]}] =
-           ConsumerSupervisor.which_children(pid)
+             ConsumerSupervisor.which_children(pid)
+
     assert_kill child1, :kill
     assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(pid)
 
     assert {:ok, child2} = ConsumerSupervisor.start_child(pid, [:ok3])
-    assert [{:undefined, _, :worker, [ConsumerSupervisorTest]},
-            {:undefined, ^child2, :worker, [ConsumerSupervisorTest]}] =
-           ConsumerSupervisor.which_children(pid)
+
+    assert [
+             {:undefined, _, :worker, [ConsumerSupervisorTest]},
+             {:undefined, ^child2, :worker, [ConsumerSupervisorTest]}
+           ] = ConsumerSupervisor.which_children(pid)
+
     assert_kill child2, :kill
     assert %{workers: 2, active: 2} = ConsumerSupervisor.count_children(pid)
 
     assert {:ok, child3} = ConsumerSupervisor.start_child(pid, [:ignore])
-    assert [{:undefined, _, :worker, [ConsumerSupervisorTest]},
-            {:undefined, _, :worker, [ConsumerSupervisorTest]},
-            {:undefined, _, :worker, [ConsumerSupervisorTest]}] =
-           ConsumerSupervisor.which_children(pid)
+
+    assert [
+             {:undefined, _, :worker, [ConsumerSupervisorTest]},
+             {:undefined, _, :worker, [ConsumerSupervisorTest]},
+             {:undefined, _, :worker, [ConsumerSupervisorTest]}
+           ] = ConsumerSupervisor.which_children(pid)
+
     assert_kill child3, :kill
     assert %{workers: 2, active: 2} = ConsumerSupervisor.count_children(pid)
 
     assert {:ok, child4} = ConsumerSupervisor.start_child(pid, [:error])
-    assert [{:undefined, _, :worker, [ConsumerSupervisorTest]},
-            {:undefined, _, :worker, [ConsumerSupervisorTest]},
-            {:undefined, _, :worker, [ConsumerSupervisorTest]}] =
-            ConsumerSupervisor.which_children(pid)
+
+    assert [
+             {:undefined, _, :worker, [ConsumerSupervisorTest]},
+             {:undefined, _, :worker, [ConsumerSupervisorTest]},
+             {:undefined, _, :worker, [ConsumerSupervisorTest]}
+           ] = ConsumerSupervisor.which_children(pid)
+
     assert_kill child4, :kill
     assert %{workers: 3, active: 2} = ConsumerSupervisor.count_children(pid)
 
     assert {:ok, child5} = ConsumerSupervisor.start_child(pid, [:unknown])
-    assert [{:undefined, _, :worker, [ConsumerSupervisorTest]},
-            {:undefined, _, :worker, [ConsumerSupervisorTest]},
-            {:undefined, :restarting, :worker, [ConsumerSupervisorTest]},
-            {:undefined, _, :worker, [ConsumerSupervisorTest]}] =
-            ConsumerSupervisor.which_children(pid)
+
+    assert [
+             {:undefined, _, :worker, [ConsumerSupervisorTest]},
+             {:undefined, _, :worker, [ConsumerSupervisorTest]},
+             {:undefined, :restarting, :worker, [ConsumerSupervisorTest]},
+             {:undefined, _, :worker, [ConsumerSupervisorTest]}
+           ] = ConsumerSupervisor.which_children(pid)
+
     assert_kill child5, :kill
     assert %{workers: 4, active: 2} = ConsumerSupervisor.count_children(pid)
   end
@@ -414,7 +447,11 @@ defmodule ConsumerSupervisorTest do
     children = [worker(Task, [], shutdown: :infinity, restart: :transient)]
     {:ok, sup} = ConsumerSupervisor.start_link(children, strategy: :one_for_one)
 
-    fun = fn -> Process.flag(:trap_exit, true); receive(do: (_ -> exit({:shutdown, :oops}))) end
+    fun = fn ->
+      Process.flag(:trap_exit, true)
+      receive(do: (_ -> exit({:shutdown, :oops})))
+    end
+
     assert {:ok, child1} = ConsumerSupervisor.start_child(sup, [fun])
     assert {:ok, child2} = ConsumerSupervisor.start_child(sup, [fun])
     assert {:ok, child3} = ConsumerSupervisor.start_child(sup, [fun])
@@ -452,7 +489,11 @@ defmodule ConsumerSupervisorTest do
     children = [worker(Task, [], shutdown: 1000, restart: :transient)]
     {:ok, sup} = ConsumerSupervisor.start_link(children, strategy: :one_for_one)
 
-    fun = fn -> Process.flag(:trap_exit, true); receive(do: (_ -> exit({:shutdown, :oops}))) end
+    fun = fn ->
+      Process.flag(:trap_exit, true)
+      receive(do: (_ -> exit({:shutdown, :oops})))
+    end
+
     assert {:ok, child1} = ConsumerSupervisor.start_child(sup, [fun])
     assert {:ok, child2} = ConsumerSupervisor.start_child(sup, [fun])
     assert {:ok, child3} = ConsumerSupervisor.start_child(sup, [fun])
@@ -472,7 +513,12 @@ defmodule ConsumerSupervisorTest do
     {:ok, sup} = ConsumerSupervisor.start_link(children, strategy: :one_for_one)
 
     fun = fn -> :timer.sleep(:infinity) end
-    tmt = fn -> Process.flag(:trap_exit, true); :timer.sleep(:infinity) end
+
+    tmt = fn ->
+      Process.flag(:trap_exit, true)
+      :timer.sleep(:infinity)
+    end
+
     assert {:ok, child1} = ConsumerSupervisor.start_child(sup, [fun])
     assert {:ok, child2} = ConsumerSupervisor.start_child(sup, [tmt])
     assert {:ok, child3} = ConsumerSupervisor.start_child(sup, [fun])
@@ -520,7 +566,9 @@ defmodule ConsumerSupervisorTest do
 
   test "terminates restarting child" do
     children = [worker(__MODULE__, [:restart], restart: :transient)]
-    {:ok, sup} = ConsumerSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 100_000)
+
+    {:ok, sup} =
+      ConsumerSupervisor.start_link(children, strategy: :one_for_one, max_restarts: 100_000)
 
     assert {:ok, child} = ConsumerSupervisor.start_child(sup, [:error])
     assert_kill child, :kill
@@ -532,8 +580,10 @@ defmodule ConsumerSupervisorTest do
 
   defmodule Consumer do
     def start_link(opts \\ []) do
-      children = [worker(__MODULE__, [self()],
-        opts ++ [function: :start_child, restart: :temporary])]
+      children = [
+        worker(__MODULE__, [self()], opts ++ [function: :start_child, restart: :temporary])
+      ]
+
       opts = opts ++ [strategy: :one_for_one, max_restarts: 0]
       ConsumerSupervisor.start_link(children, opts)
     end
@@ -543,19 +593,23 @@ defmodule ConsumerSupervisorTest do
       send(pid, {:child_started, child})
       {:ok, child}
     end
+
     def start_child(pid, :ok3) do
       child = spawn_link(:timer, :sleep, [:infinity])
       send(pid, {:child_started, child})
       {:ok, child, :extra}
     end
+
     def start_child(pid, :error) do
       send(pid, :child_start_error)
       {:error, :found}
     end
+
     def start_child(pid, :ignore) do
       send(pid, :child_ignore)
       :ignore
     end
+
     def start_child(pid, :unknown) do
       send(pid, :child_start_unknown)
       :unknown
@@ -563,9 +617,17 @@ defmodule ConsumerSupervisorTest do
 
     def start_child(pid, {:non_local, class}) do
       send(pid, {:child_non_local, class})
-      stack = try do throw(:oops) catch :oops -> System.stacktrace() end
+
+      stack =
+        try do
+          throw(:oops)
+        catch
+          :oops -> System.stacktrace()
+        end
+
       :erlang.raise(class, :oops, stack)
     end
+
     def start_child(pid, {:restart, value}) do
       if Process.get({:restart, value}) do
         start_child(pid, value)
@@ -612,14 +674,16 @@ defmodule ConsumerSupervisorTest do
 
     @tag :capture_log
     test "returns errors on bad options" do
-       {:ok, sup} = Consumer.start_link()
+      {:ok, sup} = Consumer.start_link()
 
       assert {:error, {:bad_opts, message}} =
-             GenStage.sync_subscribe(sup, to: :whatever, max_demand: 0)
+               GenStage.sync_subscribe(sup, to: :whatever, max_demand: 0)
+
       assert message == "expected :max_demand to be equal to or greater than 1, got: 0"
 
       assert {:error, {:bad_opts, message}} =
-             GenStage.sync_subscribe(sup, to: :whatever, min_demand: 2000)
+               GenStage.sync_subscribe(sup, to: :whatever, min_demand: 2000)
+
       assert message == "expected :min_demand to be equal to or less than 999, got: 2000"
     end
 
@@ -668,8 +732,7 @@ defmodule ConsumerSupervisorTest do
 
       Producer.sync_queue(producer, [:ok2])
       assert_receive {:child_started, ok2}
-      assert [{:undefined, ^ok2, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+      assert [{:undefined, ^ok2, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
 
       Producer.sync_queue(producer, [:ok3])
       assert_receive {:child_started, _}
@@ -677,23 +740,26 @@ defmodule ConsumerSupervisorTest do
 
       Producer.sync_queue(producer, [:error])
       assert_receive :child_start_error
-      assert [{:undefined, _, :worker, [Consumer]},
-              {:undefined, _, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+
+      assert [{:undefined, _, :worker, [Consumer]}, {:undefined, _, :worker, [Consumer]}] =
+               ConsumerSupervisor.which_children(sup)
+
       assert %{workers: 2, active: 2} = ConsumerSupervisor.count_children(sup)
 
       Producer.sync_queue(producer, [:ignore])
       assert_receive :child_ignore
-      assert [{:undefined, _, :worker, [Consumer]},
-              {:undefined, _, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+
+      assert [{:undefined, _, :worker, [Consumer]}, {:undefined, _, :worker, [Consumer]}] =
+               ConsumerSupervisor.which_children(sup)
+
       assert %{workers: 2, active: 2} = ConsumerSupervisor.count_children(sup)
 
       Producer.sync_queue(producer, [:unknown])
       assert_receive :child_start_unknown
-      assert [{:undefined, _, :worker, [Consumer]},
-              {:undefined, _, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+
+      assert [{:undefined, _, :worker, [Consumer]}, {:undefined, _, :worker, [Consumer]}] =
+               ConsumerSupervisor.which_children(sup)
+
       assert %{workers: 2, active: 2} = ConsumerSupervisor.count_children(sup)
     end
 
@@ -736,8 +802,7 @@ defmodule ConsumerSupervisorTest do
 
       Producer.sync_queue(producer, [:ok2, :error, :ignore, :ok2, :ok2, :ok2])
       assert_receive {:child_started, child1}
-      assert [{:undefined, ^child1, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+      assert [{:undefined, ^child1, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
       assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
       refute_received :child_start_error
 
@@ -745,48 +810,45 @@ defmodule ConsumerSupervisorTest do
       assert_receive :child_start_error
       assert_receive :child_ignore
       assert_receive {:child_started, child2}
-      assert [{:undefined, ^child2, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+      assert [{:undefined, ^child2, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
       assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
       refute_received {:child_started, _}
 
       assert ConsumerSupervisor.terminate_child(sup, child2) == :ok
       assert_receive {:child_started, child3}
-      assert [{:undefined, ^child3, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+      assert [{:undefined, ^child3, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
       assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
       refute_received {:child_started, _}
     end
 
     test "restarting children counted in max_demand" do
       {:ok, producer} = Producer.start_link()
-      {:ok, sup} = Consumer.start_link([restart: :transient, max_restarts: 100_000])
+      {:ok, sup} = Consumer.start_link(restart: :transient, max_restarts: 100_000)
       opts = [to: producer, cancel: :temporary, max_demand: 1, min_demand: 0]
       assert {:ok, _} = GenStage.sync_subscribe(sup, opts)
 
       Producer.sync_queue(producer, [{:restart, :error}, :ok2, :ok2, :ok2])
       assert_receive {:child_started, child1}
       assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
-      assert [{:undefined, ^child1, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+      assert [{:undefined, ^child1, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
 
       assert_kill child1, :kill
       assert %{workers: 1, active: 0} = ConsumerSupervisor.count_children(sup)
+
       assert [{:undefined, :restarting, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+               ConsumerSupervisor.which_children(sup)
+
       refute_received {:child_started, _}
 
       assert ConsumerSupervisor.terminate_child(sup, child1) == :ok
       assert_receive {:child_started, child2}
       assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
-      assert [{:undefined, ^child2, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+      assert [{:undefined, ^child2, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
 
       assert_kill child2, :kill
       assert_receive {:child_started, child3}
       assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
-      assert [{:undefined, ^child3, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+      assert [{:undefined, ^child3, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
 
       refute_receive {:child_started, _}
     end
@@ -807,8 +869,7 @@ defmodule ConsumerSupervisorTest do
 
       assert %{workers: 2, active: 2} = ConsumerSupervisor.count_children(sup)
       assert_kill child1, :shutdown
-      assert [{:undefined, ^child2, :worker, [Consumer]}] =
-        ConsumerSupervisor.which_children(sup)
+      assert [{:undefined, ^child2, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
 
       assert ConsumerSupervisor.terminate_child(sup, child2) == :ok
       assert %{workers: 0, active: 0} = ConsumerSupervisor.count_children(sup)
@@ -846,19 +907,21 @@ defmodule ConsumerSupervisorTest do
     end
 
     test "ask for more events when count reaches min_demand (low)" do
-      {:ok, producer} = Task.start_link(fn ->
-        receive do
-          {:"$gen_producer", _, {:subscribe, _, _}} ->
-            receive do
-              {:"$gen_producer", {pid, ref}, {:ask, 3}} ->
-                send(pid, {:"$gen_consumer", {pid, ref}, [:ok2, :ok2]})
-                receive do
-                  {:"$gen_producer", _, {:ask, _}} ->
-                    raise "oops"
-                end
-            end
-        end
-      end)
+      {:ok, producer} =
+        Task.start_link(fn ->
+          receive do
+            {:"$gen_producer", _, {:subscribe, _, _}} ->
+              receive do
+                {:"$gen_producer", {pid, ref}, {:ask, 3}} ->
+                  send(pid, {:"$gen_consumer", {pid, ref}, [:ok2, :ok2]})
+
+                  receive do
+                    {:"$gen_producer", _, {:ask, _}} ->
+                      raise "oops"
+                  end
+              end
+          end
+        end)
 
       {:ok, sup} = Consumer.start_link()
       opts = [to: producer, cancel: :temporary, max_demand: 3, min_demand: 0]

@@ -65,9 +65,12 @@ defmodule GenStage.PartitionDispatcher do
     partitions =
       case Keyword.get(opts, :partitions) do
         nil ->
-          raise ArgumentError, "the enumerable of :partitions is required when using the partition dispatcher"
+          raise ArgumentError,
+                "the enumerable of :partitions is required when using the partition dispatcher"
+
         partitions when is_integer(partitions) ->
-          0..partitions-1
+          0..(partitions - 1)
+
         partitions ->
           partitions
       end
@@ -103,8 +106,12 @@ defmodule GenStage.PartitionDispatcher do
 
     infos =
       case queued do
-        [] -> send(self(), msg); infos
-        _  -> Map.put(infos, info, {msg, queued})
+        [] ->
+          send(self(), msg)
+          infos
+
+        _ ->
+          Map.put(infos, info, {msg, queued})
       end
 
     {:ok, {tag, hash, waiting, pending, partitions, references, infos}}
@@ -113,18 +120,23 @@ defmodule GenStage.PartitionDispatcher do
   @doc false
   def subscribe(opts, {pid, ref}, {tag, hash, waiting, pending, partitions, references, infos}) do
     partition = Keyword.get(opts, :partition)
+
     case partitions do
       %{^partition => {nil, nil, demand_or_queue}} ->
         partitions = Map.put(partitions, partition, {pid, ref, demand_or_queue})
         references = Map.put(references, ref, partition)
         {:ok, 0, {tag, hash, waiting, pending, partitions, references, infos}}
+
       %{^partition => {pid, _, _}} ->
-        raise ArgumentError, "the partition #{partition} is already taken by #{inspect pid}"
+        raise ArgumentError, "the partition #{partition} is already taken by #{inspect(pid)}"
+
       _ when is_nil(partition) ->
-        raise ArgumentError, "the :partition option is required when subscribing to a producer with partition dispatcher"
+        raise ArgumentError,
+              "the :partition option is required when subscribing to a producer with partition dispatcher"
+
       _ ->
         keys = Map.keys(partitions)
-        raise ArgumentError, ":partition must be one of #{inspect keys}, got: #{partition}"
+        raise ArgumentError, ":partition must be one of #{inspect(keys)}, got: #{partition}"
     end
   end
 
@@ -133,9 +145,11 @@ defmodule GenStage.PartitionDispatcher do
     {partition, references} = Map.pop(references, ref)
     {_pid, _ref, demand_or_queue} = Map.get(partitions, partition)
     partitions = Map.put(partitions, partition, @init)
+
     case demand_or_queue do
       demand when is_integer(demand) ->
         {:ok, 0, {tag, hash, waiting, pending + demand, partitions, references, infos}}
+
       queue ->
         {length, infos} = clear_queue(queue, tag, partition, 0, infos)
         {:ok, length, {tag, hash, waiting + length, pending, partitions, references, infos}}
@@ -151,6 +165,7 @@ defmodule GenStage.PartitionDispatcher do
       case demand_or_queue do
         demand when is_integer(demand) ->
           {demand + counter, infos}
+
         queue ->
           send_from_queue(queue, tag, pid, ref, partition, counter, [], infos)
       end
@@ -166,14 +181,17 @@ defmodule GenStage.PartitionDispatcher do
     maybe_send(acc, pid, ref)
     {queue, infos}
   end
+
   defp send_from_queue(queue, tag, pid, ref, partition, counter, acc, infos) do
     case :queue.out(queue) do
       {{:value, {^tag, info}}, queue} ->
         maybe_send(acc, pid, ref)
         infos = maybe_info(infos, info, partition)
         send_from_queue(queue, tag, pid, ref, partition, counter, [], infos)
+
       {{:value, event}, queue} ->
         send_from_queue(queue, tag, pid, ref, partition, counter - 1, [event | acc], infos)
+
       {:empty, _queue} ->
         maybe_send(acc, pid, ref)
         {counter, infos}
@@ -184,16 +202,18 @@ defmodule GenStage.PartitionDispatcher do
     case :queue.out(queue) do
       {{:value, {^tag, info}}, queue} ->
         clear_queue(queue, tag, partition, counter, maybe_info(infos, info, partition))
+
       {{:value, _}, queue} ->
         clear_queue(queue, tag, partition, counter + 1, infos)
+
       {:empty, _queue} ->
         {counter, infos}
     end
   end
 
   # Important: events must be in reverse order
-  defp maybe_send([], _pid, _ref),
-    do: :ok
+  defp maybe_send([], _pid, _ref), do: :ok
+
   defp maybe_send(events, pid, ref),
     do: Process.send(pid, {:"$gen_consumer", {self(), ref}, :lists.reverse(events)}, [:noconnect])
 
@@ -202,6 +222,7 @@ defmodule GenStage.PartitionDispatcher do
       %{^info => {msg, [^partition]}} ->
         send(self(), msg)
         Map.delete(infos, info)
+
       %{^info => {msg, partitions}} ->
         Map.put(infos, info, {msg, List.delete(partitions, partition)})
     end
@@ -209,19 +230,19 @@ defmodule GenStage.PartitionDispatcher do
 
   @doc false
   def dispatch(events, _length, {tag, hash, waiting, pending, partitions, references, infos}) do
-    {deliver_now, deliver_later, waiting} =
-      split_events(events, waiting, [])
+    {deliver_now, deliver_later, waiting} = split_events(events, waiting, [])
 
     for event <- deliver_now do
       {event, partition} = hash.(event)
 
       case :erlang.get(partition) do
         :undefined ->
-          Logger.error fn ->
-            "Unknown partition #{inspect partition} computed for GenStage/Flow event " <>
-              "#{inspect event}. The known partitions are #{inspect Map.keys(partitions)}. " <>
+          Logger.error(fn ->
+            "Unknown partition #{inspect(partition)} computed for GenStage/Flow event " <>
+              "#{inspect(event)}. The known partitions are #{inspect(Map.keys(partitions))}. " <>
               "See the :partitions option to set your own. This event has been discarded."
-          end
+          end)
+
         current ->
           Process.put(partition, [event | current])
       end
@@ -229,17 +250,16 @@ defmodule GenStage.PartitionDispatcher do
 
     partitions =
       partitions
-      |> :maps.to_list
-      |> dispatch_per_partition
-      |> :maps.from_list
+      |> :maps.to_list()
+      |> dispatch_per_partition()
+      |> :maps.from_list()
 
     {:ok, deliver_later, {tag, hash, waiting, pending, partitions, references, infos}}
   end
 
-  defp split_events(events, 0, acc),
-    do: {:lists.reverse(acc), events, 0}
-  defp split_events([], counter, acc),
-    do: {:lists.reverse(acc), [], counter}
+  defp split_events(events, 0, acc), do: {:lists.reverse(acc), events, 0}
+  defp split_events([], counter, acc), do: {:lists.reverse(acc), [], counter}
+
   defp split_events([event | events], counter, acc),
     do: split_events(events, counter - 1, [event | acc])
 
@@ -247,6 +267,7 @@ defmodule GenStage.PartitionDispatcher do
     case Process.put(partition, []) do
       [] ->
         [{partition, value} | dispatch_per_partition(rest)]
+
       events ->
         events = :lists.reverse(events)
 
@@ -254,6 +275,7 @@ defmodule GenStage.PartitionDispatcher do
           case demand_or_queue do
             demand when is_integer(demand) ->
               split_into_queue(events, demand, [])
+
             queue ->
               {[], put_into_queue(events, queue)}
           end
@@ -262,14 +284,14 @@ defmodule GenStage.PartitionDispatcher do
         [{partition, {pid, ref, demand_or_queue}} | dispatch_per_partition(rest)]
     end
   end
+
   defp dispatch_per_partition([]) do
     []
   end
 
-  defp split_into_queue(events, 0, acc),
-    do: {acc, put_into_queue(events, :queue.new)}
-  defp split_into_queue([], counter, acc),
-    do: {acc, counter}
+  defp split_into_queue(events, 0, acc), do: {acc, put_into_queue(events, :queue.new())}
+  defp split_into_queue([], counter, acc), do: {acc, counter}
+
   defp split_into_queue([event | events], counter, acc),
     do: split_into_queue(events, counter - 1, [event | acc])
 

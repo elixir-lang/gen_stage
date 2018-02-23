@@ -78,7 +78,7 @@ defmodule GenStageTest do
     def handle_demand(demand, counter) when demand > 0 do
       # If the counter is 3 and we ask for 2 items, we will
       # emit the items 3 and 4, and set the state to 5.
-      events = Enum.to_list(counter..counter+demand-1)
+      events = Enum.to_list(counter..(counter + demand - 1))
       {:noreply, events, counter + demand}
     end
   end
@@ -121,17 +121,17 @@ defmodule GenStageTest do
     end
 
     def handle_subscribe(kind, opts, from, recipient) do
-      send recipient, {:producer_consumer_subscribed, kind, from}
+      send(recipient, {:producer_consumer_subscribed, kind, from})
       {Keyword.get(opts, :producer_consumer_demand, :automatic), recipient}
     end
 
     def handle_cancel(reason, from, recipient) do
-      send recipient, {:producer_consumer_cancelled, from, reason}
+      send(recipient, {:producer_consumer_cancelled, from, reason})
       {:noreply, [], recipient}
     end
 
     def handle_events(events, _from, recipient) do
-      send recipient, {:producer_consumed, events}
+      send(recipient, {:producer_consumed, events})
       {:noreply, Enum.flat_map(events, &[&1, &1]), recipient}
     end
 
@@ -157,7 +157,7 @@ defmodule GenStageTest do
     end
 
     def handle_events(events, _from, recipient) do
-      send recipient, {:producer_consumed, events}
+      send(recipient, {:producer_consumed, events})
       {:noreply, [], recipient}
     end
   end
@@ -191,7 +191,7 @@ defmodule GenStageTest do
     end
 
     def handle_subscribe(:producer, opts, from, recipient) do
-      send recipient, {:consumer_subscribed, from}
+      send(recipient, {:consumer_subscribed, from})
       {Keyword.get(opts, :consumer_demand, :automatic), recipient}
     end
 
@@ -201,26 +201,26 @@ defmodule GenStageTest do
     end
 
     def handle_events(events, _from, recipient) do
-      send recipient, {:consumed, events}
+      send(recipient, {:consumed, events})
       {:noreply, [], recipient}
     end
 
     def handle_cancel(reason, from, recipient) do
-      send recipient, {:consumer_cancelled, from, reason}
+      send(recipient, {:consumer_cancelled, from, reason})
       {:noreply, [], recipient}
     end
 
     def terminate(reason, state) do
-      send state, {:terminated, reason}
+      send(state, {:terminated, reason})
     end
   end
 
-    if function_exported?(Supervisor, :init, 2) do
+  if function_exported?(Supervisor, :init, 2) do
     test "generates child_spec/1" do
       assert Counter.child_spec([:hello]) == %{
-        id: Counter,
-        start: {Counter, :start_link, [[:hello]]},
-      }
+               id: Counter,
+               start: {Counter, :start_link, [[:hello]]}
+             }
 
       defmodule Custom do
         use GenStage,
@@ -233,11 +233,11 @@ defmodule GenStageTest do
       end
 
       assert Custom.child_spec([:hello]) == %{
-        id: :id,
-        restart: :temporary,
-        shutdown: :infinity,
-        start: {:foo, :bar, []}
-      }
+               id: :id,
+               restart: :temporary,
+               shutdown: :infinity,
+               start: {:foo, :bar, []}
+             }
     end
   end
 
@@ -254,8 +254,11 @@ defmodule GenStageTest do
 
     test "with 80% min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{producer, min_demand: 80, max_demand: 100}]})
+
+      {:ok, _} =
+        Forwarder.start_link(
+          {:consumer, self(), subscribe_to: [{producer, min_demand: 80, max_demand: 100}]}
+        )
 
       batch = Enum.to_list(0..19)
       assert_receive {:consumed, ^batch}
@@ -267,8 +270,11 @@ defmodule GenStageTest do
 
     test "with 20% min demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{producer, min_demand: 20, max_demand: 100}]})
+
+      {:ok, _} =
+        Forwarder.start_link(
+          {:consumer, self(), subscribe_to: [{producer, min_demand: 20, max_demand: 100}]}
+        )
 
       batch = Enum.to_list(0..79)
       assert_receive {:consumed, ^batch}
@@ -293,7 +299,9 @@ defmodule GenStageTest do
     end
 
     test "with shared (broadcast) demand" do
-      {:ok, producer} = Counter.start_link({:producer, 0, dispatcher: GenStage.BroadcastDispatcher})
+      {:ok, producer} =
+        Counter.start_link({:producer, 0, dispatcher: GenStage.BroadcastDispatcher})
+
       {:ok, consumer1} = Forwarder.start_link({:consumer, self()})
       {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
 
@@ -307,12 +315,14 @@ defmodule GenStageTest do
     end
 
     test "with shared (broadcast) demand and synchronizer subscriber" do
-      {:ok, producer} = Counter.start_link({:producer, 0, dispatcher: GenStage.BroadcastDispatcher})
+      {:ok, producer} =
+        Counter.start_link({:producer, 0, dispatcher: GenStage.BroadcastDispatcher})
+
       {:ok, consumer1} = Forwarder.start_link({:consumer, self()})
       {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
 
       # Subscribe but not demand
-      send producer, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, nil, []}}
+      send(producer, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, nil, []}})
 
       # Further subscriptions will block
       GenStage.sync_subscribe(consumer1, to: producer, max_demand: 10, min_demand: 0)
@@ -320,7 +330,7 @@ defmodule GenStageTest do
       refute_received {:consumed, _}
 
       # Cancel the stale one
-      send producer, {:"$gen_producer", {self(), stage_ref}, {:cancel, :killed}}
+      send(producer, {:"$gen_producer", {self(), stage_ref}, {:cancel, :killed}})
 
       # Because there is a race condition between subscriptions
       # we will assert for events just later on.
@@ -332,10 +342,17 @@ defmodule GenStageTest do
   describe "producer-producer_consumer-consumer demand" do
     test "with 80% min demand with init subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, doubler} = Doubler.start_link({:producer_consumer, self(),
-                                           subscribe_to: [{producer, max_demand: 100, min_demand: 80}]})
-      {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]})
+
+      {:ok, doubler} =
+        Doubler.start_link(
+          {:producer_consumer, self(),
+           subscribe_to: [{producer, max_demand: 100, min_demand: 80}]}
+        )
+
+      {:ok, _} =
+        Forwarder.start_link(
+          {:consumer, self(), subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]}
+        )
 
       batch = Enum.to_list(0..19)
       assert_receive {:producer_consumed, ^batch}
@@ -354,10 +371,17 @@ defmodule GenStageTest do
 
     test "with 20% min demand with init subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, doubler} = Doubler.start_link({:producer_consumer, self(),
-                                           subscribe_to: [{producer, max_demand: 100, min_demand: 20}]})
-      {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]})
+
+      {:ok, doubler} =
+        Doubler.start_link(
+          {:producer_consumer, self(),
+           subscribe_to: [{producer, max_demand: 100, min_demand: 20}]}
+        )
+
+      {:ok, _} =
+        Forwarder.start_link(
+          {:consumer, self(), subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]}
+        )
 
       batch = Enum.to_list(0..79)
       assert_receive {:producer_consumed, ^batch}
@@ -373,7 +397,7 @@ defmodule GenStageTest do
 
     test "with 80% min demand with late subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, doubler}  = Doubler.start_link({:producer_consumer, self()})
+      {:ok, doubler} = Doubler.start_link({:producer_consumer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
 
       # Now let's try consumer first
@@ -397,7 +421,7 @@ defmodule GenStageTest do
 
     test "with 20% min demand with later subscription" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, doubler}  = Doubler.start_link({:producer_consumer, self()})
+      {:ok, doubler} = Doubler.start_link({:producer_consumer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
 
       # Now let's try consumer first
@@ -418,10 +442,17 @@ defmodule GenStageTest do
 
     test "keeps emitting events even when discarded" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, doubler} = Discarder.start_link({:producer_consumer, self(),
-                                            subscribe_to: [{producer, max_demand: 100, min_demand: 80}]})
-      {:ok, _} = Forwarder.start_link({:consumer, self(),
-                                       subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]})
+
+      {:ok, doubler} =
+        Discarder.start_link(
+          {:producer_consumer, self(),
+           subscribe_to: [{producer, max_demand: 100, min_demand: 80}]}
+        )
+
+      {:ok, _} =
+        Forwarder.start_link(
+          {:consumer, self(), subscribe_to: [{doubler, max_demand: 100, min_demand: 50}]}
+        )
 
       batch = Enum.to_list(0..19)
       assert_receive {:producer_consumed, ^batch}
@@ -433,9 +464,13 @@ defmodule GenStageTest do
 
     test "with shared (broadcast) demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, doubler}  = Doubler.start_link({:producer_consumer, self(),
-                                            dispatcher: GenStage.BroadcastDispatcher,
-                                            subscribe_to: [producer]})
+
+      {:ok, doubler} =
+        Doubler.start_link(
+          {:producer_consumer, self(),
+           dispatcher: GenStage.BroadcastDispatcher, subscribe_to: [producer]}
+        )
+
       {:ok, consumer1} = Forwarder.start_link({:consumer, self()})
       {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
 
@@ -450,15 +485,18 @@ defmodule GenStageTest do
 
     test "with shared (broadcast) demand and synchronizer subscriber" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, doubler}  = Doubler.start_link({:producer_consumer, self(),
-                                            dispatcher: GenStage.BroadcastDispatcher,
-                                            subscribe_to: [producer]})
+
+      {:ok, doubler} =
+        Doubler.start_link(
+          {:producer_consumer, self(),
+           dispatcher: GenStage.BroadcastDispatcher, subscribe_to: [producer]}
+        )
 
       {:ok, consumer1} = Forwarder.start_link({:consumer, self()})
       {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
 
       # Subscribe but not demand
-      send doubler, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, nil, []}}
+      send(doubler, {:"$gen_producer", {self(), stage_ref = make_ref()}, {:subscribe, nil, []}})
 
       # Further subscriptions will block
       GenStage.sync_subscribe(consumer1, to: doubler, max_demand: 10, min_demand: 0)
@@ -466,7 +504,7 @@ defmodule GenStageTest do
       refute_received {:consumed, _}
 
       # Cancel the stale one
-      send doubler, {:"$gen_producer", {self(), stage_ref}, {:cancel, :killed}}
+      send(doubler, {:"$gen_producer", {self(), stage_ref}, {:cancel, :killed}})
 
       # Because there is a race condition between subscriptions
       # we will assert for events just later on.
@@ -476,10 +514,17 @@ defmodule GenStageTest do
 
     test "queued events with lost producer" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      {:ok, doubler}  = Doubler.start_link({:producer_consumer, self()})
+      {:ok, doubler} = Doubler.start_link({:producer_consumer, self()})
 
-      {:ok, ref} = GenStage.sync_subscribe(doubler, to: producer, cancel: :temporary,
-                                           min_demand: 50, max_demand: 100)
+      {:ok, ref} =
+        GenStage.sync_subscribe(
+          doubler,
+          to: producer,
+          cancel: :temporary,
+          min_demand: 50,
+          max_demand: 100
+        )
+
       assert_receive {:producer_consumer_subscribed, :producer, {^producer, ^ref}}
 
       GenStage.cancel({producer, ref}, :done)
@@ -490,6 +535,7 @@ defmodule GenStageTest do
       GenStage.sync_subscribe(consumer, to: doubler, min_demand: 50, max_demand: 100)
 
       batch = Enum.to_list(0..99)
+
       receive do
         {:producer_consumed, ^batch} -> :ok
       after
@@ -499,6 +545,7 @@ defmodule GenStageTest do
           batch = Enum.to_list(50..99)
           assert_receive {:producer_consumed, ^batch}
       end
+
       batch = Enum.flat_map(0..24, &[&1, &1])
       assert_receive {:consumed, ^batch}
       batch = Enum.flat_map(25..49, &[&1, &1])
@@ -564,7 +611,7 @@ defmodule GenStageTest do
   describe "buffer" do
     test "stores events when there is no demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      send producer, {:queue, [:a, :b, :c]}
+      send(producer, {:queue, [:a, :b, :c]})
       Counter.async_queue(producer, [:d, :e])
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
@@ -580,9 +627,12 @@ defmodule GenStageTest do
       {:ok, producer} = Counter.start_link({:producer, 0, buffer_size: 5, buffer_keep: :first})
       0 = Counter.sync_queue(producer, [:a, :b, :c, :d, :e])
 
-      assert capture_log(fn ->
-        0 = Counter.sync_queue(producer, [:f, :g, :h])
-      end) =~ "GenStage producer #{inspect producer} has discarded 3 events from buffer"
+      log =
+        capture_log(fn ->
+          0 = Counter.sync_queue(producer, [:f, :g, :h])
+        end)
+
+      assert log =~ "GenStage producer #{inspect(producer)} has discarded 3 events from buffer"
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
@@ -594,9 +644,12 @@ defmodule GenStageTest do
       {:ok, producer} = Counter.start_link({:producer, 0, buffer_size: 5})
       0 = Counter.sync_queue(producer, [:a, :b, :c, :d, :e])
 
-      assert capture_log(fn ->
-        0 = Counter.sync_queue(producer, [:f, :g, :h])
-      end) =~ "GenStage producer #{inspect producer} has discarded 3 events from buffer"
+      log =
+        capture_log(fn ->
+          0 = Counter.sync_queue(producer, [:f, :g, :h])
+        end)
+
+      assert log =~ "GenStage producer #{inspect(producer)} has discarded 3 events from buffer"
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
@@ -639,7 +692,7 @@ defmodule GenStageTest do
       assert_receive :async
     end
 
-  test "delivers info to producer_consumer immediately when there is incoming buffer" do
+    test "delivers info to producer_consumer immediately when there is incoming buffer" do
       {:ok, producer} = Counter.start_link({:producer, self()})
       {:ok, doubler} = Doubler.start_link({:producer_consumer, self(), subscribe_to: [producer]})
 
@@ -726,14 +779,14 @@ defmodule GenStageTest do
 
       # Subscribe
       ref = make_ref()
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
+      send(producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}})
 
       # Queue events and notification
       Counter.sync_queue(producer, [:a, :b, :c])
       GenStage.sync_info(producer, :sync1)
 
       # Ask for event and notification
-      send producer, {:"$gen_producer", {self(), ref}, {:ask, 2}}
+      send(producer, {:"$gen_producer", {self(), ref}, {:ask, 2}})
       assert_receive {:"$gen_consumer", {_, ^ref}, [:a, :b]}
       refute_received :sync1
 
@@ -742,8 +795,8 @@ defmodule GenStageTest do
       GenStage.sync_info(producer, :sync2)
 
       # Ask the remaining events and notifications
-      send producer, {:"$gen_producer", {self(), ref}, {:ask, 1}}
-      send producer, {:"$gen_producer", {self(), ref}, {:ask, 2}}
+      send(producer, {:"$gen_producer", {self(), ref}, {:ask, 1}})
+      send(producer, {:"$gen_producer", {self(), ref}, {:ask, 2}})
       assert_receive {:"$gen_consumer", {_, ^ref}, [:c]}
       assert_receive :sync1
       assert_receive {:"$gen_consumer", {_, ^ref}, [:d, :e]}
@@ -752,14 +805,15 @@ defmodule GenStageTest do
 
     @tag :capture_log
     test "delivers info to producer eventually when dropping buffer" do
-      {:ok, producer} = Counter.start_link({:producer, self(), buffer_keep: :last, buffer_size: 3})
+      {:ok, producer} =
+        Counter.start_link({:producer, self(), buffer_keep: :last, buffer_size: 3})
 
       Counter.sync_queue(producer, [:a, :b])
       GenStage.sync_info(producer, :sync)
       refute_received :sync
 
       ref = make_ref()
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
+      send(producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}})
       Counter.sync_queue(producer, [:c, :d, :e])
       assert_receive :sync
     end
@@ -783,12 +837,15 @@ defmodule GenStageTest do
     @tag :capture_log
     test "returns errors on bad options" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+
       assert {:error, {:bad_opts, message}} =
-             GenStage.sync_subscribe(consumer, to: :whatever, max_demand: 0)
+               GenStage.sync_subscribe(consumer, to: :whatever, max_demand: 0)
+
       assert message == "expected :max_demand to be equal to or greater than 1, got: 0"
 
       assert {:error, {:bad_opts, message}} =
-             GenStage.sync_subscribe(consumer, to: :whatever, min_demand: 2000)
+               GenStage.sync_subscribe(consumer, to: :whatever, min_demand: 2000)
+
       assert message == "expected :min_demand to be equal to or less than 999, got: 2000"
     end
 
@@ -828,7 +885,10 @@ defmodule GenStageTest do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       assert {:ok, old_ref} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
-      assert {:ok, new_ref} = GenStage.sync_resubscribe(consumer, old_ref, :resubscribe, to: producer)
+
+      assert {:ok, new_ref} =
+               GenStage.sync_resubscribe(consumer, old_ref, :resubscribe, to: producer)
+
       assert_received {:consumer_subscribed, {^producer, ^old_ref}}
       assert_received {:consumer_subscribed, {^producer, ^new_ref}}
     end
@@ -836,19 +896,37 @@ defmodule GenStageTest do
     test "returns ok with reference even if previous subscription does not exist" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      assert {:ok, ref} = GenStage.sync_resubscribe(consumer, make_ref(), :resubscribe, to: producer)
+
+      assert {:ok, ref} =
+               GenStage.sync_resubscribe(consumer, make_ref(), :resubscribe, to: producer)
+
       assert_received {:consumer_subscribed, {^producer, ^ref}}
     end
 
     @tag :capture_log
     test "returns errors on bad options" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+
       assert {:error, {:bad_opts, message}} =
-             GenStage.sync_resubscribe(consumer, make_ref(), :resubscribe, to: :whatever, max_demand: 0)
+               GenStage.sync_resubscribe(
+                 consumer,
+                 make_ref(),
+                 :resubscribe,
+                 to: :whatever,
+                 max_demand: 0
+               )
+
       assert message == "expected :max_demand to be equal to or greater than 1, got: 0"
 
       assert {:error, {:bad_opts, message}} =
-             GenStage.sync_resubscribe(consumer, make_ref(), :resubscribe, to: :whatever, min_demand: 2000)
+               GenStage.sync_resubscribe(
+                 consumer,
+                 make_ref(),
+                 :resubscribe,
+                 to: :whatever,
+                 min_demand: 2000
+               )
+
       assert message == "expected :min_demand to be equal to or less than 999, got: 2000"
     end
   end
@@ -911,19 +989,19 @@ defmodule GenStageTest do
       assert Counter.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
       assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
 
-      assert Counter.start_link({:producer, 0, buffer_size: -1}) ==
-             {:error, {:bad_opts, "expected :buffer_size to be equal to or greater than 0, got: -1"}}
+      error = {:bad_opts, "expected :buffer_size to be equal to or greater than 0, got: -1"}
+      assert Counter.start_link({:producer, 0, buffer_size: -1}) == {:error, error}
 
-      assert Counter.start_link({:producer, 0, dispatcher: 0}) ==
-             {:error, {:bad_opts, "expected :dispatcher to be an atom or a {atom, list}, got: 0"}}
+      error = {:bad_opts, "expected :dispatcher to be an atom or a {atom, list}, got: 0"}
+      assert Counter.start_link({:producer, 0, dispatcher: 0}) == {:error, error}
 
-      assert Counter.start_link({:producer, 0, unknown: :value}) ==
-             {:error, {:bad_opts, "unknown options [unknown: :value]"}}
+      error = {:bad_opts, "unknown options [unknown: :value]"}
+      assert Counter.start_link({:producer, 0, unknown: :value}) == {:error, error}
 
-      assert {:ok, pid} =
-             Counter.start_link({:producer, 0}, name: context.test)
-      assert {:error, {:already_started, ^pid}} =
-             Counter.start_link({:producer, 0}, name: context.test)
+      assert {:ok, pid} = Counter.start_link({:producer, 0}, name: context.test)
+
+      assert Counter.start_link({:producer, 0}, name: context.test) ==
+               {:error, {:already_started, pid}}
     end
 
     test "handle_subscribe/4" do
@@ -967,22 +1045,23 @@ defmodule GenStageTest do
 
       # Subscribe
       stage_ref = make_ref()
-      send producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, nil, []}}
-      send producer, {:"$gen_producer", {self(), stage_ref}, {:ask, 3}}
+      send(producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, nil, []}})
+      send(producer, {:"$gen_producer", {self(), stage_ref}, {:ask, 3}})
 
       # Emulate a call
       call_ref = make_ref()
-      send producer, {:"$gen_call", {self(), call_ref}, {:queue, [1, 2, 3]}}
+      send(producer, {:"$gen_call", {self(), call_ref}, {:queue, [1, 2, 3]}})
 
       # Do a blocking call
       GenStage.stop(producer)
 
       {:messages, messages} = Process.info(self(), :messages)
+
       assert messages == [
-        {:producer_subscribed, {self(), stage_ref}},
-        {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
-        {call_ref, self()},
-      ]
+               {:producer_subscribed, {self(), stage_ref}},
+               {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
+               {call_ref, self()}
+             ]
     end
 
     test "handle_call/3 allows replies before sending events" do
@@ -990,22 +1069,23 @@ defmodule GenStageTest do
 
       # Subscribe
       stage_ref = make_ref()
-      send producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, nil, []}}
-      send producer, {:"$gen_producer", {self(), stage_ref}, {:ask, 3}}
+      send(producer, {:"$gen_producer", {self(), stage_ref}, {:subscribe, nil, []}})
+      send(producer, {:"$gen_producer", {self(), stage_ref}, {:ask, 3}})
 
       # Emulate a call
       call_ref = make_ref()
-      send producer, {:"$gen_call", {self(), call_ref}, {:early_reply_queue, [1, 2, 3]}}
+      send(producer, {:"$gen_call", {self(), call_ref}, {:early_reply_queue, [1, 2, 3]}})
 
       # Do a blocking call
       GenStage.stop(producer)
 
       {:messages, messages} = Process.info(self(), :messages)
+
       assert messages == [
-        {:producer_subscribed, {self(), stage_ref}},
-        {call_ref, self()},
-        {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]},
-      ]
+               {:producer_subscribed, {self(), stage_ref}},
+               {call_ref, self()},
+               {:"$gen_consumer", {producer, stage_ref}, [1, 2, 3]}
+             ]
     end
 
     test "handle_call/3 may shut stage down" do
@@ -1018,7 +1098,7 @@ defmodule GenStageTest do
     test "handle_info/2 is called for unmatched down messages" do
       {:ok, consumer} = Counter.start_link({:producer, self()})
       ref = make_ref()
-      send consumer, {:DOWN, ref, :process, self(), :oops}
+      send(consumer, {:DOWN, ref, :process, self(), :oops})
       assert_receive {:DOWN, ^ref, :process, pid, :oops} when pid == self()
     end
 
@@ -1032,9 +1112,16 @@ defmodule GenStageTest do
       {:ok, producer} = Counter.start_link({:producer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
-      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(producer)
-      assert data == [{'State', self()}, {'Stage', :producer}, {'Dispatcher', GenStage.DemandDispatcher},
-                      {'Consumers', [consumer]}, {'Buffer size', 0}]
+      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} =
+               :sys.get_status(producer)
+
+      assert data == [
+               {'State', self()},
+               {'Stage', :producer},
+               {'Dispatcher', GenStage.DemandDispatcher},
+               {'Consumers', [consumer]},
+               {'Buffer size', 0}
+             ]
     end
   end
 
@@ -1049,12 +1136,12 @@ defmodule GenStageTest do
       assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
 
       assert Forwarder.start_link({:consumer, self(), unknown: :value}) ==
-             {:error, {:bad_opts, "unknown options [unknown: :value]"}}
+               {:error, {:bad_opts, "unknown options [unknown: :value]"}}
 
-      assert {:ok, pid} =
-             Forwarder.start_link({:consumer, self()}, name: context.test)
+      assert {:ok, pid} = Forwarder.start_link({:consumer, self()}, name: context.test)
+
       assert {:error, {:already_started, ^pid}} =
-             Forwarder.start_link({:consumer, self()}, name: context.test)
+               Forwarder.start_link({:consumer, self()}, name: context.test)
     end
 
     test "handle_subscribe/4" do
@@ -1147,7 +1234,7 @@ defmodule GenStageTest do
     test "handle_info/2 is called for unmatched down messages" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       ref = make_ref()
-      send consumer, {:DOWN, ref, :process, self(), :oops}
+      send(consumer, {:DOWN, ref, :process, self(), :oops})
       assert_receive {:DOWN, ^ref, :process, pid, :oops} when pid == self()
     end
 
@@ -1160,16 +1247,21 @@ defmodule GenStageTest do
     test "emit warning if trying to dispatch events from a consumer" do
       {:ok, consumer} = Counter.start_link({:consumer, 0}, name: :gen_stage_error)
 
-      assert capture_log(fn ->
-        0 = Counter.sync_queue(consumer, [:f, :g, :h])
-      end) =~ "GenStage consumer :gen_stage_error cannot dispatch events"
+      log =
+        capture_log(fn ->
+          0 = Counter.sync_queue(consumer, [:f, :g, :h])
+        end)
+
+      assert log =~ "GenStage consumer :gen_stage_error cannot dispatch events"
     end
 
     test "format_status/2" do
       {:ok, producer} = Counter.start_link({:producer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
-      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(consumer)
+      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} =
+               :sys.get_status(consumer)
+
       assert data == [{'State', self()}, {'Stage', :consumer}, {'Producers', [producer]}]
     end
   end
@@ -1185,15 +1277,15 @@ defmodule GenStageTest do
       assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
 
       assert Doubler.start_link({:producer_consumer, self(), unknown: :value}) ==
-             {:error, {:bad_opts, "unknown options [unknown: :value]"}}
+               {:error, {:bad_opts, "unknown options [unknown: :value]"}}
 
-      assert Doubler.start_link({:producer_consumer, 0, dispatcher: 0}) ==
-             {:error, {:bad_opts, "expected :dispatcher to be an atom or a {atom, list}, got: 0"}}
+      error = {:bad_opts, "expected :dispatcher to be an atom or a {atom, list}, got: 0"}
+      assert Doubler.start_link({:producer_consumer, 0, dispatcher: 0}) == {:error, error}
 
-      assert {:ok, pid} =
-             Doubler.start_link({:producer_consumer, self()}, name: context.test)
+      assert {:ok, pid} = Doubler.start_link({:producer_consumer, self()}, name: context.test)
+
       assert {:error, {:already_started, ^pid}} =
-             Doubler.start_link({:producer_consumer, self()}, name: context.test)
+               Doubler.start_link({:producer_consumer, self()}, name: context.test)
     end
 
     test "producer handle_subscribe/4" do
@@ -1208,7 +1300,10 @@ defmodule GenStageTest do
       Process.flag(:trap_exit, true)
       {:ok, producer} = Doubler.start_link({:producer_consumer, self()})
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      {:ok, ref} = GenStage.sync_subscribe(consumer, to: producer, producer_consumer_demand: :manual)
+
+      {:ok, ref} =
+        GenStage.sync_subscribe(consumer, to: producer, producer_consumer_demand: :manual)
+
       assert_receive {:producer_consumer_subscribed, :consumer, {^consumer, ^ref}}
       assert_receive {:EXIT, ^producer, {:bad_return_value, {:manual, pid}}} when pid == self()
     end
@@ -1267,7 +1362,10 @@ defmodule GenStageTest do
 
       {:ok, ref} = GenStage.sync_subscribe(producer_consumer, to: producer, cancel: :permanent)
       GenStage.cancel({producer, ref}, self())
-      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, pid}} when pid == self()
+
+      assert_receive {:producer_consumer_cancelled, {^producer, ^ref}, {:cancel, pid}}
+                     when pid == self()
+
       assert_receive {:EXIT, ^producer_consumer, pid} when pid == self()
     end
 
@@ -1319,13 +1417,24 @@ defmodule GenStageTest do
 
     test "format_status/2" do
       {:ok, producer} = Counter.start_link({:producer, self()})
-      {:ok, producer_consumer} = Doubler.start_link({:producer_consumer, self(), subscribe_to: [producer]})
-      {:ok, consumer} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
 
-      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} = :sys.get_status(producer_consumer)
-      assert data == [{'State', self()}, {'Stage', :producer_consumer},
-                      {'Dispatcher', GenStage.DemandDispatcher}, {'Producers', [producer]},
-                      {'Consumers', [consumer]}, {'Buffer size', 0}]
+      {:ok, producer_consumer} =
+        Doubler.start_link({:producer_consumer, self(), subscribe_to: [producer]})
+
+      {:ok, consumer} =
+        Forwarder.start_link({:consumer, self(), subscribe_to: [producer_consumer]})
+
+      assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} =
+               :sys.get_status(producer_consumer)
+
+      assert data == [
+               {'State', self()},
+               {'Stage', :producer_consumer},
+               {'Dispatcher', GenStage.DemandDispatcher},
+               {'Producers', [producer]},
+               {'Consumers', [consumer]},
+               {'Buffer size', 0}
+             ]
     end
   end
 
@@ -1335,21 +1444,21 @@ defmodule GenStageTest do
     test "duplicated subscriptions" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       ref = make_ref()
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
-      send producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}}
+      send(producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}})
+      send(producer, {:"$gen_producer", {self(), ref}, {:subscribe, nil, []}})
       assert_receive {:"$gen_consumer", {^producer, ^ref}, {:cancel, :duplicated_subscription}}
     end
 
     test "unknown demand" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       ref = make_ref()
-      send producer, {:"$gen_producer", {self(), ref}, {:ask, 10}}
+      send(producer, {:"$gen_producer", {self(), ref}, {:ask, 10}})
       assert_receive {:"$gen_consumer", {^producer, ^ref}, {:cancel, :unknown_subscription}}
     end
 
     test "not a producer" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      send consumer, {:"$gen_producer", {self(), make_ref()}, {:subscribe, nil, []}}
+      send(consumer, {:"$gen_producer", {self(), make_ref()}, {:subscribe, nil, []}})
     end
   end
 
@@ -1359,13 +1468,13 @@ defmodule GenStageTest do
     test "unknown events" do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       ref = make_ref()
-      send consumer, {:"$gen_consumer", {self(), ref}, [1, 2, 3]}
+      send(consumer, {:"$gen_consumer", {self(), ref}, [1, 2, 3]})
       assert_receive {:"$gen_producer", {^consumer, ^ref}, {:cancel, :unknown_subscription}}
     end
 
     test "not a consumer" do
       {:ok, producer} = Counter.start_link({:producer, 0})
-      send producer, {:"$gen_consumer", {self(), make_ref()}, {:events, []}}
+      send(producer, {:"$gen_consumer", {self(), make_ref()}, {:events, []}})
     end
   end
 
@@ -1387,8 +1496,8 @@ defmodule GenStageTest do
     test "does not remove unknown $gen_consumer and DOWN messages" do
       pid = self()
       ref = make_ref()
-      send self(), {:"$gen_consumer", {pid, ref}, [1, 2, 3]}
-      send self(), {:DOWN, ref, :process, pid, :oops}
+      send(self(), {:"$gen_consumer", {pid, ref}, [1, 2, 3]})
+      send(self(), {:DOWN, ref, :process, pid, :oops})
 
       {:ok, producer} = Counter.start_link({:producer, 0})
       stream = GenStage.stream([producer])
@@ -1402,37 +1511,42 @@ defmodule GenStageTest do
 
     test "exits when there is no named producer and subscription is permanent/transient" do
       assert {:noproc, {GenStage, :init_stream, [_]}} =
-             catch_exit(GenStage.stream([:unknown]) |> Enum.take(10))
+               catch_exit(GenStage.stream([:unknown]) |> Enum.take(10))
     end
 
     test "exits when producer is dead and subscription is permanent/transient" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
+
       assert {:noproc, {GenStage, :close_stream, [_]}} =
-             catch_exit(GenStage.stream([producer]) |> Enum.take(10))
+               catch_exit(GenStage.stream([producer]) |> Enum.take(10))
     end
 
     test "exits when producer does not ack and subscription is permanent/transient" do
-      {:ok, producer} = Task.start_link(fn ->
-        receive do
-          {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
-            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
-        end
-      end)
+      {:ok, producer} =
+        Task.start_link(fn ->
+          receive do
+            {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
+              send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+          end
+        end)
+
       assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) ==
-             {:no_thanks, {GenStage, :close_stream, [%{}]}}
+               {:no_thanks, {GenStage, :close_stream, [%{}]}}
     end
 
     test "exits when producer does not ack and lives and subscription is permanent/transient" do
-      {:ok, producer} = Task.start_link(fn ->
-        receive do
-          {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
-            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
-            Process.sleep(:infinity)
-        end
-      end)
+      {:ok, producer} =
+        Task.start_link(fn ->
+          receive do
+            {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
+              send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+              Process.sleep(:infinity)
+          end
+        end)
+
       assert catch_exit(GenStage.stream([producer]) |> Enum.take(10)) ==
-             {:no_thanks, {GenStage, :close_stream, [%{}]}}
+               {:no_thanks, {GenStage, :close_stream, [%{}]}}
     end
 
     test "exits when there is no named producer and subscription is temporary" do
@@ -1442,51 +1556,60 @@ defmodule GenStageTest do
     test "exits when producer is dead and subscription is temporary" do
       {:ok, producer} = Counter.start_link({:producer, 0})
       GenStage.stop(producer)
-      assert GenStage.stream([{producer,cancel: :temporary}]) |> Enum.take(10) == []
+      assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
     end
 
     test "exits when producer does not ack and subscription is temporary" do
-      {:ok, producer} = Task.start_link(fn ->
-        receive do
-          {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
-            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
-        end
-      end)
+      {:ok, producer} =
+        Task.start_link(fn ->
+          receive do
+            {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
+              send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+          end
+        end)
+
       assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
     end
 
     test "exits when producer does not ack and lives and subscription is temporary" do
-      {:ok, producer} = Task.start_link(fn ->
-        receive do
-          {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
-            send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
-            Process.sleep(:infinity)
-        end
-      end)
+      {:ok, producer} =
+        Task.start_link(fn ->
+          receive do
+            {:"$gen_producer", {pid, ref}, {:subscribe, _, _}} ->
+              send(pid, {:"$gen_consumer", {pid, ref}, {:cancel, :no_thanks}})
+              Process.sleep(:infinity)
+          end
+        end)
+
       assert GenStage.stream([{producer, cancel: :temporary}]) |> Enum.take(10) == []
     end
 
     test "sends termination message on done" do
-      stream = Stream.iterate(0, & &1 + 1)
+      stream = Stream.iterate(0, &(&1 + 1))
       {:ok, producer} = GenStage.from_enumerable(stream)
+
       assert GenStage.stream([{producer, cancel: :transient}]) |> Enum.take(10) ==
-             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+               [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
       ref = Process.monitor(producer)
       refute_received {:DOWN, ^ref, _, _, _}
     end
 
     test "sends termination message on halt" do
-      stream = Stream.iterate(0, & &1 + 1) |> Stream.take(10)
+      stream = Stream.iterate(0, &(&1 + 1)) |> Stream.take(10)
       {:ok, producer} = GenStage.from_enumerable(stream)
-      assert GenStage.stream([{producer, cancel: :transient}]) |> Enum.to_list ==
-             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+      assert GenStage.stream([{producer, cancel: :transient}]) |> Enum.to_list() ==
+               [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
       ref = Process.monitor(producer)
       assert_received {:DOWN, ^ref, _, _, _}
     end
 
     test "raises on bad options" do
-      msg = "invalid options for :unknown producer " <>
-            "(expected :max_demand to be equal to or greater than 1, got: 0)"
+      msg =
+        "invalid options for :unknown producer " <>
+          "(expected :max_demand to be equal to or greater than 1, got: 0)"
 
       assert_raise ArgumentError, msg, fn ->
         GenStage.stream([{:unknown, max_demand: 0}])
@@ -1507,8 +1630,9 @@ defmodule GenStageTest do
 
     test "accepts a :name option" do
       {:ok, producer} = GenStage.from_enumerable([], name: :gen_stage_from_enumerable)
+
       assert Process.info(producer, :registered_name) ==
-             {:registered_name, :gen_stage_from_enumerable}
+               {:registered_name, :gen_stage_from_enumerable}
     end
   end
 end
