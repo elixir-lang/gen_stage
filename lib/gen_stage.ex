@@ -261,7 +261,7 @@ defmodule GenStage do
   Also note that we set the supervision strategy to `:rest_for_one`. This
   is important because if the producer A terminates, all of the other
   processes will terminate too, since they are consuming events produced
-  by A. In this scenario, the supervisor will see multiple processing shutting
+  by A. In this scenario, the supervisor will see multiple processes shutting
   down at the same time, and conclude there are too many failures in a short
   interval. However, if the strategy is `:rest_for_one`, the supervisor will
   shut down the rest of tree, and already expect the remaining process to fail.
@@ -274,7 +274,7 @@ defmodule GenStage do
   will communicate with the producer respecting the back-pressure properties
   and start a separate supervised process per event. The number of children
   concurrently running in a `ConsumerSupervisor` is at most `max_demand` and
-  the average amount of children is `(max_demand - min_demand) / 2`.
+  the average amount of children is `(max_demand + min_demand) / 2`.
 
   ## Usage guidelines
 
