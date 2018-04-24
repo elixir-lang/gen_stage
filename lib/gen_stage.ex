@@ -320,7 +320,8 @@ defmodule GenStage do
   Now, if the consumer B crashes, the producer may attempt to dispatch the
   now produced events but it no longer has a consumer to send those events to.
   In such cases, the producer will automatically buffer the events until another
-  consumer subscribes.
+  consumer subscribes. Note however, all of the events being consumed by
+  `B` in its `handle_events` at the moment of the crash will be lost.
 
   The buffer can also be used in cases where external sources only send
   events in batches larger than asked for. For example, if you are
