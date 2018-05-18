@@ -191,7 +191,8 @@ defmodule ConsumerSupervisor do
   name. The supported values are described under the "Name Registration"
   section in the `GenServer` module docs.
   """
-  @spec start_link(module, any, [option]) :: Supervisor.on_start()
+  @spec start_link(module, any) :: Supervisor.on_start
+  @spec start_link(module, any, [option]) :: Supervisor.on_start
   def start_link(mod, args, opts \\ []) do
     GenStage.start_link(__MODULE__, {mod, args, opts[:name]}, opts)
   end
