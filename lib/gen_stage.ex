@@ -615,7 +615,7 @@ defmodule GenStage do
 
   `GenStage` is implemented on top of a `GenServer` with a few additions.
   Besides exposing all of the `GenServer` callbacks, it also provides
-  `handle_demand/2` to be implemented by producers and `handle_events/3` to be
+  `c:handle_demand/2` to be implemented by producers and `c:handle_events/3` to be
   implemented by consumers, as shown above, as well as subscription-related
   callbacks. Furthermore, all the callback responses have been modified to
   potentially emit events. See the callbacks documentation for more
@@ -624,9 +624,9 @@ defmodule GenStage do
   By adding `use GenStage` to your module, Elixir will automatically
   define all callbacks for you except for the following ones:
 
-    * `init/1` - must be implemented to choose between `:producer`, `:consumer`, or `:producer_consumer` stages
-    * `handle_demand/2` - must be implemented by `:producer` stages
-    * `handle_events/3` - must be implemented by `:producer_consumer` and `:consumer` stages
+    * `c:init/1` - must be implemented to choose between `:producer`, `:consumer`, or `:producer_consumer` stages
+    * `c:handle_demand/2` - must be implemented by `:producer` stages
+    * `c:handle_events/3` - must be implemented by `:producer_consumer` and `:consumer` stages
 
   `use GenStage` also defines a `child_spec/1` function, allowing the
   defined module to be put under a supervision tree in Elixir v1.5+.
