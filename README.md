@@ -28,7 +28,7 @@ GenStage requires Elixir v1.3. Just add `:gen_stage` to your list of dependencie
 
 ```elixir
 def deps do
-  [{:gen_stage, "~> 0.12"}]
+  [{:gen_stage, "~> 0.13"}]
 end
 ```
 
