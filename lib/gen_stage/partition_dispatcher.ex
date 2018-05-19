@@ -75,10 +75,18 @@ defmodule GenStage.PartitionDispatcher do
           partitions
       end
 
+    hash_present? = Keyword.has_key?(opts, :hash)
+
     partitions =
-      for i <- partitions, into: %{} do
-        Process.put(i, [])
-        {i, @init}
+      for partition <- partitions, into: %{} do
+        if not hash_present? and not is_integer(partition) do
+          raise ArgumentError,
+                "when :partitions contains partitions that are not integers, you have to pass " <>
+                  "in the :hash option as well"
+        end
+
+        Process.put(partition, [])
+        {partition, @init}
       end
 
     size = map_size(partitions)

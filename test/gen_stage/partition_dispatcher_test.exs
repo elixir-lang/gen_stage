@@ -212,6 +212,10 @@ defmodule GenStage.PartitionDispatcherTest do
     assert_raise ArgumentError, ~r/the enumerable of :partitions is required/, fn ->
       dispatcher([])
     end
+
+    assert_raise ArgumentError, ~r/when :partitions contains partitions/, fn ->
+      dispatcher(partitions: [:even, :odd])
+    end
   end
 
   test "errors on subscribe" do
