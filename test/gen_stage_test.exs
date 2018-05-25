@@ -141,9 +141,9 @@ defmodule GenStageTest do
     end
   end
 
-  defmodule Discarder do
+  defmodule Postponer do
     @moduledoc """
-    Multiples every event by two.
+    Discards all events.
     """
 
     use GenStage
@@ -157,14 +157,62 @@ defmodule GenStageTest do
     end
 
     def handle_events(events, _from, recipient) do
-      send(recipient, {:producer_consumed, events})
+      send(self(), {:postponed, events})
+      {:noreply, [], recipient}
+    end
+
+    def handle_info({:postponed, events}, recipient) do
+      send(recipient, {:postponed, events})
+      {:noreply, events, recipient}
+    end
+  end
+
+  defmodule Discarder do
+    @moduledoc """
+    Discards all events.
+    """
+
+    use GenStage
+
+    def start_link(init, opts \\ []) do
+      GenStage.start_link(__MODULE__, init, opts)
+    end
+
+    def init(init) do
+      init
+    end
+
+    def handle_events(events, _from, recipient) do
+      send(recipient, {:discarded, events})
+      {:noreply, [], recipient}
+    end
+  end
+
+  defmodule Sleeper do
+    @moduledoc """
+    Sleeps after the first batch.
+    """
+
+    use GenStage
+
+    def start_link(init, opts \\ []) do
+      GenStage.start_link(__MODULE__, init, opts)
+    end
+
+    def init(init) do
+      init
+    end
+
+    def handle_events(events, _from, recipient) do
+      send(recipient, {:sleep, events})
+      Process.sleep(:infinity)
       {:noreply, [], recipient}
     end
   end
 
   defmodule Forwarder do
     @moduledoc """
-    A consumer that forwards messages to the given process.
+    Forwards messages to the given process.
     """
 
     use GenStage
@@ -440,6 +488,30 @@ defmodule GenStageTest do
       assert_receive {:producer_consumed, ^batch}
     end
 
+    test "stops asking when consumer stops asking" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+
+      {:ok, doubler} =
+        Postponer.start_link(
+          {:producer_consumer, self(),
+           subscribe_to: [{producer, max_demand: 10, min_demand: 8}]}
+        )
+
+      {:ok, _} =
+        Sleeper.start_link(
+          {:consumer, self(), subscribe_to: [{doubler, max_demand: 10, min_demand: 5}]}
+        )
+
+      assert_receive {:postponed, [0, 1]}
+      assert_receive {:sleep, [0, 1]}
+      assert_receive {:postponed, [2, 3]}
+      assert_receive {:postponed, [4, 5]}
+      assert_receive {:postponed, [6, 7]}
+      assert_receive {:postponed, [8, 9]}
+      refute_receive {:sleep, [2, 3]}
+      refute_receive {:postponed, [10, 11]}
+    end
+
     test "keeps emitting events even when discarded" do
       {:ok, producer} = Counter.start_link({:producer, 0})
 
@@ -455,11 +527,11 @@ defmodule GenStageTest do
         )
 
       batch = Enum.to_list(0..19)
-      assert_receive {:producer_consumed, ^batch}
+      assert_receive {:discarded, ^batch}
       batch = Enum.to_list(100..119)
-      assert_receive {:producer_consumed, ^batch}
+      assert_receive {:discarded, ^batch}
       batch = Enum.to_list(1000..1019)
-      assert_receive {:producer_consumed, ^batch}
+      assert_receive {:discarded, ^batch}
     end
 
     test "with shared (broadcast) demand" do

@@ -1986,7 +1986,7 @@ defmodule GenStage do
         type: :producer_consumer,
         buffer: {:queue.new(), 0, init_wheel(buffer_size)},
         buffer_config: {buffer_size, buffer_keep},
-        events: 0,
+        events: {:queue.new(), 0},
         dispatcher_mod: dispatcher_mod,
         dispatcher_state: dispatcher_state
       }
@@ -2200,17 +2200,11 @@ defmodule GenStage do
 
   def handle_info(
         {:"$gen_consumer", {producer_pid, ref}, events},
-        %{type: :producer_consumer, events: demand_or_queue, producers: producers} = stage
+        %{type: :producer_consumer, events: {queue, counter}, producers: producers} = stage
       )
       when is_list(events) do
     case producers do
       %{^ref => _entry} ->
-        {counter, queue} =
-          case demand_or_queue do
-            demand when is_integer(demand) -> {demand, :queue.new()}
-            queue -> {0, queue}
-          end
-
         queue = put_pc_events(events, ref, queue)
         take_pc_events(queue, counter, stage)
 
@@ -2229,8 +2223,7 @@ defmodule GenStage do
     case producers do
       %{^ref => entry} ->
         {batches, stage} = consumer_receive(from, entry, events, stage)
-        {_, reply} = consumer_dispatch(batches, from, mod, state, stage, 0, false)
-        reply
+        consumer_dispatch(batches, from, mod, state, stage, false)
 
       _ ->
         msg = {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}}
@@ -2489,27 +2482,25 @@ defmodule GenStage do
 
   defp dispatcher_callback(callback, args, %{dispatcher_mod: dispatcher_mod} = stage) do
     {:ok, counter, dispatcher_state} = apply(dispatcher_mod, callback, args)
-    stage = %{stage | dispatcher_state: dispatcher_state}
 
-    case take_from_buffer(counter, stage) do
-      {:ok, 0, stage} ->
-        {:noreply, stage}
+    case stage do
+      %{type: :producer_consumer, events: {queue, demand}} ->
+        counter = demand + counter
+        stage = %{stage | dispatcher_state: dispatcher_state, events: {queue, counter}}
+        {:ok, _, stage} = take_from_buffer(counter, stage)
+        %{events: {queue, counter}} = stage
+        take_pc_events(queue, counter, stage)
 
-      {:ok, counter, stage} when is_integer(counter) and counter > 0 ->
-        case stage do
-          # producer
-          %{events: :forward, state: state} ->
+      %{} ->
+        case take_from_buffer(counter, %{stage | dispatcher_state: dispatcher_state}) do
+          {:ok, 0, stage} ->
+            {:noreply, stage}
+
+          {:ok, counter, %{events: :forward, state: state} = stage} ->
             noreply_callback(:handle_demand, [counter, state], stage)
 
-          %{events: events} when is_list(events) ->
+          {:ok, counter, %{events: events} = stage} when is_list(events) ->
             {:noreply, %{stage | events: [counter | events]}}
-
-          # producer_consumer
-          %{events: events} when is_integer(events) ->
-            {:noreply, %{stage | events: counter + events}}
-
-          %{events: queue} ->
-            take_pc_events(queue, counter, stage)
         end
     end
   end
@@ -2534,7 +2525,24 @@ defmodule GenStage do
   defp dispatch_events(events, length, stage) do
     %{dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} = stage
     {:ok, events, dispatcher_state} = dispatcher_mod.dispatch(events, length, dispatcher_state)
-    buffer_events(events, %{stage | dispatcher_state: dispatcher_state})
+
+    stage =
+      case stage do
+        %{type: :producer_consumer, events: {queue, demand}} ->
+          if demand < length - length(events) do
+            IO.puts(Exception.format_stacktrace())
+            IO.inspect({demand, length, length(events)})
+          end
+
+          demand = demand - (length - length(events))
+
+          %{stage | dispatcher_state: dispatcher_state, events: {queue, max(demand, 0)}}
+
+        %{} ->
+          %{stage | dispatcher_state: dispatcher_state}
+      end
+
+    buffer_events(events, stage)
   end
 
   defp take_from_buffer(counter, %{buffer: {_, buffer, _}} = stage)
@@ -2669,14 +2677,12 @@ defmodule GenStage do
     {:reply, :ok, stage}
   end
 
-  defp producer_info(msg, %{type: :producer_consumer, events: demand_or_queue} = stage) do
+  defp producer_info(msg, %{type: :producer_consumer, events: {queue, demand}} = stage) do
     stage =
-      case demand_or_queue do
-        demand when is_integer(demand) ->
-          buffer_or_dispatch_info(msg, stage)
-
-        queue ->
-          %{stage | events: :queue.in({:info, msg}, queue)}
+      if :queue.is_empty(queue) do
+        buffer_or_dispatch_info(msg, stage)
+      else
+        %{stage | events: {:queue.in({:info, msg}, queue), demand}}
       end
 
     {:reply, :ok, stage}
@@ -2798,32 +2804,32 @@ defmodule GenStage do
   defp split_events([event | events], limit, counter, acc),
     do: split_events(events, limit, counter + 1, [event | acc])
 
-  defp consumer_dispatch([{batch, ask} | batches], from, mod, state, stage, count, _hibernate?) do
+  defp consumer_dispatch([{batch, ask} | batches], from, mod, state, stage, _hibernate?) do
     case mod.handle_events(batch, from, state) do
       {:noreply, events, state} when is_list(events) ->
         stage = dispatch_events(events, length(events), stage)
         ask(from, ask, [:noconnect])
-        consumer_dispatch(batches, from, mod, state, stage, count + length(events), false)
+        consumer_dispatch(batches, from, mod, state, stage, false)
 
       {:noreply, events, state, :hibernate} when is_list(events) ->
         stage = dispatch_events(events, length(events), stage)
         ask(from, ask, [:noconnect])
-        consumer_dispatch(batches, from, mod, state, stage, count + length(events), true)
+        consumer_dispatch(batches, from, mod, state, stage, true)
 
       {:stop, reason, state} ->
-        {count, {:stop, reason, %{stage | state: state}}}
+        {:stop, reason, %{stage | state: state}}
 
       other ->
-        {count, {:stop, {:bad_return_value, other}, %{stage | state: state}}}
+        {:stop, {:bad_return_value, other}, %{stage | state: state}}
     end
   end
 
-  defp consumer_dispatch([], _from, _mod, state, stage, count, false) do
-    {count, {:noreply, %{stage | state: state}}}
+  defp consumer_dispatch([], _from, _mod, state, stage, false) do
+    {:noreply, %{stage | state: state}}
   end
 
-  defp consumer_dispatch([], _from, _mod, state, stage, count, true) do
-    {count, {:noreply, %{stage | state: state}, :hibernate}}
+  defp consumer_dispatch([], _from, _mod, state, stage, true) do
+    {:noreply, %{stage | state: state}, :hibernate}
   end
 
   defp consumer_subscribe({to, opts}, stage) when is_list(opts),
@@ -2903,14 +2909,13 @@ defmodule GenStage do
          mode,
          kind_reason,
          pid_ref,
-         %{type: :producer_consumer, events: demand_or_queue} = stage
+         %{type: :producer_consumer, events: {queue, demand}} = stage
        ) do
-    case demand_or_queue do
-      demand when is_integer(demand) ->
-        invoke_cancel(mode, kind_reason, pid_ref, stage)
-
-      queue ->
-        {:noreply, %{stage | events: :queue.in({:cancel, mode, kind_reason, pid_ref}, queue)}}
+    if :queue.is_empty(queue) do
+      invoke_cancel(mode, kind_reason, pid_ref, stage)
+    else
+      queue = :queue.in({:cancel, mode, kind_reason, pid_ref}, queue)
+      {:noreply, %{stage | events: {queue, demand}}}
     end
   end
 
@@ -2946,11 +2951,11 @@ defmodule GenStage do
         {producer_id, _, _} = entry
         from = {producer_id, ref}
         {batches, stage} = consumer_receive(from, entry, events, stage)
-        consumer_dispatch(batches, from, mod, state, stage, 0, false)
+        consumer_dispatch(batches, from, mod, state, stage, false)
 
       %{} ->
         # We queued but producer was removed
-        consumer_dispatch([{events, 0}], {:pid, ref}, mod, state, stage, 0, false)
+        consumer_dispatch([{events, 0}], {:pid, ref}, mod, state, stage, false)
     end
   end
 
@@ -2972,27 +2977,27 @@ defmodule GenStage do
         end
 
       {{:value, {events, ref}}, queue} ->
-        case send_pc_events(events, ref, stage) do
-          {sent, {:noreply, stage}} ->
-            take_pc_events(queue, counter - sent, stage)
+        case send_pc_events(events, ref, %{stage | events: {queue, counter}}) do
+          {:noreply, %{events: {queue, counter}} = stage} ->
+            take_pc_events(queue, counter, stage)
 
-          {sent, {:noreply, stage, :hibernate}} ->
-            take_pc_events(queue, counter - sent, stage)
+          {:noreply, %{events: {queue, counter}} = stage, :hibernate} ->
+            take_pc_events(queue, counter, stage)
 
-          {_, {:stop, _, _} = stop} ->
+          {:stop, _, _} = stop ->
             stop
         end
 
-      {:empty, _queue} ->
-        {:noreply, %{stage | events: counter}}
+      {:empty, queue} ->
+        {:noreply, %{stage | events: {queue, counter}}}
     end
   end
 
   # It is OK to send more events than the consumer has
-  # asked because those will always be buffered. Once
-  # we have taken from the buffer, the event queue will
+  # asked (counter < 0) because those will always be buffered.
+  # Once we have taken from the buffer, the event queue will
   # be adjusted again.
-  defp take_pc_events(queue, _counter, stage) do
-    {:noreply, %{stage | events: queue}}
+  defp take_pc_events(queue, counter, stage) do
+    {:noreply, %{stage | events: {queue, counter}}}
   end
 end
