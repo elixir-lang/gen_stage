@@ -20,9 +20,10 @@ defmodule GenStage.PartitionDispatcher do
       named `:odd` and `:even`.
 
     * `:hash` - the hashing algorithm, which receives the event and returns
-      a tuple with two elements, containing the event and the partition.
-      The partition must be one of the partitions specified in `:partitions`
-      above. The default uses `&:erlang.phash2(&1, Enum.count(partitions))`
+      a tuple with two elements, the event to be dispatched as first argument 
+      and the partition as second. The partition must be one of the partitions
+      specified in `:partitions` above. The default uses 
+      `fn event -> {event, :erlang.phash2(event, Enum.count(partitions))} end`
       on the event to select the partition.
 
   ### Examples
