@@ -793,14 +793,6 @@ defmodule GenStage do
   @typedoc "The term that identifies a subscription associated with the corresponding producer/consumer."
   @type from :: {pid, subscription_tag}
 
-  defmacrop is_transient_shutdown(value) do
-    quote do
-      unquote(value) == :normal or unquote(value) == :shutdown or
-        (is_tuple(unquote(value)) and tuple_size(unquote(value)) == 2 and
-           elem(unquote(value), 0) == :shutdown)
-    end
-  end
-
   @doc """
   Invoked when the server is started.
 
@@ -1632,16 +1624,10 @@ defmodule GenStage do
   discarded after the stream is consumed.
   """
   @spec stream([stage | {stage, keyword}], keyword) :: Enumerable.t()
-  def stream(subscriptions, opts \\ [])
+  def stream(subscriptions, options \\ [])
 
   def stream(subscriptions, options) when is_list(subscriptions) do
-    subscriptions = :lists.map(&stream_validate_opts/1, subscriptions)
-
-    Stream.resource(
-      fn -> init_stream(subscriptions, options) end,
-      &consume_stream/1,
-      &close_stream/1
-    )
+    GenStage.Stream.build(subscriptions, options)
   end
 
   def stream(subscriptions, _options) do
@@ -1649,256 +1635,9 @@ defmodule GenStage do
           "GenStage.stream/1 expects a list of subscriptions, got: #{inspect(subscriptions)}"
   end
 
-  defp stream_validate_opts({to, opts}) when is_list(opts) do
-    with {:ok, cancel, _} <-
-           validate_in(opts, :cancel, :permanent, [:temporary, :transient, :permanent]),
-         {:ok, max, _} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
-         {:ok, min, _} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
-      {to, cancel, min, max, opts}
-    else
-      {:error, message} ->
-        raise ArgumentError, "invalid options for #{inspect(to)} producer (#{message})"
-    end
-  end
-
-  defp stream_validate_opts(to) do
-    stream_validate_opts({to, []})
-  end
-
-  defp init_stream(subscriptions, options) do
-    parent = self()
-    demand = options[:demand] || :forward
-
-    {monitor_pid, monitor_ref} = spawn_monitor(fn -> init_monitor(parent, demand) end)
-    send(monitor_pid, {parent, monitor_ref})
-    send(monitor_pid, {monitor_ref, {:subscribe, subscriptions}})
-
-    receive do
-      {:DOWN, ^monitor_ref, _, _, reason} ->
-        exit(reason)
-
-      {^monitor_ref, {:subscriptions, demand, subscriptions}} ->
-        if producers = options[:producers] do
-          for pid <- producers, do: demand(pid, demand)
-        else
-          demand_stream_subscriptions(demand, subscriptions)
-        end
-
-        {:receive, monitor_pid, monitor_ref, subscriptions}
-    end
-  end
-
-  defp demand_stream_subscriptions(demand, subscriptions) do
-    Enum.each(subscriptions, fn {_, {:subscribed, pid, _, _, _, _}} ->
-      demand(pid, demand)
-    end)
-  end
-
-  defp init_monitor(parent, demand) do
-    parent_ref = Process.monitor(parent)
-
-    receive do
-      {:DOWN, ^parent_ref, _, _, reason} ->
-        exit(reason)
-
-      {^parent, monitor_ref} ->
-        loop_monitor(parent, parent_ref, monitor_ref, demand, [])
-    end
-  end
-
-  defp subscriptions_monitor(parent, monitor_ref, subscriptions) do
-    fold_fun = fn {to, cancel, min, max, opts}, acc ->
-      producer_pid = GenServer.whereis(to)
-
-      cond do
-        producer_pid != nil ->
-          inner_ref = Process.monitor(producer_pid)
-          from = {parent, {monitor_ref, inner_ref}}
-          send_noconnect(producer_pid, {:"$gen_producer", from, {:subscribe, nil, opts}})
-          send_noconnect(producer_pid, {:"$gen_producer", from, {:ask, max}})
-          Map.put(acc, inner_ref, {:subscribed, producer_pid, cancel, min, max, max})
-
-        cancel == :permanent or cancel == :transient ->
-          exit({:noproc, {GenStage, :init_stream, [subscriptions]}})
-
-        cancel == :temporary ->
-          acc
-      end
-    end
-
-    :lists.foldl(fold_fun, %{}, subscriptions)
-  end
-
-  defp loop_monitor(parent, parent_ref, monitor_ref, demand, keys) do
-    receive do
-      {^monitor_ref, {:subscribe, pairs}} ->
-        subscriptions = subscriptions_monitor(parent, monitor_ref, pairs)
-        send(parent, {monitor_ref, {:subscriptions, demand, subscriptions}})
-        loop_monitor(parent, parent_ref, monitor_ref, demand, Map.keys(subscriptions) ++ keys)
-
-      {:DOWN, ^parent_ref, _, _, reason} ->
-        exit(reason)
-
-      {:DOWN, ref, _, _, reason} ->
-        if ref in keys do
-          send(parent, {monitor_ref, {:DOWN, ref, reason}})
-        end
-
-        loop_monitor(parent, parent_ref, monitor_ref, demand, keys -- [ref])
-    end
-  end
-
-  defp cancel_monitor(monitor_pid, monitor_ref) do
-    # Cancel the old ref and get a fresh one since
-    # the monitor_ref may already have been received.
-    Process.demonitor(monitor_ref, [:flush])
-
-    ref = Process.monitor(monitor_pid)
-    Process.exit(monitor_pid, :kill)
-
-    receive do
-      {:DOWN, ^ref, _, _, _} ->
-        flush_monitor(monitor_ref)
-    end
-  end
-
-  defp flush_monitor(monitor_ref) do
-    receive do
-      {^monitor_ref, _} ->
-        flush_monitor(monitor_ref)
-    after
-      0 -> :ok
-    end
-  end
-
-  defp consume_stream({:receive, monitor_pid, monitor_ref, subscriptions}) do
-    receive_stream(monitor_pid, monitor_ref, subscriptions)
-  end
-
-  defp consume_stream({:ask, from, ask, batches, monitor_pid, monitor_ref, subscriptions}) do
-    ask(from, ask, [:noconnect])
-    deliver_stream(batches, from, monitor_pid, monitor_ref, subscriptions)
-  end
-
-  defp close_stream({:receive, monitor_pid, monitor_ref, subscriptions}) do
-    request_to_cancel_stream(monitor_pid, monitor_ref, subscriptions)
-    cancel_monitor(monitor_pid, monitor_ref)
-  end
-
-  defp close_stream({:ask, _, _, _, monitor_pid, monitor_ref, subscriptions}) do
-    request_to_cancel_stream(monitor_pid, monitor_ref, subscriptions)
-    cancel_monitor(monitor_pid, monitor_ref)
-  end
-
-  defp close_stream({:exit, reason, monitor_pid, monitor_ref, subscriptions}) do
-    request_to_cancel_stream(monitor_pid, monitor_ref, subscriptions)
-    cancel_monitor(monitor_pid, monitor_ref)
-    exit({reason, {GenStage, :close_stream, [subscriptions]}})
-  end
-
-  defp receive_stream(monitor_pid, monitor_ref, subscriptions)
-       when map_size(subscriptions) == 0 do
-    {:halt, {:receive, monitor_pid, monitor_ref, subscriptions}}
-  end
-
-  defp receive_stream(monitor_pid, monitor_ref, subscriptions) do
-    receive do
-      {:"$gen_consumer", {producer_pid, {^monitor_ref, inner_ref} = ref}, events}
-      when is_list(events) ->
-        case subscriptions do
-          %{^inner_ref => {:subscribed, producer_pid, cancel, min, max, demand}} ->
-            from = {producer_pid, ref}
-            {demand, batches} = split_batches(events, from, min, max, demand, demand, [])
-            subscribed = {:subscribed, producer_pid, cancel, min, max, demand}
-
-            deliver_stream(
-              batches,
-              from,
-              monitor_pid,
-              monitor_ref,
-              Map.put(subscriptions, inner_ref, subscribed)
-            )
-
-          %{^inner_ref => {:cancel, _}} ->
-            # We received this message before the cancellation was processed
-            receive_stream(monitor_pid, monitor_ref, subscriptions)
-
-          _ ->
-            # Cancel if messages are out of order or unknown
-            msg = {:"$gen_producer", {self(), ref}, {:cancel, :unknown_subscription}}
-            send_noconnect(producer_pid, msg)
-            receive_stream(monitor_pid, monitor_ref, Map.delete(subscriptions, inner_ref))
-        end
-
-      {:"$gen_consumer", {_, {^monitor_ref, inner_ref}}, {:cancel, reason}} ->
-        cancel_stream(inner_ref, reason, monitor_pid, monitor_ref, subscriptions)
-
-      {:"$gen_cast", {:"$subscribe", nil, to, opts}} ->
-        send(monitor_pid, {monitor_ref, {:subscribe, [stream_validate_opts({to, opts})]}})
-
-        receive do
-          {^monitor_ref, {:subscriptions, demand, new_subscriptions}} ->
-            demand_stream_subscriptions(demand, new_subscriptions)
-            receive_stream(monitor_pid, monitor_ref, Map.merge(subscriptions, new_subscriptions))
-
-          {^monitor_ref, {:DOWN, inner_ref, reason}} ->
-            cancel_stream(inner_ref, reason, monitor_pid, monitor_ref, subscriptions)
-        end
-
-      {:DOWN, ^monitor_ref, _, _, reason} ->
-        {:halt, {:exit, reason, monitor_pid, monitor_ref, subscriptions}}
-
-      {^monitor_ref, {:DOWN, inner_ref, reason}} ->
-        cancel_stream(inner_ref, reason, monitor_pid, monitor_ref, subscriptions)
-    end
-  end
-
-  defp deliver_stream([], _from, monitor_pid, monitor_ref, subscriptions) do
-    receive_stream(monitor_pid, monitor_ref, subscriptions)
-  end
-
-  defp deliver_stream([{events, ask} | batches], from, monitor_pid, monitor_ref, subscriptions) do
-    {events, {:ask, from, ask, batches, monitor_pid, monitor_ref, subscriptions}}
-  end
-
-  defp request_to_cancel_stream(monitor_pid, monitor_ref, subscriptions) do
-    fold_fun = fn inner_ref, tuple, acc ->
-      request_to_cancel_stream(inner_ref, tuple, monitor_ref, acc)
-    end
-
-    subscriptions = :maps.fold(fold_fun, subscriptions, subscriptions)
-    receive_stream(monitor_pid, monitor_ref, subscriptions)
-  end
-
-  defp request_to_cancel_stream(_ref, {:cancel, _}, _monitor_ref, subscriptions) do
-    subscriptions
-  end
-
-  defp request_to_cancel_stream(inner_ref, tuple, monitor_ref, subscriptions) do
-    process_pid = elem(tuple, 1)
-    cancel({process_pid, {monitor_ref, inner_ref}}, :normal, [:noconnect])
-    Map.put(subscriptions, inner_ref, {:cancel, process_pid})
-  end
-
-  defp cancel_stream(inner_ref, reason, monitor_pid, monitor_ref, subscriptions) do
-    case subscriptions do
-      %{^inner_ref => {_, _, cancel, _, _, _}}
-      when cancel == :permanent
-      when cancel == :transient and not is_transient_shutdown(reason) ->
-        Process.demonitor(inner_ref, [:flush])
-        {:halt, {:exit, reason, monitor_pid, monitor_ref, Map.delete(subscriptions, inner_ref)}}
-
-      %{^inner_ref => _} ->
-        Process.demonitor(inner_ref, [:flush])
-        receive_stream(monitor_pid, monitor_ref, Map.delete(subscriptions, inner_ref))
-
-      %{} ->
-        receive_stream(monitor_pid, monitor_ref, subscriptions)
-    end
-  end
-
   ## Callbacks
 
+  import GenStage.Utils
   @compile :inline_list_funcs
 
   @doc false
@@ -2007,62 +1746,6 @@ defmodule GenStage do
     end
   end
 
-  defp validate_list(opts, key, default) do
-    {value, opts} = Keyword.pop(opts, key, default)
-
-    if is_list(value) do
-      {:ok, value, opts}
-    else
-      {:error, "expected #{inspect(key)} to be a list, got: #{inspect(value)}"}
-    end
-  end
-
-  defp validate_in(opts, key, default, values) do
-    {value, opts} = Keyword.pop(opts, key, default)
-
-    if value in values do
-      {:ok, value, opts}
-    else
-      {:error, "expected #{inspect(key)} to be one of #{inspect(values)}, got: #{inspect(value)}"}
-    end
-  end
-
-  defp validate_integer(opts, key, default, min, max, infinity?) do
-    {value, opts} = Keyword.pop(opts, key, default)
-
-    cond do
-      value == :infinity and infinity? ->
-        {:ok, value, opts}
-
-      not is_integer(value) ->
-        error_message = "expected #{inspect(key)} to be an integer, got: #{inspect(value)}"
-        {:error, error_message}
-
-      value < min ->
-        error_message =
-          "expected #{inspect(key)} to be equal to or greater than #{min}, got: #{inspect(value)}"
-
-        {:error, error_message}
-
-      value > max ->
-        error_message =
-          "expected #{inspect(key)} to be equal to or less than #{max}, got: #{inspect(value)}"
-
-        {:error, error_message}
-
-      true ->
-        {:ok, value, opts}
-    end
-  end
-
-  defp validate_no_opts(opts) do
-    if opts == [] do
-      :ok
-    else
-      {:error, "unknown options #{inspect(opts)}"}
-    end
-  end
-
   @doc false
 
   def handle_call({:"$info", msg}, _from, stage) do
@@ -2136,7 +1819,7 @@ defmodule GenStage do
 
   def handle_info({:"$gen_producer", _, _} = msg, %{type: :consumer} = stage) do
     error_msg = 'GenStage consumer ~tp received $gen_producer message: ~tp~n'
-    :error_logger.error_msg(error_msg, [name(), msg])
+    :error_logger.error_msg(error_msg, [self_name(), msg])
     {:noreply, stage}
   end
 
@@ -2147,7 +1830,7 @@ defmodule GenStage do
     case consumers do
       %{^ref => _} ->
         error_msg = 'GenStage producer ~tp received duplicated subscription from: ~tp~n'
-        :error_logger.error_msg(error_msg, [name(), from])
+        :error_logger.error_msg(error_msg, [self_name(), from])
 
         msg = {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}}
         send_noconnect(consumer_pid, msg)
@@ -2194,7 +1877,7 @@ defmodule GenStage do
 
   def handle_info({:"$gen_consumer", _, _} = msg, %{type: :producer} = stage) do
     error_msg = 'GenStage producer ~tp received $gen_consumer message: ~tp~n'
-    :error_logger.error_msg(error_msg, [name(), msg])
+    :error_logger.error_msg(error_msg, [self_name(), msg])
     {:noreply, stage}
   end
 
@@ -2374,13 +2057,6 @@ defmodule GenStage do
     end
   end
 
-  defp name() do
-    case :erlang.process_info(self(), :registered_name) do
-      {:registered_name, name} when is_atom(name) -> name
-      _ -> self()
-    end
-  end
-
   ## Producer helpers
 
   defp producer_demand(:forward, %{type: :producer_consumer} = stage) do
@@ -2390,7 +2066,7 @@ defmodule GenStage do
 
   defp producer_demand(_mode, %{type: type} = stage) when type != :producer do
     error_msg = 'Demand mode can only be set for producers, GenStage ~tp is a ~ts'
-    :error_logger.error_msg(error_msg, [name(), type])
+    :error_logger.error_msg(error_msg, [self_name(), type])
     {:noreply, stage}
   end
 
@@ -2513,7 +2189,7 @@ defmodule GenStage do
     error_msg =
       'GenStage consumer ~tp cannot dispatch events (an empty list must be returned): ~tp~n'
 
-    :error_logger.error_msg(error_msg, [name(), events])
+    :error_logger.error_msg(error_msg, [self_name(), events])
     stage
   end
 
@@ -2612,7 +2288,7 @@ defmodule GenStage do
 
       excess ->
         error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
-        :error_logger.warning_msg(error_msg, [name(), excess])
+        :error_logger.warning_msg(error_msg, [self_name(), excess])
     end
 
     stage = %{stage | buffer: {queue, counter, infos}}
@@ -2751,7 +2427,7 @@ defmodule GenStage do
   end
 
   defp consumer_receive({_, ref} = from, {producer_id, cancel, {demand, min, max}}, events, stage) do
-    {demand, batches} = split_batches(events, from, min, max, demand, demand, [])
+    {demand, batches} = split_batches(events, from, min, max, demand)
     stage = put_in(stage.producers[ref], {producer_id, cancel, {demand, min, max}})
     {batches, stage}
   end
@@ -2759,44 +2435,6 @@ defmodule GenStage do
   defp consumer_receive(_, {_, _, :manual}, events, stage) do
     {[{events, 0}], stage}
   end
-
-  defp split_batches([], _from, _min, _max, _old_demand, new_demand, batches) do
-    {new_demand, :lists.reverse(batches)}
-  end
-
-  defp split_batches(events, from, min, max, old_demand, new_demand, batches) do
-    {events, batch, batch_size} = split_events(events, max - min, 0, [])
-
-    # Adjust the batch size to whatever is left of the demand in case of excess.
-    {old_demand, batch_size} =
-      case old_demand - batch_size do
-        diff when diff < 0 ->
-          error_msg = 'GenStage consumer ~tp has received ~tp events in excess from: ~tp~n'
-          :error_logger.error_msg(error_msg, [name(), abs(diff), from])
-          {0, old_demand}
-
-        diff ->
-          {diff, batch_size}
-      end
-
-    # In case we've reached min, we will ask for more events.
-    {new_demand, batch_size} =
-      case new_demand - batch_size do
-        diff when diff <= min ->
-          {max, max - diff}
-
-        diff ->
-          {diff, 0}
-      end
-
-    split_batches(events, from, min, max, old_demand, new_demand, [{batch, batch_size} | batches])
-  end
-
-  defp split_events(events, limit, limit, acc), do: {events, :lists.reverse(acc), limit}
-  defp split_events([], _limit, counter, acc), do: {[], :lists.reverse(acc), counter}
-
-  defp split_events([event | events], limit, counter, acc),
-    do: split_events(events, limit, counter + 1, [event | acc])
 
   defp consumer_dispatch([{batch, ask} | batches], from, mod, state, stage, _hibernate?) do
     case mod.handle_events(batch, from, state) do
@@ -2833,7 +2471,7 @@ defmodule GenStage do
 
   defp consumer_subscribe(_cancel, to, _opts, %{type: :producer} = stage) do
     error_msg = 'GenStage producer ~tp cannot be subscribed to another stage: ~tp~n'
-    :error_logger.error_msg(error_msg, [name(), to])
+    :error_logger.error_msg(error_msg, [self_name(), to])
     {:reply, {:error, :not_a_consumer}, stage}
   end
 
@@ -2860,7 +2498,7 @@ defmodule GenStage do
     else
       {:error, message} ->
         error_msg = 'GenStage consumer ~tp subscribe received invalid option: ~ts~n'
-        :error_logger.error_msg(error_msg, [name(), message])
+        :error_logger.error_msg(error_msg, [self_name(), message])
         {:reply, {:error, {:bad_opts, message}}, stage}
     end
   end
@@ -2925,7 +2563,7 @@ defmodule GenStage do
         error_msg =
           'GenStage consumer ~tp is stopping after receiving cancel from producer ~tp with reason: ~tp~n'
 
-        :error_logger.info_msg(error_msg, [name(), pid, reason])
+        :error_logger.info_msg(error_msg, [self_name(), pid, reason])
         {:stop, reason, stage}
 
       other ->
