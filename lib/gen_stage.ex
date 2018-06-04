@@ -2529,13 +2529,7 @@ defmodule GenStage do
     stage =
       case stage do
         %{type: :producer_consumer, events: {queue, demand}} ->
-          if demand < length - length(events) do
-            IO.puts(Exception.format_stacktrace())
-            IO.inspect({demand, length, length(events)})
-          end
-
           demand = demand - (length - length(events))
-
           %{stage | dispatcher_state: dispatcher_state, events: {queue, max(demand, 0)}}
 
         %{} ->
