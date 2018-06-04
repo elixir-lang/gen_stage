@@ -1,6 +1,5 @@
 defmodule GenStage.Stream do
   @moduledoc false
-
   require GenStage.Utils, as: Utils
 
   def build(subscriptions, options) do

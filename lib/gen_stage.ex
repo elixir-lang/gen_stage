@@ -745,7 +745,7 @@ defmodule GenStage do
     :dispatcher_mod,
     :dispatcher_state,
     :buffer,
-    :buffer_config,
+    :buffer_keep,
     events: :forward,
     monitors: %{},
     producers: %{},
@@ -1637,8 +1637,9 @@ defmodule GenStage do
 
   ## Callbacks
 
-  require GenStage.Utils, as: Utils
   @compile :inline_list_funcs
+  require GenStage.Utils, as: Utils
+  alias GenStage.Buffer
 
   @doc false
   def init({mod, args}) do
@@ -1685,8 +1686,8 @@ defmodule GenStage do
         mod: mod,
         state: state,
         type: :producer,
-        buffer: {:queue.new(), 0, init_wheel(buffer_size)},
-        buffer_config: {buffer_size, buffer_keep},
+        buffer: Buffer.new(buffer_size),
+        buffer_keep: buffer_keep,
         events: if(demand == :accumulate, do: [], else: :forward),
         dispatcher_mod: dispatcher_mod,
         dispatcher_state: dispatcher_state
@@ -1726,8 +1727,8 @@ defmodule GenStage do
         mod: mod,
         state: state,
         type: :producer_consumer,
-        buffer: {:queue.new(), 0, init_wheel(buffer_size)},
-        buffer_config: {buffer_size, buffer_keep},
+        buffer: Buffer.new(buffer_size),
+        buffer_keep: buffer_keep,
         events: {:queue.new(), 0},
         dispatcher_mod: dispatcher_mod,
         dispatcher_state: dispatcher_state
@@ -1982,14 +1983,13 @@ defmodule GenStage do
          buffer: buffer,
          dispatcher_mod: dispatcher_mod
        }) do
-    {_, counter, _} = buffer
     consumer_pids = for {_, {pid, _}} <- consumers, do: pid
 
     [
       {~c(Stage), :producer},
       {~c(Dispatcher), dispatcher_mod},
       {~c(Consumers), consumer_pids},
-      {~c(Buffer size), counter}
+      {~c(Buffer size), Buffer.estimate_size(buffer)}
     ]
   end
 
@@ -2000,7 +2000,6 @@ defmodule GenStage do
          buffer: buffer,
          dispatcher_mod: dispatcher_mod
        }) do
-    {_, counter, _} = buffer
     producer_pids = for {_, {pid, _, _}} <- producers, do: pid
     consumer_pids = for {_, {pid, _}} <- consumers, do: pid
 
@@ -2009,7 +2008,7 @@ defmodule GenStage do
       {~c(Dispatcher), dispatcher_mod},
       {~c(Producers), producer_pids},
       {~c(Consumers), consumer_pids},
-      {~c(Buffer size), counter}
+      {~c(Buffer size), Buffer.estimate_size(buffer)}
     ]
   end
 
@@ -2218,59 +2217,17 @@ defmodule GenStage do
     buffer_events(events, stage)
   end
 
-  defp take_from_buffer(counter, %{buffer: {_, buffer, _}} = stage)
-       when counter == 0
-       when buffer == 0 do
-    {:ok, counter, stage}
-  end
+  defp take_from_buffer(counter, %{buffer: buffer} = stage) do
+    case Buffer.take_count_or_until_permanent(buffer, counter) do
+      :empty ->
+        {:ok, counter, stage}
 
-  defp take_from_buffer(counter, %{buffer: {queue, buffer, infos}} = stage) do
-    {queue, events, new_counter, buffer, info, infos} =
-      take_from_buffer(queue, [], counter, buffer, infos)
-
-    # Update the buffer because dispatch events may
-    # trigger more events to be buffered.
-    stage = %{stage | buffer: {queue, buffer, infos}}
-    stage = dispatch_events(events, counter - new_counter, stage)
-
-    case info do
-      {:ok, msg} ->
-        take_from_buffer(new_counter, dispatch_info(msg, stage))
-
-      :error ->
+      {:ok, buffer, new_counter, temps, perms} ->
+        # Update the buffer because dispatch events may
+        # trigger more events to be buffered.
+        stage = dispatch_events(temps, counter - new_counter, %{stage | buffer: buffer})
+        stage = :lists.foldl(&dispatch_info/2, stage, perms)
         take_from_buffer(new_counter, stage)
-    end
-  end
-
-  defp take_from_buffer(queue, events, 0, buffer, infos) do
-    {queue, :lists.reverse(events), 0, buffer, :error, infos}
-  end
-
-  defp take_from_buffer(queue, events, counter, 0, infos) do
-    {queue, :lists.reverse(events), counter, 0, :error, infos}
-  end
-
-  defp take_from_buffer(queue, events, counter, buffer, infos) when is_reference(infos) do
-    {{:value, value}, queue} = :queue.out(queue)
-
-    case value do
-      {^infos, msg} ->
-        {queue, :lists.reverse(events), counter, buffer - 1, {:ok, msg}, infos}
-
-      val ->
-        take_from_buffer(queue, [val | events], counter - 1, buffer - 1, infos)
-    end
-  end
-
-  defp take_from_buffer(queue, events, counter, buffer, wheel) do
-    {{:value, value}, queue} = :queue.out(queue)
-
-    case pop_and_increment_wheel(wheel) do
-      {:ok, msg, wheel} ->
-        {queue, :lists.reverse([value | events]), counter - 1, buffer - 1, {:ok, msg}, wheel}
-
-      {:error, wheel} ->
-        take_from_buffer(queue, [value | events], counter - 1, buffer - 1, wheel)
     end
   end
 
@@ -2278,12 +2235,8 @@ defmodule GenStage do
     stage
   end
 
-  defp buffer_events(
-         events,
-         %{buffer: {queue, counter, infos}, buffer_config: {max, keep}} = stage
-       ) do
-    {{excess, queue, counter}, pending, infos} =
-      queue_events(keep, events, queue, counter, max, infos)
+  defp buffer_events(events, %{buffer: buffer, buffer_keep: keep} = stage) do
+    {buffer, excess, perms} = Buffer.store_temporary(buffer, events, keep)
 
     case excess do
       0 ->
@@ -2294,56 +2247,10 @@ defmodule GenStage do
         :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
     end
 
-    stage = %{stage | buffer: {queue, counter, infos}}
-    :lists.foldl(&dispatch_info/2, stage, pending)
+    :lists.foldl(&dispatch_info/2, %{stage | buffer: buffer}, perms)
   end
-
-  defp queue_events(_keep, events, _queue, 0, :infinity, infos),
-    do: {{0, :queue.from_list(events), length(events)}, [], infos}
-
-  defp queue_events(_keep, events, queue, counter, :infinity, infos),
-    do: {queue_infinity(events, queue, counter), [], infos}
-
-  defp queue_events(:first, events, queue, counter, max, infos),
-    do: {queue_first(events, queue, counter, max), [], infos}
-
-  defp queue_events(:last, events, queue, counter, max, infos),
-    do: queue_last(events, queue, 0, counter, max, [], infos)
-
-  defp queue_infinity([], queue, counter), do: {0, queue, counter}
-
-  defp queue_infinity([event | events], queue, counter),
-    do: queue_infinity(events, :queue.in(event, queue), counter + 1)
-
-  defp queue_first([], queue, counter, _max), do: {0, queue, counter}
-  defp queue_first(events, queue, max, max), do: {length(events), queue, max}
-
-  defp queue_first([event | events], queue, counter, max),
-    do: queue_first(events, :queue.in(event, queue), counter + 1, max)
-
-  defp queue_last([], queue, excess, counter, _max, pending, wheel),
-    do: {{excess, queue, counter}, :lists.reverse(pending), wheel}
-
-  defp queue_last([event | events], queue, excess, max, max, pending, wheel) do
-    queue = :queue.in(event, :queue.drop(queue))
-
-    case pop_and_increment_wheel(wheel) do
-      {:ok, info, wheel} ->
-        queue_last(events, queue, excess + 1, max, max, [info | pending], wheel)
-
-      {:error, wheel} ->
-        queue_last(events, queue, excess + 1, max, max, pending, wheel)
-    end
-  end
-
-  defp queue_last([event | events], queue, excess, counter, max, pending, wheel),
-    do: queue_last(events, :queue.in(event, queue), excess, counter + 1, max, pending, wheel)
 
   ## Info helpers
-
-  # We use a wheel unless the queue is infinity.
-  defp init_wheel(:infinity), do: make_ref()
-  defp init_wheel(_), do: nil
 
   defp producer_info(msg, %{type: :consumer} = stage) do
     send(self(), msg)
@@ -2365,43 +2272,10 @@ defmodule GenStage do
     {:reply, :ok, buffer_or_dispatch_info(msg, stage)}
   end
 
-  defp buffer_or_dispatch_info(msg, stage) do
-    %{buffer: {queue, count, infos}, buffer_config: {max, _keep}} = stage
-
-    case count do
-      0 ->
-        dispatch_info(msg, stage)
-
-      _ when is_reference(infos) ->
-        queue = :queue.in({infos, msg}, queue)
-        %{stage | buffer: {queue, count + 1, infos}}
-
-      _ ->
-        wheel = put_wheel(infos, count, max, msg)
-        %{stage | buffer: {queue, count, wheel}}
-    end
-  end
-
-  defp put_wheel(nil, count, max, contents), do: {0, max, %{(count - 1) => contents}}
-
-  defp put_wheel({pos, _, wheel}, count, max, contents),
-    do: {pos, max, Map.put(wheel, rem(pos + count - 1, max), contents)}
-
-  defp pop_and_increment_wheel(nil), do: {:error, nil}
-
-  defp pop_and_increment_wheel({pos, limit, wheel}) do
-    new_pos = rem(pos + 1, limit)
-
-    # TODO: Use :maps.take/2
-    case wheel do
-      %{^pos => info} when map_size(wheel) == 1 ->
-        {:ok, info, nil}
-
-      %{^pos => info} ->
-        {:ok, info, {new_pos, limit, Map.delete(wheel, pos)}}
-
-      %{} ->
-        {:error, {new_pos, limit, wheel}}
+  defp buffer_or_dispatch_info(msg, %{buffer: buffer} = stage) do
+    case Buffer.store_permanent_unless_empty(buffer, msg) do
+      :empty -> dispatch_info(msg, stage)
+      {:ok, buffer} -> %{stage | buffer: buffer}
     end
   end
 
