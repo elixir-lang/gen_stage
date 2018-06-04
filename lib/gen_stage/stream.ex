@@ -1,7 +1,7 @@
 defmodule GenStage.Stream do
   @moduledoc false
 
-  import GenStage.Utils
+  require GenStage.Utils, as: Utils
 
   def build(subscriptions, options) do
     subscriptions = :lists.map(&stream_validate_opts/1, subscriptions)
@@ -14,10 +14,10 @@ defmodule GenStage.Stream do
   end
 
   defp stream_validate_opts({to, opts}) when is_list(opts) do
-    with {:ok, cancel, _} <-
-           validate_in(opts, :cancel, :permanent, [:temporary, :transient, :permanent]),
-         {:ok, max, _} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
-         {:ok, min, _} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
+    with {:ok, max, _} <- Utils.validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
+         {:ok, min, _} <- Utils.validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false),
+         {:ok, cancel, _} <-
+           Utils.validate_in(opts, :cancel, :permanent, [:temporary, :transient, :permanent]) do
       {to, cancel, min, max, opts}
     else
       {:error, message} ->
@@ -172,7 +172,7 @@ defmodule GenStage.Stream do
         case subscriptions do
           %{^inner_ref => {:subscribed, producer_pid, cancel, min, max, demand}} ->
             from = {producer_pid, ref}
-            {demand, batches} = split_batches(events, from, min, max, demand)
+            {demand, batches} = Utils.split_batches(events, from, min, max, demand)
             subscribed = {:subscribed, producer_pid, cancel, min, max, demand}
 
             deliver_stream(
@@ -248,7 +248,7 @@ defmodule GenStage.Stream do
     case subscriptions do
       %{^inner_ref => {_, _, cancel, _, _, _}}
       when cancel == :permanent
-      when cancel == :transient and not is_transient_shutdown(reason) ->
+      when cancel == :transient and not Utils.is_transient_shutdown(reason) ->
         Process.demonitor(inner_ref, [:flush])
         {:halt, {:exit, reason, monitor_pid, monitor_ref, Map.delete(subscriptions, inner_ref)}}
 

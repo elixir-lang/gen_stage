@@ -1637,7 +1637,7 @@ defmodule GenStage do
 
   ## Callbacks
 
-  import GenStage.Utils
+  require GenStage.Utils, as: Utils
   @compile :inline_list_funcs
 
   @doc false
@@ -1673,12 +1673,14 @@ defmodule GenStage do
   end
 
   defp init_producer(mod, opts, state) do
-    with {:ok, dispatcher_mod, dispatcher_state, opts} <- validate_dispatcher(opts),
+    with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
          {:ok, buffer_size, opts} <-
-           validate_integer(opts, :buffer_size, 10000, 0, :infinity, true),
-         {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
-         {:ok, demand, opts} <- validate_in(opts, :demand, :forward, [:accumulate, :forward]),
-         :ok <- validate_no_opts(opts) do
+           Utils.validate_integer(opts, :buffer_size, 10000, 0, :infinity, true),
+         {:ok, buffer_keep, opts} <-
+           Utils.validate_in(opts, :buffer_keep, :last, [:first, :last]),
+         {:ok, demand, opts} <-
+           Utils.validate_in(opts, :demand, :forward, [:accumulate, :forward]),
+         :ok <- Utils.validate_no_opts(opts) do
       stage = %GenStage{
         mod: mod,
         state: state,
@@ -1696,7 +1698,7 @@ defmodule GenStage do
     end
   end
 
-  defp validate_dispatcher(opts) do
+  defp init_dispatcher(opts) do
     case Keyword.pop(opts, :dispatcher, GenStage.DemandDispatcher) do
       {dispatcher, opts} when is_atom(dispatcher) ->
         {:ok, dispatcher_state} = dispatcher.init([])
@@ -1713,12 +1715,13 @@ defmodule GenStage do
   end
 
   defp init_producer_consumer(mod, opts, state) do
-    with {:ok, dispatcher_mod, dispatcher_state, opts} <- validate_dispatcher(opts),
-         {:ok, subscribe_to, opts} <- validate_list(opts, :subscribe_to, []),
+    with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
+         {:ok, subscribe_to, opts} <- Utils.validate_list(opts, :subscribe_to, []),
          {:ok, buffer_size, opts} <-
-           validate_integer(opts, :buffer_size, :infinity, 0, :infinity, true),
-         {:ok, buffer_keep, opts} <- validate_in(opts, :buffer_keep, :last, [:first, :last]),
-         :ok <- validate_no_opts(opts) do
+           Utils.validate_integer(opts, :buffer_size, :infinity, 0, :infinity, true),
+         {:ok, buffer_keep, opts} <-
+           Utils.validate_in(opts, :buffer_keep, :last, [:first, :last]),
+         :ok <- Utils.validate_no_opts(opts) do
       stage = %GenStage{
         mod: mod,
         state: state,
@@ -1737,8 +1740,8 @@ defmodule GenStage do
   end
 
   defp init_consumer(mod, opts, state) do
-    with {:ok, subscribe_to, opts} <- validate_list(opts, :subscribe_to, []),
-         :ok <- validate_no_opts(opts) do
+    with {:ok, subscribe_to, opts} <- Utils.validate_list(opts, :subscribe_to, []),
+         :ok <- Utils.validate_no_opts(opts) do
       stage = %GenStage{mod: mod, state: state, type: :consumer}
       consumer_init_subscribe(subscribe_to, stage)
     else
@@ -1819,7 +1822,7 @@ defmodule GenStage do
 
   def handle_info({:"$gen_producer", _, _} = msg, %{type: :consumer} = stage) do
     error_msg = 'GenStage consumer ~tp received $gen_producer message: ~tp~n'
-    :error_logger.error_msg(error_msg, [self_name(), msg])
+    :error_logger.error_msg(error_msg, [Utils.self_name(), msg])
     {:noreply, stage}
   end
 
@@ -1830,7 +1833,7 @@ defmodule GenStage do
     case consumers do
       %{^ref => _} ->
         error_msg = 'GenStage producer ~tp received duplicated subscription from: ~tp~n'
-        :error_logger.error_msg(error_msg, [self_name(), from])
+        :error_logger.error_msg(error_msg, [Utils.self_name(), from])
 
         msg = {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}}
         send_noconnect(consumer_pid, msg)
@@ -1877,7 +1880,7 @@ defmodule GenStage do
 
   def handle_info({:"$gen_consumer", _, _} = msg, %{type: :producer} = stage) do
     error_msg = 'GenStage producer ~tp received $gen_consumer message: ~tp~n'
-    :error_logger.error_msg(error_msg, [self_name(), msg])
+    :error_logger.error_msg(error_msg, [Utils.self_name(), msg])
     {:noreply, stage}
   end
 
@@ -2066,7 +2069,7 @@ defmodule GenStage do
 
   defp producer_demand(_mode, %{type: type} = stage) when type != :producer do
     error_msg = 'Demand mode can only be set for producers, GenStage ~tp is a ~ts'
-    :error_logger.error_msg(error_msg, [self_name(), type])
+    :error_logger.error_msg(error_msg, [Utils.self_name(), type])
     {:noreply, stage}
   end
 
@@ -2189,7 +2192,7 @@ defmodule GenStage do
     error_msg =
       'GenStage consumer ~tp cannot dispatch events (an empty list must be returned): ~tp~n'
 
-    :error_logger.error_msg(error_msg, [self_name(), events])
+    :error_logger.error_msg(error_msg, [Utils.self_name(), events])
     stage
   end
 
@@ -2288,7 +2291,7 @@ defmodule GenStage do
 
       excess ->
         error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
-        :error_logger.warning_msg(error_msg, [self_name(), excess])
+        :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
     end
 
     stage = %{stage | buffer: {queue, counter, infos}}
@@ -2427,7 +2430,7 @@ defmodule GenStage do
   end
 
   defp consumer_receive({_, ref} = from, {producer_id, cancel, {demand, min, max}}, events, stage) do
-    {demand, batches} = split_batches(events, from, min, max, demand)
+    {demand, batches} = Utils.split_batches(events, from, min, max, demand)
     stage = put_in(stage.producers[ref], {producer_id, cancel, {demand, min, max}})
     {batches, stage}
   end
@@ -2471,15 +2474,16 @@ defmodule GenStage do
 
   defp consumer_subscribe(_cancel, to, _opts, %{type: :producer} = stage) do
     error_msg = 'GenStage producer ~tp cannot be subscribed to another stage: ~tp~n'
-    :error_logger.error_msg(error_msg, [self_name(), to])
+    :error_logger.error_msg(error_msg, [Utils.self_name(), to])
     {:reply, {:error, :not_a_consumer}, stage}
   end
 
   defp consumer_subscribe(current, to, opts, stage) do
-    with {:ok, cancel, _} <-
-           validate_in(opts, :cancel, :permanent, [:temporary, :transient, :permanent]),
-         {:ok, max, _} <- validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
-         {:ok, min, _} <- validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false) do
+    with {:ok, max, _} <- Utils.validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
+         {:ok, min, _} <-
+           Utils.validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false),
+         {:ok, cancel, _} <-
+           Utils.validate_in(opts, :cancel, :permanent, [:temporary, :transient, :permanent]) do
       producer_pid = GenServer.whereis(to)
 
       cond do
@@ -2498,7 +2502,7 @@ defmodule GenStage do
     else
       {:error, message} ->
         error_msg = 'GenStage consumer ~tp subscribe received invalid option: ~ts~n'
-        :error_logger.error_msg(error_msg, [self_name(), message])
+        :error_logger.error_msg(error_msg, [Utils.self_name(), message])
         {:reply, {:error, {:bad_opts, message}}, stage}
     end
   end
@@ -2559,11 +2563,11 @@ defmodule GenStage do
     case noreply_callback(:handle_cancel, [kind_reason, pid_ref, state], stage) do
       {:noreply, stage}
       when mode == :permanent
-      when mode == :transient and not is_transient_shutdown(reason) ->
+      when mode == :transient and not Utils.is_transient_shutdown(reason) ->
         error_msg =
           'GenStage consumer ~tp is stopping after receiving cancel from producer ~tp with reason: ~tp~n'
 
-        :error_logger.info_msg(error_msg, [self_name(), pid, reason])
+        :error_logger.info_msg(error_msg, [Utils.self_name(), pid, reason])
         {:stop, reason, stage}
 
       other ->
