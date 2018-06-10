@@ -14,7 +14,8 @@ defmodule GenStage.Stream do
 
   defp stream_validate_opts({to, opts}) when is_list(opts) do
     with {:ok, max, _} <- Utils.validate_integer(opts, :max_demand, 1000, 1, :infinity, false),
-         {:ok, min, _} <- Utils.validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false),
+         {:ok, min, _} <-
+           Utils.validate_integer(opts, :min_demand, div(max, 2), 0, max - 1, false),
          {:ok, cancel, _} <-
            Utils.validate_in(opts, :cancel, :permanent, [:temporary, :transient, :permanent]) do
       {to, cancel, min, max, opts}

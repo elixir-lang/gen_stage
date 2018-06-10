@@ -263,30 +263,28 @@ defmodule GenStageTest do
     end
   end
 
-  if function_exported?(Supervisor, :init, 2) do
-    test "generates child_spec/1" do
-      assert Counter.child_spec([:hello]) == %{
-               id: Counter,
-               start: {Counter, :start_link, [[:hello]]}
-             }
+  test "generates child_spec/1" do
+    assert Counter.child_spec([:hello]) == %{
+             id: Counter,
+             start: {Counter, :start_link, [[:hello]]}
+           }
 
-      defmodule Custom do
-        use GenStage,
-          id: :id,
-          restart: :temporary,
-          shutdown: :infinity,
-          start: {:foo, :bar, []}
+    defmodule Custom do
+      use GenStage,
+        id: :id,
+        restart: :temporary,
+        shutdown: :infinity,
+        start: {:foo, :bar, []}
 
-        def init(arg), do: {:producer, arg}
-      end
-
-      assert Custom.child_spec([:hello]) == %{
-               id: :id,
-               restart: :temporary,
-               shutdown: :infinity,
-               start: {:foo, :bar, []}
-             }
+      def init(arg), do: {:producer, arg}
     end
+
+    assert Custom.child_spec([:hello]) == %{
+             id: :id,
+             restart: :temporary,
+             shutdown: :infinity,
+             start: {:foo, :bar, []}
+           }
   end
 
   describe "producer-to-consumer demand" do
@@ -493,8 +491,7 @@ defmodule GenStageTest do
 
       {:ok, doubler} =
         Postponer.start_link(
-          {:producer_consumer, self(),
-           subscribe_to: [{producer, max_demand: 10, min_demand: 8}]}
+          {:producer_consumer, self(), subscribe_to: [{producer, max_demand: 10, min_demand: 8}]}
         )
 
       {:ok, _} =

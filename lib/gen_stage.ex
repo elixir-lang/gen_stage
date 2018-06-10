@@ -1118,19 +1118,17 @@ defmodule GenStage do
     quote location: :keep, bind_quoted: [opts: opts] do
       @behaviour GenStage
 
-      if Code.ensure_loaded?(Supervisor) and function_exported?(Supervisor, :init, 2) do
-        @doc false
-        def child_spec(arg) do
-          default = %{
-            id: __MODULE__,
-            start: {__MODULE__, :start_link, [arg]}
-          }
+      @doc false
+      def child_spec(arg) do
+        default = %{
+          id: __MODULE__,
+          start: {__MODULE__, :start_link, [arg]}
+        }
 
-          Supervisor.child_spec(default, unquote(Macro.escape(opts)))
-        end
-
-        defoverridable child_spec: 1
+        Supervisor.child_spec(default, unquote(Macro.escape(opts)))
       end
+
+      defoverridable child_spec: 1
     end
   end
 

@@ -24,11 +24,11 @@ Examples for using GenStage and ConsumerSupervisor can be found [examples](examp
 
 ## Installation
 
-GenStage requires Elixir v1.3. Just add `:gen_stage` to your list of dependencies in mix.exs:
+GenStage requires Elixir v1.5. Just add `:gen_stage` to your list of dependencies in mix.exs:
 
 ```elixir
 def deps do
-  [{:gen_stage, "~> 0.13"}]
+  [{:gen_stage, "~> 0.14"}]
 end
 ```
 

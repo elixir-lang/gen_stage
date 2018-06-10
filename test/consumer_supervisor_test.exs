@@ -8,32 +8,30 @@ defmodule ConsumerSupervisorTest do
     def init(args), do: args
   end
 
-  if function_exported?(Supervisor, :init, 2) do
-    test "generates child_spec/1" do
-      assert Simple.child_spec([:hello]) == %{
-               id: Simple,
-               start: {Simple, :start_link, [[:hello]]},
-               type: :supervisor
-             }
+  test "generates child_spec/1" do
+    assert Simple.child_spec([:hello]) == %{
+             id: Simple,
+             start: {Simple, :start_link, [[:hello]]},
+             type: :supervisor
+           }
 
-      defmodule Custom do
-        use ConsumerSupervisor,
-          id: :id,
-          restart: :temporary,
-          start: {:foo, :bar, []}
+    defmodule Custom do
+      use ConsumerSupervisor,
+        id: :id,
+        restart: :temporary,
+        start: {:foo, :bar, []}
 
-        def init(arg) do
-          arg
-        end
+      def init(arg) do
+        arg
       end
-
-      assert Custom.child_spec([:hello]) == %{
-               id: :id,
-               restart: :temporary,
-               start: {:foo, :bar, []},
-               type: :supervisor
-             }
     end
+
+    assert Custom.child_spec([:hello]) == %{
+             id: :id,
+             restart: :temporary,
+             start: {:foo, :bar, []},
+             type: :supervisor
+           }
   end
 
   test "start_link/3 with non-ok init" do
@@ -127,47 +125,42 @@ defmodule ConsumerSupervisorTest do
       assert expected == ConsumerSupervisor.init([worker(Foo, [])], strategy: :one_for_one)
     end
 
-    if function_exported?(Supervisor, :init, 2) do
-      test "supports new child spec as tuple" do
-        expected = {
-          :ok,
-          [%{id: Task, restart: :temporary, start: {Task, :start_link, [[:foo, :bar]]}}],
-          [strategy: :one_for_one]
-        }
+    test "supports new child spec as tuple" do
+      expected = {
+        :ok,
+        [%{id: Task, restart: :temporary, start: {Task, :start_link, [[:foo, :bar]]}}],
+        [strategy: :one_for_one]
+      }
 
-        assert expected == ConsumerSupervisor.init([{Task, [:foo, :bar]}], strategy: :one_for_one)
-      end
+      assert expected == ConsumerSupervisor.init([{Task, [:foo, :bar]}], strategy: :one_for_one)
+    end
 
-      test "supports new child spec as atom" do
-        expected = {
-          :ok,
-          [%{id: Task, restart: :temporary, start: {Task, :start_link, [[]]}}],
-          [strategy: :one_for_one]
-        }
+    test "supports new child spec as atom" do
+      expected = {
+        :ok,
+        [%{id: Task, restart: :temporary, start: {Task, :start_link, [[]]}}],
+        [strategy: :one_for_one]
+      }
 
-        assert expected == ConsumerSupervisor.init([Task], strategy: :one_for_one)
-      end
+      assert expected == ConsumerSupervisor.init([Task], strategy: :one_for_one)
     end
   end
 
-  if function_exported?(Supervisor, :init, 2) do
-    test "start_link/3 with new syntax" do
-      children = [%{id: Foo, restart: :temporary, start: {Foo, :start_link, [[]]}}]
-      spec = {:ok, children, [strategy: :one_for_one]}
+  test "start_link/3 with new syntax" do
+    children = [%{id: Foo, restart: :temporary, start: {Foo, :start_link, [[]]}}]
+    spec = {:ok, children, [strategy: :one_for_one]}
 
-      {:ok, pid} = ConsumerSupervisor.start_link(Simple, spec, name: __MODULE__)
+    {:ok, pid} = ConsumerSupervisor.start_link(Simple, spec, name: __MODULE__)
 
-      # Sets up a link
-      {:links, links} = Process.info(self(), :links)
-      assert pid in links
+    # Sets up a link
+    {:links, links} = Process.info(self(), :links)
+    assert pid in links
 
-      # A name
-      assert Process.whereis(__MODULE__) == pid
+    # A name
+    assert Process.whereis(__MODULE__) == pid
 
-      # And the initial call
-      assert {:supervisor, ConsumerSupervisorTest.Simple, 1} =
-               :proc_lib.translate_initial_call(pid)
-    end
+    # And the initial call
+    assert {:supervisor, ConsumerSupervisorTest.Simple, 1} = :proc_lib.translate_initial_call(pid)
   end
 
   ## Code change

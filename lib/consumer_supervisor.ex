@@ -118,20 +118,18 @@ defmodule ConsumerSupervisor do
       @behaviour ConsumerSupervisor
       import Supervisor.Spec
 
-      if Code.ensure_loaded?(Supervisor) and function_exported?(Supervisor, :init, 2) do
-        @doc false
-        def child_spec(arg) do
-          default = %{
-            id: __MODULE__,
-            start: {__MODULE__, :start_link, [arg]},
-            type: :supervisor
-          }
+      @doc false
+      def child_spec(arg) do
+        default = %{
+          id: __MODULE__,
+          start: {__MODULE__, :start_link, [arg]},
+          type: :supervisor
+        }
 
-          Supervisor.child_spec(default, unquote(Macro.escape(opts)))
-        end
-
-        defoverridable child_spec: 1
+        Supervisor.child_spec(default, unquote(Macro.escape(opts)))
       end
+
+      defoverridable child_spec: 1
 
       @doc false
       def init(arg)
@@ -191,8 +189,8 @@ defmodule ConsumerSupervisor do
   name. The supported values are described under the "Name Registration"
   section in the `GenServer` module docs.
   """
-  @spec start_link(module, any) :: Supervisor.on_start
-  @spec start_link(module, any, [option]) :: Supervisor.on_start
+  @spec start_link(module, any) :: Supervisor.on_start()
+  @spec start_link(module, any, [option]) :: Supervisor.on_start()
   def start_link(mod, args, opts \\ []) do
     GenStage.start_link(__MODULE__, {mod, args, opts[:name]}, opts)
   end
@@ -314,16 +312,9 @@ defmodule ConsumerSupervisor do
     {:ok, [template], opts}
   end
 
-  if Code.ensure_loaded?(Supervisor) and function_exported?(Supervisor, :init, 2) do
-    def init([template], opts) when is_tuple(template) or is_map(template) or is_atom(template) do
-      {:ok, {_, [template]}} = Supervisor.init([template], opts)
-      {:ok, [template], opts}
-    end
-  end
-
-  def init(not_a_list, opts) when not is_list(not_a_list) do
-    IO.warn("ConsumerSupervisor.init/1 expects a list with a single element")
-    init([not_a_list], opts)
+  def init([template], opts) when is_tuple(template) or is_map(template) or is_atom(template) do
+    {:ok, {_, [template]}} = Supervisor.init([template], opts)
+    {:ok, [template], opts}
   end
 
   @compile {:inline, call: 2}

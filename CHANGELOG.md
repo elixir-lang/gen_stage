@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.14.0 (2018-06-10)
+
+This version requires Elixir v1.5+.
+
+### Bug fixes
+
+  * Ensure a `:producer_consumer` stops asking the producer if downstream demand is 0
+  * Enforce the :hash option for non-int partitions in PartitionDispatcher
+
 ## v0.13.1 (2018-01-28)
 
 Note: this is the last version to support Elixir v1.3 and v1.4.

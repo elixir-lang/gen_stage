@@ -7,7 +7,7 @@ defmodule GenStage.Buffer do
   # is stored in a wheel for performance and to avoid discards.
   @moduledoc false
 
-  @opaque t() :: {:queue.queue, non_neg_integer(), wheel()}
+  @opaque t() :: {:queue.queue(), non_neg_integer(), wheel()}
   @typep wheel() :: {non_neg_integer(), pos_integer(), map()} | pos_integer() | reference()
 
   @doc """
@@ -175,15 +175,12 @@ defmodule GenStage.Buffer do
   defp pop_and_increment_wheel({pos, max, wheel}) do
     new_pos = rem(pos + 1, max)
 
-    # TODO: Use :maps.take/2
-    case wheel do
-      %{^pos => perms} when map_size(wheel) == 1 ->
-        {:ok, perms, max}
+    case :maps.take(pos, wheel) do
+      {perms, wheel} ->
+        maybe_triplet = if wheel == %{}, do: max, else: {new_pos, max, wheel}
+        {:ok, perms, maybe_triplet}
 
-      %{^pos => perms} ->
-        {:ok, perms, {new_pos, max, Map.delete(wheel, pos)}}
-
-      %{} ->
+      :error ->
         {:error, {new_pos, max, wheel}}
     end
   end
