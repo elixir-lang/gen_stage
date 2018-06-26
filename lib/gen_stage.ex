@@ -241,24 +241,20 @@ defmodule GenStage do
       GenStage.start_link(C, :ok)
       GenStage.start_link(C, :ok)
 
-  In a supervision tree, this is often done by starting multiple workers. But to add
-  modules `A` and `B` as workers we have to update first the `c:start_link/1`
-  call to the following for module `A`:
+  In a supervision tree, this is often done by starting multiple workers. Typically
+  we update each `c:start_link/1` call to start a named process:
 
       def start_link(number) do
-        # Calling the stage in module A as A
         GenStage.start_link(A, number, name: A)
       end
 
   And the same for module `B`:
 
       def start_link(number) do
-        # Calling the stage in module B as B
         GenStage.start_link(B, number, name: B)
       end
 
   Module `C` does not need to be updated because it won't be subscribed to.
-
   Then we can define our supervision tree like this:
 
       children = [
@@ -272,9 +268,9 @@ defmodule GenStage do
 
       Supervisor.start_link(children, strategy: :rest_for_one)
 
-  Having multiple consumers is often the easiest and simplest way to
-  leverage concurrency in a GenStage pipeline, especially if events can
-  be processed out of order.
+  Having multiple consumers is often the easiest and simplest way to leverage
+  concurrency in a GenStage pipeline, especially if events can be processed out
+  of order.
 
   Also note that we set the supervision strategy to `:rest_for_one`. This
   is important because if the producer A terminates, all of the other
