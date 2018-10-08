@@ -1672,7 +1672,7 @@ defmodule GenStageTest do
                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
       ref = Process.monitor(producer)
-      assert_received {:DOWN, ^ref, _, _, _}
+      assert_receive {:DOWN, ^ref, _, _, _}
     end
 
     test "raises on bad options" do

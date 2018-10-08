@@ -2,6 +2,10 @@ defmodule GenStage.Streamer do
   @moduledoc false
   use GenStage
 
+  def start_link({_, opts} = pair) do
+    GenStage.start_link(__MODULE__, pair, opts)
+  end
+
   def init({stream, opts}) do
     continuation =
       &Enumerable.reduce(stream, &1, fn

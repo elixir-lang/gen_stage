@@ -1108,8 +1108,8 @@ defmodule GenStage do
   @doc """
   The same as `c:GenServer.format_status/2`.
   """
-  @callback format_status(:normal | :terminate, [pdict :: {term, term} | state :: term, ...]) ::
-              status :: term
+  @callback format_status(:normal | :terminate, [pdict :: {term, term} | (state :: term), ...]) ::
+              (status :: term)
 
   @optional_callbacks [
     # GenStage
