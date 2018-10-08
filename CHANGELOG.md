@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.1 (2018-10-08)
+
+### Bug fixes
+
+  * Fix warnings on Elixir v1.8
+
 ## v0.14.0 (2018-06-10)
 
 This version requires Elixir v1.5+.
