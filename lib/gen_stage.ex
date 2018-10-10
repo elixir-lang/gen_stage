@@ -1296,11 +1296,17 @@ defmodule GenStage do
   end
 
   @doc """
-  Cancels `subscription_tag` with `reason` and subscribes synchronously in one step.
+  Cancels `subscription_tag` with `reason` and resubscribe
+  to the same stage with the given options.
 
-  `subscription_tag` is the subscription tag returned by `sync_subscribe/3`.
+  This is useful in case you need to update the options in
+  which you are currently subscribed to in a producer.
 
-  See `sync_subscribe/3` for examples and options.
+  This function is sync, which means it will wait until the
+  subscription message is sent to the producer, although it
+  won't wait for the subscription confirmation.
+
+  See `sync_subscribe/2` for options and more information.
   """
   @spec sync_resubscribe(stage, subscription_tag, term, subscription_options, timeout) ::
           {:ok, subscription_tag} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t()}}
@@ -1320,13 +1326,14 @@ defmodule GenStage do
   @doc """
   Asks the consumer to subscribe to the given producer asynchronously.
 
-  This call returns `:ok` regardless if the subscription
-  effectively happened or not. It is typically called from
-  a stage's `c:init/1` callback.
+  This function is async, which means it always returns
+  `:ok` once the request is dispatched but without waiting
+  for its completion. This particular function is usually
+  called from a stage's `c:init/1` callback.
 
   ## Options
 
-  This function accepts the same options as `sync_subscribe/4`.
+  This function accepts the same options as `sync_subscribe/2`.
   """
   @spec async_subscribe(stage, subscription_options) :: :ok
   def async_subscribe(stage, opts) do
@@ -1334,10 +1341,19 @@ defmodule GenStage do
   end
 
   @doc """
-  Cancels `subscription_tag` with `reason` and subscribe asynchronously in one
-  step.
+  Cancels `subscription_tag` with `reason` and resubscribe
+  to the same stage with the given options.
 
-  See `async_subscribe/2` for examples and options.
+  This is useful in case you need to update the options in
+  which you are currently subscribed to in a producer.
+
+  This function is async, which means it always returns
+  `:ok` once the request is dispatched but without waiting
+  for its completion.
+
+  ## Options
+
+  This function accepts the same options as `sync_subscribe/2`.
   """
   @spec async_resubscribe(stage, subscription_tag, reason :: term, subscription_options) :: :ok
   def async_resubscribe(stage, subscription_tag, reason, opts) do
