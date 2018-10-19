@@ -1232,6 +1232,16 @@ defmodule GenStage do
   end
 
   @doc """
+  Returns the demand mode for a producer.
+
+  It is either `:forward` or `:accumulate`. See `demand/2`.
+  """
+  @spec demand(stage) :: :forward | :accumulate
+  def demand(stage) do
+    call(stage, :"$demand")
+  end
+
+  @doc """
   Sets the demand mode for a producer.
 
   When `:forward`, the demand is always forwarded to the `handle_demand`
@@ -1784,6 +1794,10 @@ defmodule GenStage do
     producer_info(msg, stage)
   end
 
+  def handle_call(:"$demand", _from, stage) do
+    producer_demand(stage)
+  end
+
   def handle_call({:"$subscribe", current, to, opts}, _from, stage) do
     consumer_subscribe(current, to, opts, stage)
   end
@@ -2088,6 +2102,14 @@ defmodule GenStage do
   end
 
   ## Producer helpers
+
+  defp producer_demand(%{events: :forward} = stage) do
+    {:reply, :forward, stage}
+  end
+
+  defp producer_demand(%{events: events} = stage) when is_list(events) do
+    {:reply, :accumulate, stage}
+  end
 
   defp producer_demand(:forward, %{type: :producer_consumer} = stage) do
     # That's the only mode on producer consumers.

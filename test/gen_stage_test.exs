@@ -627,26 +627,33 @@ defmodule GenStageTest do
   describe "demand" do
     test "can be set to :accumulate on init" do
       {:ok, producer} = Counter.start_link({:producer, 0, demand: :accumulate})
+      assert GenStage.demand(producer) == :accumulate
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       GenStage.sync_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
       refute_received {:consumed, [0, 1, 2, 3]}
       GenStage.demand(producer, :forward)
+      assert GenStage.demand(producer) == :forward
       assert_receive {:consumed, [0, 1, 2, 3]}
     end
 
     test "can be set to :accumulate via API" do
       {:ok, producer} = Counter.start_link({:producer, 0})
+      assert GenStage.demand(producer) == :forward
       GenStage.demand(producer, :accumulate)
+      assert GenStage.demand(producer) == :accumulate
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       GenStage.sync_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
       refute_received {:consumed, [0, 1, 2, 3]}
       GenStage.demand(producer, :forward)
+      assert GenStage.demand(producer) == :forward
       assert_receive {:consumed, [0, 1, 2, 3]}
     end
 
     test "can be set to :forward via API before subscriptions" do
       {:ok, producer} = Counter.start_link({:producer, 0, demand: :accumulate})
+      assert GenStage.demand(producer) == :accumulate
       GenStage.demand(producer, :forward)
+      assert GenStage.demand(producer) == :forward
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       GenStage.sync_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
       assert_receive {:consumed, [0, 1, 2, 3]}
