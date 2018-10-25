@@ -103,6 +103,11 @@ defmodule GenStage.Dispatcher do
   In case the dispatcher is doing buffering, the message must
   only be sent after all currently buffered consumer messages are
   delivered.
+
+  The returned demand from the dispatcher in this callback ought to be
+  positive only if it was previously requested in `ask/3` and buffered.
   """
-  @callback info(msg :: term, state :: term) :: {:ok, new_state} when new_state: term
+  @callback info(msg :: term, state :: term) ::
+              {:ok, demand :: non_neg_integer, new_state}
+            when new_state: term
 end

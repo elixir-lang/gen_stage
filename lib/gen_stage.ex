@@ -1228,7 +1228,14 @@ defmodule GenStage do
   """
   @spec async_info(stage, msg :: term()) :: :ok
   def async_info(stage, msg) do
-    cast(stage, {:"$info", msg})
+    Process.send(GenServer.whereis(stage), {:"$info", msg}, [])
+  end
+
+  @doc """
+  """
+  @spec async_info_after(stage, msg :: term(), non_neg_integer()) :: :ok
+  def async_info_after(stage, msg, time) do
+    Process.send_after(GenServer.whereis(stage), {:"$info", msg}, time)
   end
 
   @doc """
@@ -1820,12 +1827,6 @@ defmodule GenStage do
     end
   end
 
-  @doc false
-  def handle_cast({:"$info", msg}, stage) do
-    {:reply, _, stage} = producer_info(msg, stage)
-    {:noreply, stage}
-  end
-
   def handle_cast({:"$demand", mode}, stage) do
     producer_demand(mode, stage)
   end
@@ -1859,6 +1860,12 @@ defmodule GenStage do
             noreply_callback(:handle_info, [msg, state], stage)
         end
     end
+  end
+
+  @doc false
+  def handle_info({:"$info", msg}, stage) do
+    {:reply, _, stage} = producer_info(msg, stage)
+    {:noreply, stage}
   end
 
   ## Producer messages
@@ -2309,7 +2316,8 @@ defmodule GenStage do
 
   defp producer_info(msg, %{type: :producer_consumer, events: {queue, demand}} = stage) do
     stage =
-      if :queue.is_empty(queue) do
+      # an :info message can produce demand
+      if :queue.is_empty(queue) or demand == 0 do
         buffer_or_dispatch_info(msg, stage)
       else
         %{stage | events: {:queue.in({:info, msg}, queue), demand}}
@@ -2330,9 +2338,9 @@ defmodule GenStage do
   end
 
   defp dispatch_info(msg, stage) do
-    %{dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} = stage
-    {:ok, dispatcher_state} = dispatcher_mod.info(msg, dispatcher_state)
-    %{stage | dispatcher_state: dispatcher_state}
+    %{dispatcher_state: dispatcher_state} = stage
+    {:noreply, stage} = dispatcher_callback(:info, [msg, dispatcher_state], stage)
+    stage
   end
 
   ## Consumer helpers

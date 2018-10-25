@@ -17,7 +17,7 @@ defmodule GenStage.DemandDispatcher do
   @doc false
   def info(msg, state) do
     send(self(), msg)
-    {:ok, state}
+    {:ok, 0, state}
   end
 
   @doc false

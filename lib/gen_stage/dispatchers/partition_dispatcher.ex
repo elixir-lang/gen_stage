@@ -123,7 +123,7 @@ defmodule GenStage.PartitionDispatcher do
           Map.put(infos, info, {msg, queued})
       end
 
-    {:ok, {tag, hash, waiting, pending, partitions, references, infos}}
+    {:ok, 0, {tag, hash, waiting, pending, partitions, references, infos}}
   end
 
   @doc false

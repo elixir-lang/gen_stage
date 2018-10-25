@@ -148,7 +148,7 @@ defmodule GenStage.PartitionDispatcherTest do
     refute_received {:"$gen_consumer", {_, ^ref0}, _}
 
     # The notification should not count as an event
-    {:ok, disp} = D.info(:hello, disp)
+    {:ok, 0, disp} = D.info(:hello, disp)
     {:ok, 5, disp} = D.cancel({pid0, ref0}, disp)
     assert {5, 0} = waiting_and_pending(disp)
     assert_received :hello
@@ -165,7 +165,7 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, 0, disp} = D.subscribe([partition: 1], {pid1, ref1}, disp)
     {:ok, 3, disp} = D.ask(3, {pid1, ref1}, disp)
 
-    {:ok, notify_disp} = D.info(:hello, disp)
+    {:ok, 0, notify_disp} = D.info(:hello, disp)
     assert disp == notify_disp
     assert_received :hello
   end
@@ -188,7 +188,7 @@ defmodule GenStage.PartitionDispatcherTest do
     {:ok, 3, disp} = D.ask(3, {pid1, ref1}, disp)
     {:ok, [], disp} = D.dispatch([1, 2, 5], 3, disp)
 
-    {:ok, disp} = D.info(:hello, disp)
+    {:ok, 0, disp} = D.info(:hello, disp)
     refute_received :hello
 
     {:ok, 5, _} = D.ask(5, {pid0, ref0}, disp)

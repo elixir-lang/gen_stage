@@ -158,7 +158,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
     {:ok, 0, disp} = D.ask(3, {pid, ref1}, disp)
 
-    {:ok, notify_disp} = D.info(:hello, disp)
+    {:ok, 0, notify_disp} = D.info(:hello, disp)
     assert disp == notify_disp
     assert_received :hello
   end
