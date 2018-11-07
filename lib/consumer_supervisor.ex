@@ -7,7 +7,7 @@ defmodule ConsumerSupervisor do
   to the arguments in the child specification.
 
   A `ConsumerSupervisor` can be attached to a producer by returning
-  `:subscribe_to` from `init/1` or explicitly with `GenStage.sync_subscribe/3`
+  `:subscribe_to` from `c:init/1` or explicitly with `GenStage.sync_subscribe/3`
   and `GenStage.async_subscribe/2`.
 
   Once subscribed, the supervisor will ask the producer for `:max_demand` events
