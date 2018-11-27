@@ -12,9 +12,9 @@ You may also be interested in [the Flow project](https://github.com/elixir-lang/
 
 ## Examples
 
-Examples for using GenStage and ConsumerSupervisor can be found [examples](examples) directory:
+Examples for using GenStage and ConsumerSupervisor can be found in the [examples](examples) directory:
 
-  * [ProducerConsumer](examples/producer_consumer.exs) - a simple example of setting up a pipeline of `A -> B -> C` stages and having events flowing through
+  * [ProducerConsumer](examples/producer_consumer.exs) - a simple example of setting up a pipeline of `A -> B -> C` stages and having events flowing through it
 
   * [ConsumerSupervisor](examples/consumer_supervisor.exs) - an example of how to use one or more `ConsumerSupervisor` as a consumer to a producer that works as a counter
 
