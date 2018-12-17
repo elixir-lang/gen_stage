@@ -1411,13 +1411,25 @@ defmodule GenStage do
   @doc """
   Cancels the given subscription on the producer.
 
-  Once the producer receives the request, a confirmation
-  may be forwarded to the consumer (although there is no
-  guarantee as the producer may crash for unrelated reasons
-  before). This is an asynchronous request.
+  The second argument is the cancellation reason. Once the
+  producer receives the request, a confirmation may be
+  forwarded to the consumer (although there is no guarantee
+  as the producer may crash for unrelated reasons before).
+  The consumer will react to the cancellation according to
+  the `:cancel` option given when subscribing. For example:
 
-  It accepts the same options as `Process.send/3`, and returns the same value as
-  `Process.send/3`.
+      GenStage.cancel({pid, subscription}, :shutdown)
+
+  will cause the consumer to crash if the `:cancel` given
+  when subscribing is `:permanent` (the default) but it
+  won't cause a crash in other modes. See the options in
+  `sync_subscribe/3` for more information.
+
+  The `cancel` operation is an asynchronous request. The
+  third argument are same options as `Process.send/3`,
+  allowing you to pass `:noconnect` or `:nosuspend` which
+  is useful when working across nodes. This function returns
+  the same value as `Process.send/3`.
   """
   @spec cancel(from, term, [:noconnect | :nosuspend]) :: :ok | :noconnect | :nosuspend
   def cancel({pid, ref} = _producer_subscription, reason, opts \\ []) do
