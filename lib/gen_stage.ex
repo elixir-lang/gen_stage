@@ -2000,7 +2000,7 @@ defmodule GenStage do
         other -> other
       end
     else
-      {:ok, state}
+      {:ok, stage}
     end
   end
 
