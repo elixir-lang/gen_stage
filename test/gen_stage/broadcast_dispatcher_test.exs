@@ -162,4 +162,15 @@ defmodule GenStage.BroadcastDispatcherTest do
     assert disp == notify_disp
     assert_received :hello
   end
+
+  test "subscribing is idempotent" do
+    pid = self()
+    ref1 = make_ref()
+    ref2 = make_ref()
+    disp = dispatcher([])
+
+    {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
+    assert disp == {[{0, pid, ref1, nil}], 0}
+  end
 end
