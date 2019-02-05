@@ -4,7 +4,7 @@ defmodule GenStage.BroadcastDispatcherTest do
   alias GenStage.BroadcastDispatcher, as: D
 
   defp dispatcher(opts) do
-    {:ok, {[], 0} = state} = D.init(opts)
+    {:ok, {[], 0, _subscribers} = state} = D.init(opts)
     state
   end
 
@@ -168,9 +168,10 @@ defmodule GenStage.BroadcastDispatcherTest do
     ref1 = make_ref()
     ref2 = make_ref()
     disp = dispatcher([])
+    expected_subscribers = MapSet.new([pid])
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
-    assert disp == {[{0, pid, ref1, nil}], 0}
+    assert disp == {[{0, pid, ref1, nil}], 0, expected_subscribers}
   end
 end

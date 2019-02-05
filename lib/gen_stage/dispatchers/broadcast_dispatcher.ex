@@ -35,7 +35,7 @@ defmodule GenStage.BroadcastDispatcher do
 
   @doc false
   def init(_opts) do
-    {:ok, {[], 0}}
+    {:ok, {[], 0, MapSet.new()}}
   end
 
   @doc false
@@ -45,36 +45,42 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   @doc false
-  def subscribe(opts, {pid, ref}, {demands, waiting}) do
+  def subscribe(opts, {pid, ref}, state = {demands, waiting, subscribed_processes}) do
     selector = validate_selector(opts)
-    {:ok, 0, {add_demand(-waiting, pid, ref, selector, demands), waiting}}
+    if subscribed?(subscribed_processes, pid) do
+      {:ok, 0, state}
+    else
+      subscribed_processes = add_subscriber(subscribed_processes, pid)
+      {:ok, 0, {add_demand(-waiting, pid, ref, selector, demands), waiting, subscribed_processes}}
+    end
   end
 
   @doc false
-  def cancel({_, ref}, {demands, waiting}) do
+  def cancel({pid, ref}, {demands, waiting, subscribed_processes}) do
     # Since we may have removed the process we were waiting on,
     # cancellation may actually generate demand!
     demands = delete_demand(ref, demands)
     new_min = get_min(demands)
     demands = adjust_demand(new_min, demands)
-    {:ok, new_min, {demands, waiting + new_min}}
+    subscribed_processes = delete_subscriber(subscribed_processes, pid)
+    {:ok, new_min, {demands, waiting + new_min, subscribed_processes}}
   end
 
   @doc false
-  def ask(counter, {pid, ref}, {demands, waiting}) do
+  def ask(counter, {pid, ref}, {demands, waiting, subscribed_processes}) do
     {current, selector, demands} = pop_demand(ref, demands)
     demands = add_demand(current + counter, pid, ref, selector, demands)
     new_min = get_min(demands)
     demands = adjust_demand(new_min, demands)
-    {:ok, new_min, {demands, waiting + new_min}}
+    {:ok, new_min, {demands, waiting + new_min, subscribed_processes}}
   end
 
   @doc false
-  def dispatch(events, _length, {demands, 0}) do
-    {:ok, events, {demands, 0}}
+  def dispatch(events, _length, {demands, 0, subscribed_processes}) do
+    {:ok, events, {demands, 0, subscribed_processes}}
   end
 
-  def dispatch(events, length, {demands, waiting}) do
+  def dispatch(events, length, {demands, waiting, subscribed_processes}) do
     {deliver_now, deliver_later, waiting} = split_events(events, length, waiting)
 
     for {_, pid, ref, selector} <- demands do
@@ -92,7 +98,7 @@ defmodule GenStage.BroadcastDispatcher do
       :ok
     end
 
-    {:ok, deliver_later, {demands, waiting}}
+    {:ok, deliver_later, {demands, waiting, subscribed_processes}}
   end
 
   defp filter_and_count(messages, nil) do
@@ -167,5 +173,17 @@ defmodule GenStage.BroadcastDispatcher do
 
   defp delete_demand(ref, demands) do
     List.keydelete(demands, ref, 2)
+  end
+
+  defp add_subscriber(subscribed_processes, pid) do
+    MapSet.put(subscribed_processes, pid)
+  end
+
+  defp delete_subscriber(subscribed_processes, pid) do
+    MapSet.delete(subscribed_processes, pid)
+  end
+
+  defp subscribed?(subscribed_processes, pid) do
+    MapSet.member?(subscribed_processes, pid)
   end
 end
