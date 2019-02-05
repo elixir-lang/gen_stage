@@ -127,7 +127,9 @@ defmodule GenStage.BroadcastDispatcherTest do
     expected_subscribers = MapSet.put(expected_subscribers, pid3)
 
     assert disp ==
-      {[{-1, pid3, ref3, nil}, {0, pid1, ref1, nil}, {0, pid2, ref2, nil}], 0, expected_subscribers}
+             {[{-1, pid3, ref3, nil}, {0, pid1, ref1, nil}, {0, pid2, ref2, nil}], 0,
+              expected_subscribers}
+
     assert_receive {:"$gen_consumer", {_, ^ref1}, [:d]}
     assert_receive {:"$gen_consumer", {_, ^ref2}, [:d]}
     assert_receive {:"$gen_consumer", {_, ^ref3}, [:d]}
@@ -137,8 +139,10 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.ask(2, {pid2, ref2}, disp)
     {:ok, 2, disp} = D.ask(3, {pid3, ref3}, disp)
     {:ok, [], disp} = D.dispatch([:e, :f], 2, disp)
+
     assert disp ==
-      {[{0, pid3, ref3, nil}, {0, pid2, ref2, nil}, {0, pid1, ref1, nil}], 0, expected_subscribers}
+             {[{0, pid3, ref3, nil}, {0, pid2, ref2, nil}, {0, pid1, ref1, nil}], 0,
+              expected_subscribers}
 
     assert_receive {:"$gen_consumer", {_, ^ref1}, [:e, :f]}
     assert_receive {:"$gen_consumer", {_, ^ref2}, [:e, :f]}
@@ -168,7 +172,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     assert_receive {:"$gen_producer", {_, ^ref2}, {:ask, 2}}
 
     assert_receive {:"$gen_consumer", {_, ^ref1},
-                     [%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}]}
+                    [%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}]}
 
     assert_receive {:"$gen_consumer", {_, ^ref2}, [%{key: "pref-1234"}, %{key: "pref-5678"}]}
   end
@@ -197,10 +201,11 @@ defmodule GenStage.BroadcastDispatcherTest do
     expected_subscribers = MapSet.new([pid])
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
+
     assert ExUnit.CaptureLog.capture_log(fn ->
-      {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
-      assert disp == {[{0, pid, ref1, nil}], 0, expected_subscribers}
-    end) =~ "already registered"
+             {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
+             assert disp == {[{0, pid, ref1, nil}], 0, expected_subscribers}
+           end) =~ "already registered"
   end
 
   defp spawn_forwarder do
