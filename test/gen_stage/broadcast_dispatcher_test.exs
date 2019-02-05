@@ -197,8 +197,10 @@ defmodule GenStage.BroadcastDispatcherTest do
     expected_subscribers = MapSet.new([pid])
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
-    {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
-    assert disp == {[{0, pid, ref1, nil}], 0, expected_subscribers}
+    assert ExUnit.CaptureLog.capture_log(fn ->
+      {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
+      assert disp == {[{0, pid, ref1, nil}], 0, expected_subscribers}
+    end) =~ "already registered"
   end
 
   defp spawn_forwarder do
