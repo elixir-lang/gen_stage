@@ -1901,7 +1901,14 @@ defmodule GenStage do
             mon_ref = Process.monitor(consumer_pid)
             stage = put_in(stage.monitors[mon_ref], ref)
             stage = put_in(stage.consumers[ref], {consumer_pid, mon_ref})
-            producer_subscribe(opts, from, stage)
+
+            case producer_subscribe(opts, from, stage) do
+              {:error, :already_subscribed} ->
+                producer_cancel(ref, :cancel, :already_subscribed, stage)
+
+              other ->
+                other
+            end
 
           other ->
             other
@@ -2221,8 +2228,14 @@ defmodule GenStage do
   end
 
   defp dispatcher_callback(callback, args, %{dispatcher_mod: dispatcher_mod} = stage) do
-    {:ok, counter, dispatcher_state} = apply(dispatcher_mod, callback, args)
+    dispatcher_mod |> apply(callback, args) |> handle_callback_result(stage)
+  end
 
+  defp handle_callback_result(e = {:error, _reason}, _stage) do
+    e
+  end
+
+  defp handle_callback_result({:ok, counter, dispatcher_state}, stage) do
     case stage do
       %{type: :producer_consumer, events: {queue, demand}} ->
         counter = demand + counter
@@ -2500,11 +2513,17 @@ defmodule GenStage do
       {:noreply, stage}
       when mode == :permanent
       when mode == :transient and not Utils.is_transient_shutdown(reason) ->
-        error_msg =
-          'GenStage consumer ~tp is stopping after receiving cancel from producer ~tp with reason: ~tp~n'
+        case reason do
+          :already_subscribed ->
+            {:noreply, stage}
 
-        :error_logger.info_msg(error_msg, [Utils.self_name(), pid, reason])
-        {:stop, reason, stage}
+          _other ->
+            error_msg =
+              'GenStage consumer ~tp is stopping after receiving cancel from producer ~tp with reason: ~tp~n'
+
+            :error_logger.info_msg(error_msg, [Utils.self_name(), pid, reason])
+            {:stop, reason, stage}
+        end
 
       other ->
         other
