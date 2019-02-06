@@ -203,7 +203,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
 
     assert ExUnit.CaptureLog.capture_log(fn ->
-             {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
+             assert {:error, _} = D.subscribe([], {pid, ref2}, disp)
              assert disp == {[{0, pid, ref1, nil}], 0, expected_subscribers}
            end) =~ "already registered"
   end
