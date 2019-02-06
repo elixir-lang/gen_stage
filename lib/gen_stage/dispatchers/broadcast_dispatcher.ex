@@ -47,7 +47,7 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   @doc false
-  def subscribe(opts, {pid, ref}, state = {demands, waiting, subscribed_processes}) do
+  def subscribe(opts, {pid, ref}, {demands, waiting, subscribed_processes}) do
     selector = validate_selector(opts)
 
     if subscribed?(subscribed_processes, pid) do
@@ -56,7 +56,7 @@ defmodule GenStage.BroadcastDispatcher do
           "This subscription has been discared."
       end)
 
-      {:ok, 0, state}
+      {:error, :already_subscribed}
     else
       subscribed_processes = add_subscriber(subscribed_processes, pid)
       {:ok, 0, {add_demand(-waiting, pid, ref, selector, demands), waiting, subscribed_processes}}
