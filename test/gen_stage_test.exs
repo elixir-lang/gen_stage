@@ -976,8 +976,14 @@ defmodule GenStageTest do
       GenStage.async_subscribe(consumer2, to: producer)
       GenStage.async_subscribe(consumer2, to: producer)
 
+      # Give the async subscribe some time
+      Process.sleep(100)
+
       producer_state = :sys.get_state(producer)
-      assert [{^consumer, _}, {^consumer2, _}] = Map.values(producer_state.consumers)
+
+      assert [consumer, consumer2] |> Enum.sort() ==
+               producer_state.consumers |> Map.values() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+
       consumer_state = :sys.get_state(consumer2)
       assert [{^producer, _, _}] = Map.values(consumer_state.producers)
     end
