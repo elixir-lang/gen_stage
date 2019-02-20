@@ -954,6 +954,39 @@ defmodule GenStageTest do
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       assert {:ok, _} = GenStage.sync_subscribe(consumer, to: producer, cancel: :temporary)
     end
+
+    @tag :capture_log
+    test "handles subscription error gracefully" do
+      {:ok, producer} =
+        Counter.start_link({:producer, 0, dispatcher: GenStage.BroadcastDispatcher})
+
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      {:ok, consumer2} = Forwarder.start_link({:consumer, self()})
+
+      GenStage.sync_subscribe(consumer, to: producer)
+      # The cancellation will be delayed
+      GenStage.sync_subscribe(consumer, to: producer)
+
+      producer_state = :sys.get_state(producer)
+      assert [{^consumer, _}] = Map.values(producer_state.consumers)
+
+      consumer_state = :sys.get_state(consumer)
+      assert [{^producer, _, _}] = Map.values(consumer_state.producers)
+
+      GenStage.async_subscribe(consumer2, to: producer)
+      GenStage.async_subscribe(consumer2, to: producer)
+
+      # Give the async subscribe some time
+      Process.sleep(100)
+
+      producer_state = :sys.get_state(producer)
+
+      assert [consumer, consumer2] |> Enum.sort() ==
+               producer_state.consumers |> Map.values() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+
+      consumer_state = :sys.get_state(consumer2)
+      assert [{^producer, _, _}] = Map.values(consumer_state.producers)
+    end
   end
 
   describe "sync_resubscribe/2" do

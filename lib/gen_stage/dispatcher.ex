@@ -41,7 +41,7 @@ defmodule GenStage.Dispatcher do
   Called every time the producer gets a new subscriber.
   """
   @callback subscribe(opts :: keyword(), from :: {pid, reference}, state :: term) ::
-              {:ok, demand :: non_neg_integer, new_state}
+              {:ok, demand :: non_neg_integer, new_state} | {:error, term}
             when new_state: term
 
   @doc """
