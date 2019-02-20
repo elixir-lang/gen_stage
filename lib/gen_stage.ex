@@ -1901,14 +1901,7 @@ defmodule GenStage do
             mon_ref = Process.monitor(consumer_pid)
             stage = put_in(stage.monitors[mon_ref], ref)
             stage = put_in(stage.consumers[ref], {consumer_pid, mon_ref})
-
-            case producer_subscribe(opts, from, stage) do
-              {:error, :already_subscribed} ->
-                producer_cancel(ref, :cancel, :already_subscribed, stage)
-
-              other ->
-                other
-            end
+            producer_subscribe(opts, from, stage)
 
           other ->
             other
@@ -2171,13 +2164,19 @@ defmodule GenStage do
   end
 
   defp producer_subscribe(opts, from, stage) do
-    %{mod: mod, state: state, dispatcher_state: dispatcher_state} = stage
+    %{mod: mod, state: state, dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} =
+      stage
 
     case maybe_subscribe(mod, :consumer, opts, from, state) do
       {:automatic, state} ->
-        # Call the dispatcher after since it may generate demand and the
-        # main module must know the consumer is subscribed.
-        dispatcher_callback(:subscribe, [opts, from, dispatcher_state], %{stage | state: state})
+        stage = %{stage | state: state}
+
+        # Call the dispatcher after since it may generate demand
+        # and the main module must know the consumer is subscribed.
+        case dispatcher_mod.subscribe(opts, from, dispatcher_state) do
+          {:ok, _, _} = ok -> handle_dispatcher_result(ok, stage)
+          {:error, term} -> producer_cancel(elem(from, 1), :cancel, term, stage)
+        end
 
       {:stop, reason, state} ->
         {:stop, reason, %{stage | state: state}}
@@ -2228,14 +2227,10 @@ defmodule GenStage do
   end
 
   defp dispatcher_callback(callback, args, %{dispatcher_mod: dispatcher_mod} = stage) do
-    dispatcher_mod |> apply(callback, args) |> handle_callback_result(stage)
+    dispatcher_mod |> apply(callback, args) |> handle_dispatcher_result(stage)
   end
 
-  defp handle_callback_result(e = {:error, _reason}, _stage) do
-    e
-  end
-
-  defp handle_callback_result({:ok, counter, dispatcher_state}, stage) do
+  defp handle_dispatcher_result({:ok, counter, dispatcher_state}, stage) do
     case stage do
       %{type: :producer_consumer, events: {queue, demand}} ->
         counter = demand + counter
