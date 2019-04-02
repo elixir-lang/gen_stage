@@ -321,7 +321,7 @@ defmodule ConsumerSupervisor do
 
   ## Callbacks
 
-  @doc false
+  @impl true
   def init({mod, args, name}) do
     Process.put(:"$initial_call", {:supervisor, mod, 1})
     Process.flag(:trap_exit, true)
@@ -393,7 +393,7 @@ defmodule ConsumerSupervisor do
   defp validate_seconds(seconds) when is_integer(seconds), do: :ok
   defp validate_seconds(_), do: {:error, "max_seconds must be an integer"}
 
-  @doc false
+  @impl true
   def handle_subscribe(:producer, opts, {_, ref} = from, state) do
     # GenStage checks these options before allowing susbcription
     max = Keyword.get(opts, :max_demand, 1000)
@@ -402,12 +402,12 @@ defmodule ConsumerSupervisor do
     {:manual, put_in(state.producers[ref], {from, 0, 0, min, max})}
   end
 
-  @doc false
+  @impl true
   def handle_cancel(_, {_, ref}, state) do
     {:noreply, [], update_in(state.producers, &Map.delete(&1, ref))}
   end
 
-  @doc false
+  @impl true
   def handle_events(events, {pid, ref} = from, state) do
     %{template: child, children: children} = state
     {new, errors} = start_events(events, from, child, 0, [], state)
@@ -487,7 +487,7 @@ defmodule ConsumerSupervisor do
     end
   end
 
-  @doc false
+  @impl true
   def handle_call(:which_children, _from, state) do
     %{children: children, template: child} = state
     {_, _, _, _, type, mods} = child
@@ -584,12 +584,12 @@ defmodule ConsumerSupervisor do
   defp exit_reason(:error, reason, stack), do: {reason, stack}
   defp exit_reason(:throw, value, stack), do: {{:nocatch, value}, stack}
 
-  @doc false
+  @impl true
   def handle_cast(_msg, state) do
     {:noreply, [], state}
   end
 
-  @doc false
+  @impl true
   def handle_info({:EXIT, pid, reason}, state) do
     case maybe_restart_child(pid, reason, state) do
       {:ok, state} -> {:noreply, [], state}
@@ -625,7 +625,7 @@ defmodule ConsumerSupervisor do
     {:noreply, [], state}
   end
 
-  @doc false
+  @impl true
   def code_change(_, %{mod: mod, args: args} = state, _) do
     case mod.init(args) do
       {:ok, children, opts} ->
@@ -648,7 +648,7 @@ defmodule ConsumerSupervisor do
     end
   end
 
-  @doc false
+  @impl true
   def terminate(_, %{children: children} = state) do
     :ok = terminate_children(children, state)
   end
@@ -906,6 +906,7 @@ defmodule ConsumerSupervisor do
     ]
   end
 
+  @impl true
   def format_status(:terminate, [_pdict, state]) do
     state
   end
