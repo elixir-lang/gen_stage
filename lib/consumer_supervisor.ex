@@ -58,6 +58,22 @@ defmodule ConsumerSupervisor do
 
   A supervisor is bound to the same name registration rules as a `GenServer`.
   Read more about it in the `GenServer` docs.
+
+  ## Implementing a Module-based ConumserSupervisor
+
+  To implement a module-based `ConsumerSupervisor` you must call
+  `use ConsumerSupervisor` in the body of the supervisor. Then you must
+  implement `start_link/1` which must return `{:ok, pid}` where pid is the pid
+  of a start process that has been linked. For more information see the Elixir
+  `Supervisor` docs.
+
+      defmodule Consumer do
+        use ConsumerSupervisor
+
+        def start_link(arg) do
+          # Start and link a process here returning `{:ok, pid}`
+        end
+      end
   """
 
   @behaviour GenStage
