@@ -44,6 +44,10 @@ defmodule ConsumerSupervisor do
 
       defmodule Printer do
         def start_link(event) do
+          # Note: this function must return the format of `{:ok, pid}` and like
+          # all children started by a Supervisor, the process must be linked
+          # back to the supervisor (if you use `Task.start_link/1` then both
+          # these requirements are met automatically)
           Task.start_link(fn ->
             IO.inspect({self(), event})
           end)
@@ -58,22 +62,6 @@ defmodule ConsumerSupervisor do
 
   A supervisor is bound to the same name registration rules as a `GenServer`.
   Read more about it in the `GenServer` docs.
-
-  ## Implementing a Module-based ConumserSupervisor
-
-  To implement a module-based `ConsumerSupervisor` you must call
-  `use ConsumerSupervisor` in the body of the supervisor. Then you must
-  implement `start_link/1` which must return `{:ok, pid}` where pid is the pid
-  of a start process that has been linked. For more information see the Elixir
-  `Supervisor` docs.
-
-      defmodule Consumer do
-        use ConsumerSupervisor
-
-        def start_link(arg) do
-          # Start and link a process here returning `{:ok, pid}`
-        end
-      end
   """
 
   @behaviour GenStage
