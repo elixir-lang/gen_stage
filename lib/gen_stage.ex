@@ -882,11 +882,17 @@ defmodule GenStage do
 
   @callback init(args :: term) ::
               {:producer, state}
+              | {:producer, state, :hibernate | {:continue, term}}
               | {:producer, state, [producer_option]}
+              | {:producer, state, :hibernate | {:continue, term}, [producer_option]}
               | {:producer_consumer, state}
+              | {:producer_consumer, state, :hibernate | {:continue, term}}
               | {:producer_consumer, state, [producer_consumer_option]}
+              | {:producer_consumer, state, :hibernate | {:continue, term}, [producer_consumer_option]}
               | {:consumer, state}
+              | {:consumer, state, :hibernate | {:continue, term}}
               | {:consumer, state, [consumer_option]}
+              | {:consumer, state, :hibernate | {:continue, term}, [consumer_option]}
               | :ignore
               | {:stop, reason :: any}
             when state: any
@@ -1095,6 +1101,25 @@ defmodule GenStage do
             when new_state: term, event: term
 
   @doc """
+  Invoked to handle `continue` instructions.
+
+  It is useful for performing work after initialization or for splitting the work
+  in a callback in multiple steps, updating the process state along the way.
+
+  Return values are the same as `c:handle_cast/2`.
+
+  This callback is optional. If one is not implemented, the server will fail
+  if a continue instruction is used.
+
+  This callback is only supported on Erlang/OTP 21+.
+  """
+  @callback handle_continue(continue :: term, state :: term) ::
+              {:noreply, [event], new_state}
+              | {:noreply, [event], new_state, :hibernate}
+              | {:stop, reason :: term, new_state}
+            when new_state: term, event: term
+
+  @doc """
   The same as `c:GenServer.terminate/2`.
   """
   @callback terminate(reason, state :: term) :: term
@@ -1127,6 +1152,7 @@ defmodule GenStage do
     handle_call: 3,
     handle_cast: 2,
     handle_info: 2,
+    handle_continue: 2,
     terminate: 2
   ]
 
@@ -1700,8 +1726,14 @@ defmodule GenStage do
       {:producer, state} ->
         init_producer(mod, [], state)
 
+      {:producer, state, {:continue, continue}} ->
+        init_producer(mod, [], state, {:continue, continue})
+
       {:producer, state, opts} when is_list(opts) ->
         init_producer(mod, opts, state)
+
+      {:producer, state, {:continue, continue}, opts} when is_list(opts) ->
+        init_producer(mod, opts, state, {:continue, continue})
 
       {:producer_consumer, state} ->
         init_producer_consumer(mod, [], state)
@@ -1726,7 +1758,7 @@ defmodule GenStage do
     end
   end
 
-  defp init_producer(mod, opts, state) do
+  defp init_producer(mod, opts, state, continue \\ :no_continue) do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
          {:ok, buffer_size, opts} <-
            Utils.validate_integer(opts, :buffer_size, 10000, 0, :infinity, true),
@@ -1746,7 +1778,10 @@ defmodule GenStage do
         dispatcher_state: dispatcher_state
       }
 
-      {:ok, stage}
+      case continue do
+        :no_continue -> {:ok, stage}
+        continue -> {:ok, stage, continue}
+      end
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
