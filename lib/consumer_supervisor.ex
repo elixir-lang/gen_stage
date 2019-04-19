@@ -24,7 +24,7 @@ defmodule ConsumerSupervisor do
   to a producer named `Producer` and starts a new process for each event
   received from the producer. Each new process will be started by calling
   `Printer.start_link/1`, which simply starts a task that will print the
-  incoming event to the terminal. 
+  incoming event to the terminal.
 
       defmodule Consumer do
         use ConsumerSupervisor
@@ -34,7 +34,10 @@ defmodule ConsumerSupervisor do
         end
 
         def init(_arg) do
-          children = [%{id: Printer, start: {Printer, :start_link, []}}]
+          # Note: By default the restart for a child is set to :permanent
+          # which is not supported in ConsumerSupervisor. You need to explicitly
+          # set the :restart option either to :temporary or :transient.
+          children = [%{id: Printer, start: {Printer, :start_link, []}, restart: :transient}]
           opts = [strategy: :one_for_one, subscribe_to: [{Producer, max_demand: 50}]]
           ConsumerSupervisor.init(children, opts)
         end
@@ -44,6 +47,10 @@ defmodule ConsumerSupervisor do
 
       defmodule Printer do
         def start_link(event) do
+          # Note: this function must return the format of `{:ok, pid}` and like
+          # all children started by a Supervisor, the process must be linked
+          # back to the supervisor (if you use `Task.start_link/1` then both
+          # these requirements are met automatically)
           Task.start_link(fn ->
             IO.inspect({self(), event})
           end)
