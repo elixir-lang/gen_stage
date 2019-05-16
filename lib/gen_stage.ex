@@ -1738,14 +1738,26 @@ defmodule GenStage do
       {:producer_consumer, state} ->
         init_producer_consumer(mod, [], state)
 
+      {:producer_consumer, state, {:continue, continue}} ->
+        init_producer_consumer(mod, [], state, {:continue, continue})
+
       {:producer_consumer, state, opts} when is_list(opts) ->
         init_producer_consumer(mod, opts, state)
+
+      {:producer_consumer, state, {:continue, continue}, opts} when is_list(opts) ->
+        init_producer_consumer(mod, opts, state, {:continue, continue})
 
       {:consumer, state} ->
         init_consumer(mod, [], state)
 
+      {:consumer, state, {:continue, continue}} ->
+        init_consumer(mod, [], state, {:continue, continue})
+
       {:consumer, state, opts} when is_list(opts) ->
         init_consumer(mod, opts, state)
+
+      {:consumer, state, {:continue, continue}, opts} when is_list(opts) ->
+        init_consumer(mod, opts, state, {:continue, continue})
 
       {:stop, _} = stop ->
         stop
@@ -1803,7 +1815,7 @@ defmodule GenStage do
     end
   end
 
-  defp init_producer_consumer(mod, opts, state) do
+  defp init_producer_consumer(mod, opts, state, continue \\ :no_continue) do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
          {:ok, subscribe_to, opts} <- Utils.validate_list(opts, :subscribe_to, []),
          {:ok, buffer_size, opts} <-
@@ -1822,17 +1834,17 @@ defmodule GenStage do
         dispatcher_state: dispatcher_state
       }
 
-      consumer_init_subscribe(subscribe_to, stage)
+      consumer_init_subscribe(subscribe_to, stage, continue)
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
   end
 
-  defp init_consumer(mod, opts, state) do
+  defp init_consumer(mod, opts, state, continue \\ :no_continue) do
     with {:ok, subscribe_to, opts} <- Utils.validate_list(opts, :subscribe_to, []),
          :ok <- Utils.validate_no_opts(opts) do
       stage = %GenStage{mod: mod, state: state, type: :consumer}
-      consumer_init_subscribe(subscribe_to, stage)
+      consumer_init_subscribe(subscribe_to, stage, continue)
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
@@ -2395,11 +2407,18 @@ defmodule GenStage do
 
   ## Consumer helpers
 
-  defp consumer_init_subscribe(producers, stage) do
+  defp consumer_init_subscribe(producers, stage, continue) do
     fold_fun = fn
-      to, {:ok, stage} ->
+      to, {:ok, stage, :no_continue} ->
         case consumer_subscribe(to, stage) do
           {:reply, _, stage} -> {:ok, stage}
+          {:stop, reason, _, _} -> {:stop, reason}
+          {:stop, reason, _} -> {:stop, reason}
+        end
+
+      to, {:ok, stage, continue} ->
+        case consumer_subscribe(to, stage) do
+          {:reply, _, stage} -> {:ok, stage, continue}
           {:stop, reason, _, _} -> {:stop, reason}
           {:stop, reason, _} -> {:stop, reason}
         end
@@ -2408,7 +2427,7 @@ defmodule GenStage do
         {:stop, reason}
     end
 
-    :lists.foldl(fold_fun, {:ok, stage}, producers)
+    :lists.foldl(fold_fun, {:ok, stage, continue}, producers)
   end
 
   defp consumer_receive({_, ref} = from, {producer_id, cancel, {demand, min, max}}, events, stage) do
