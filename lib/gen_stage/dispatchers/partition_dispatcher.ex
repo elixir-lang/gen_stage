@@ -23,8 +23,8 @@ defmodule GenStage.PartitionDispatcher do
       a tuple with two elements, the event to be dispatched as first argument 
       and the partition as second. The partition must be one of the partitions
       specified in `:partitions` above. The default uses 
-      `fn event -> {event, :erlang.phash2(event, Enum.count(partitions))} end`
-      on the event to select the partition.
+      `fn event, count -> {event, :erlang.phash2(event, count)} end`
+      on the event to select the partition, where count is `Enum.count(partitions)`.
 
   ### Examples
 
@@ -95,8 +95,8 @@ defmodule GenStage.PartitionDispatcher do
     {:ok, {make_ref(), hash, 0, 0, partitions, %{}, %{}}}
   end
 
-  defp hash(event, range) do
-    {event, :erlang.phash2(event, range)}
+  defp hash(event, count) do
+    {event, :erlang.phash2(event, count)}
   end
 
   @doc false
