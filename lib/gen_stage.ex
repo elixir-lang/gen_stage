@@ -173,7 +173,7 @@ defmodule GenStage do
   specifies the minimum threshold to trigger for more demand. For
   example, if `:max_demand` is 1000 and `:min_demand` is 750,
   the consumer will ask for 1000 events initially and ask for more
-  only after it receives at least 250.
+  only after it processes at least 250.
 
   In the example above, B is a `:producer_consumer` and therefore
   acts as a buffer. Getting the proper demand values in B is
