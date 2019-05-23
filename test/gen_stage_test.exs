@@ -143,7 +143,7 @@ defmodule GenStageTest do
 
   defmodule Postponer do
     @moduledoc """
-    Discards all events.
+    Postpones all events.
     """
 
     use GenStage

@@ -24,7 +24,7 @@ defmodule ConsumerSupervisor do
   to a producer named `Producer` and starts a new process for each event
   received from the producer. Each new process will be started by calling
   `Printer.start_link/1`, which simply starts a task that will print the
-  incoming event to the terminal. 
+  incoming event to the terminal.
 
       defmodule Consumer do
         use ConsumerSupervisor

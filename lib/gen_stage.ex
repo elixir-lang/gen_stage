@@ -831,8 +831,8 @@ defmodule GenStage do
       end
 
   The returned tuple may also contain 3 or 4 elements. The third
-  element may be the `:hibernate` atom or a set of options defined
-  below.
+  element may be the `:hibernate` atom, the `{:continue, term}` tuple
+  or a set of options defined below.
 
   Returning `:ignore` will cause `start_link/3` to return `:ignore`
   and the process will exit normally without entering the loop or
@@ -1724,40 +1724,40 @@ defmodule GenStage do
   def init({mod, args}) do
     case mod.init(args) do
       {:producer, state} ->
-        init_producer(mod, [], state)
-
-      {:producer, state, {:continue, continue}} ->
-        init_producer(mod, [], state, {:continue, continue})
+        init_producer(mod, [], state, :no_continue)
 
       {:producer, state, opts} when is_list(opts) ->
-        init_producer(mod, opts, state)
+        init_producer(mod, opts, state, :no_continue)
 
-      {:producer, state, {:continue, continue}, opts} when is_list(opts) ->
-        init_producer(mod, opts, state, {:continue, continue})
+      {:producer, state, continue_or_hibernate} ->
+        init_producer(mod, [], state, continue_or_hibernate)
+
+      {:producer, state, continue_or_hibernate, opts} when is_list(opts) ->
+        init_producer(mod, opts, state, continue_or_hibernate)
 
       {:producer_consumer, state} ->
-        init_producer_consumer(mod, [], state)
-
-      {:producer_consumer, state, {:continue, continue}} ->
-        init_producer_consumer(mod, [], state, {:continue, continue})
+        init_producer_consumer(mod, [], state, :no_continue)
 
       {:producer_consumer, state, opts} when is_list(opts) ->
-        init_producer_consumer(mod, opts, state)
+        init_producer_consumer(mod, opts, state, :no_continue)
 
-      {:producer_consumer, state, {:continue, continue}, opts} when is_list(opts) ->
-        init_producer_consumer(mod, opts, state, {:continue, continue})
+      {:producer_consumer, state, continue_or_hibernate} ->
+        init_producer_consumer(mod, [], state, continue_or_hibernate)
+
+      {:producer_consumer, state, continue_or_hibernate, opts} when is_list(opts) ->
+        init_producer_consumer(mod, opts, state, continue_or_hibernate)
 
       {:consumer, state} ->
-        init_consumer(mod, [], state)
-
-      {:consumer, state, {:continue, continue}} ->
-        init_consumer(mod, [], state, {:continue, continue})
+        init_consumer(mod, [], state, :no_continue)
 
       {:consumer, state, opts} when is_list(opts) ->
-        init_consumer(mod, opts, state)
+        init_consumer(mod, opts, state, :no_continue)
 
-      {:consumer, state, {:continue, continue}, opts} when is_list(opts) ->
-        init_consumer(mod, opts, state, {:continue, continue})
+      {:consumer, state, continue_or_hibernate} ->
+        init_consumer(mod, [], state, continue_or_hibernate)
+
+      {:consumer, state, continue_or_hibernate, opts} when is_list(opts) ->
+        init_consumer(mod, opts, state, continue_or_hibernate)
 
       {:stop, _} = stop ->
         stop
@@ -1770,7 +1770,7 @@ defmodule GenStage do
     end
   end
 
-  defp init_producer(mod, opts, state, continue \\ :no_continue) do
+  defp init_producer(mod, opts, state, continue_or_hibernate) do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
          {:ok, buffer_size, opts} <-
            Utils.validate_integer(opts, :buffer_size, 10000, 0, :infinity, true),
@@ -1790,9 +1790,9 @@ defmodule GenStage do
         dispatcher_state: dispatcher_state
       }
 
-      case continue do
+      case continue_or_hibernate do
         :no_continue -> {:ok, stage}
-        continue -> {:ok, stage, continue}
+        continue_or_hibernate -> {:ok, stage, continue_or_hibernate}
       end
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
@@ -1815,7 +1815,7 @@ defmodule GenStage do
     end
   end
 
-  defp init_producer_consumer(mod, opts, state, continue \\ :no_continue) do
+  defp init_producer_consumer(mod, opts, state, continue_or_hibernate) do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
          {:ok, subscribe_to, opts} <- Utils.validate_list(opts, :subscribe_to, []),
          {:ok, buffer_size, opts} <-
@@ -1834,17 +1834,17 @@ defmodule GenStage do
         dispatcher_state: dispatcher_state
       }
 
-      consumer_init_subscribe(subscribe_to, stage, continue)
+      consumer_init_subscribe(subscribe_to, stage, continue_or_hibernate)
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
   end
 
-  defp init_consumer(mod, opts, state, continue \\ :no_continue) do
+  defp init_consumer(mod, opts, state, continue_or_hibernate) do
     with {:ok, subscribe_to, opts} <- Utils.validate_list(opts, :subscribe_to, []),
          :ok <- Utils.validate_no_opts(opts) do
       stage = %GenStage{mod: mod, state: state, type: :consumer}
-      consumer_init_subscribe(subscribe_to, stage, continue)
+      consumer_init_subscribe(subscribe_to, stage, continue_or_hibernate)
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
@@ -2407,7 +2407,7 @@ defmodule GenStage do
 
   ## Consumer helpers
 
-  defp consumer_init_subscribe(producers, stage, continue) do
+  defp consumer_init_subscribe(producers, stage, continue_or_hibernate) do
     fold_fun = fn
       to, {:ok, stage, :no_continue} ->
         case consumer_subscribe(to, stage) do
@@ -2416,9 +2416,9 @@ defmodule GenStage do
           {:stop, reason, _} -> {:stop, reason}
         end
 
-      to, {:ok, stage, continue} ->
+      to, {:ok, stage, continue_or_hibernate} ->
         case consumer_subscribe(to, stage) do
-          {:reply, _, stage} -> {:ok, stage, continue}
+          {:reply, _, stage} -> {:ok, stage, continue_or_hibernate}
           {:stop, reason, _, _} -> {:stop, reason}
           {:stop, reason, _} -> {:stop, reason}
         end
@@ -2427,7 +2427,12 @@ defmodule GenStage do
         {:stop, reason}
     end
 
-    :lists.foldl(fold_fun, {:ok, stage, continue}, producers)
+    :lists.foldl(fold_fun, {:ok, stage, continue_or_hibernate}, producers)
+    |> case do
+      {:ok, stage, :no_continue} -> {:ok, stage}
+      {:ok, stage, continue_or_hibernate} -> {:ok, stage, continue_or_hibernate}
+      otherwise -> otherwise
+    end
   end
 
   defp consumer_receive({_, ref} = from, {producer_id, cancel, {demand, min, max}}, events, stage) do
