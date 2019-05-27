@@ -2409,13 +2409,6 @@ defmodule GenStage do
 
   defp consumer_init_subscribe(producers, stage, continue_or_hibernate) do
     fold_fun = fn
-      to, {:ok, stage, :no_continue} ->
-        case consumer_subscribe(to, stage) do
-          {:reply, _, stage} -> {:ok, stage}
-          {:stop, reason, _, _} -> {:stop, reason}
-          {:stop, reason, _} -> {:stop, reason}
-        end
-
       to, {:ok, stage, continue_or_hibernate} ->
         case consumer_subscribe(to, stage) do
           {:reply, _, stage} -> {:ok, stage, continue_or_hibernate}
@@ -2430,7 +2423,6 @@ defmodule GenStage do
     :lists.foldl(fold_fun, {:ok, stage, continue_or_hibernate}, producers)
     |> case do
       {:ok, stage, :no_continue} -> {:ok, stage}
-      {:ok, stage, continue_or_hibernate} -> {:ok, stage, continue_or_hibernate}
       otherwise -> otherwise
     end
   end
