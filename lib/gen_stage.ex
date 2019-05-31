@@ -1214,7 +1214,7 @@ defmodule GenStage do
 
   This function will return `:ok` if the info message is successfully queued.
   """
-  @spec sync_info(stage, msg :: term(), timeout) :: :ok
+  @spec sync_info(stage, msg :: term, timeout) :: :ok
   def sync_info(stage, msg, timeout \\ 5_000) do
     call(stage, {:"$info", msg}, timeout)
   end
@@ -1229,7 +1229,7 @@ defmodule GenStage do
   This call returns `:ok` regardless if the info has been successfully
   queued or not. It is typically called from the stage itself.
   """
-  @spec async_info(stage, msg :: term()) :: :ok
+  @spec async_info(stage, msg :: term) :: :ok
   def async_info(stage, msg) do
     cast(stage, {:"$info", msg})
   end
@@ -1321,7 +1321,7 @@ defmodule GenStage do
 
   See `sync_subscribe/2` for options and more information.
   """
-  @spec sync_resubscribe(stage, subscription_tag, term, subscription_options, timeout) ::
+  @spec sync_resubscribe(stage, subscription_tag, reason :: term, subscription_options, timeout) ::
           {:ok, subscription_tag} | {:error, :not_a_consumer} | {:error, {:bad_opts, String.t()}}
   def sync_resubscribe(stage, subscription_tag, reason, opts, timeout \\ 5000) do
     sync_subscribe(stage, {subscription_tag, reason}, opts, timeout)
@@ -1400,7 +1400,8 @@ defmodule GenStage do
   It accepts the same options as `Process.send/3`, and returns the same value as
   `Process.send/3`.
   """
-  @spec ask(from, non_neg_integer, [:noconnect | :nosuspend]) :: :ok | :noconnect | :nosuspend
+  @spec ask(from, demand :: non_neg_integer, [:noconnect | :nosuspend]) ::
+          :ok | :noconnect | :nosuspend
   def ask(producer_subscription, demand, opts \\ [])
 
   def ask({_pid, _ref}, 0, _opts) do
@@ -1434,7 +1435,7 @@ defmodule GenStage do
   is useful when working across nodes. This function returns
   the same value as `Process.send/3`.
   """
-  @spec cancel(from, term, [:noconnect | :nosuspend]) :: :ok | :noconnect | :nosuspend
+  @spec cancel(from, reason :: term, [:noconnect | :nosuspend]) :: :ok | :noconnect | :nosuspend
   def cancel({pid, ref} = _producer_subscription, reason, opts \\ []) do
     Process.send(pid, {:"$gen_producer", {self(), ref}, {:cancel, reason}}, opts)
   end
@@ -1542,7 +1543,7 @@ defmodule GenStage do
   If the reason is any other than `:normal`, `:shutdown` or
   `{:shutdown, _}`, an error report is logged.
   """
-  @spec stop(stage, term, timeout) :: :ok
+  @spec stop(stage, reason :: term, timeout) :: :ok
   def stop(stage, reason \\ :normal, timeout \\ :infinity) do
     :gen.stop(stage, reason, timeout)
   end
@@ -1601,7 +1602,7 @@ defmodule GenStage do
   All other options that would be given for `start_link/3` are
   also accepted.
   """
-  @spec from_enumerable(Enumerable.t(), keyword()) :: GenServer.on_start()
+  @spec from_enumerable(Enumerable.t(), keyword) :: GenServer.on_start()
   def from_enumerable(stream, opts \\ []) do
     case Keyword.pop(opts, :link, true) do
       {true, opts} -> start_link(GenStage.Streamer, {stream, opts}, opts)
