@@ -132,7 +132,7 @@ defmodule GenStage do
       defmodule C do
         use GenStage
 
-        def start_link() do
+        def start_link(_opts) do
           GenStage.start_link(C, :ok)
         end
 
@@ -156,7 +156,7 @@ defmodule GenStage do
 
       {:ok, a} = A.start_link(0)  # starting from zero
       {:ok, b} = B.start_link(2)  # multiply by 2
-      {:ok, c} = C.start_link()   # state does not matter
+      {:ok, c} = C.start_link([]) # state does not matter
 
       GenStage.sync_subscribe(c, to: b)
       GenStage.sync_subscribe(b, to: a)
@@ -258,12 +258,12 @@ defmodule GenStage do
   Then we can define our supervision tree like this:
 
       children = [
-        worker(A, [0]),
-        worker(B, [2]),
-        worker(C, []),
-        worker(C, []),
-        worker(C, []),
-        worker(C, [])
+        {A, [0]},
+        {B, [2]},
+        Supervisor.child_spec({C, []}, id: :c1),
+        Supervisor.child_spec({C, []}, id: :c2),
+        Supervisor.child_spec({C, []}, id: :c3),
+        Supervisor.child_spec({C, []}, id: :c4)
       ]
 
       Supervisor.start_link(children, strategy: :rest_for_one)

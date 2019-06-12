@@ -1,8 +1,6 @@
 defmodule ConsumerSupervisorTest do
   use ExUnit.Case, async: true
 
-  import Supervisor.Spec
-
   defmodule Simple do
     use ConsumerSupervisor
     def init(args), do: args
@@ -116,13 +114,9 @@ defmodule ConsumerSupervisorTest do
 
   describe "init/2" do
     test "supports old child spec" do
-      expected = {
-        :ok,
-        [{Foo, {Foo, :start_link, []}, :permanent, 5000, :worker, [Foo]}],
-        [strategy: :one_for_one]
-      }
-
-      assert expected == ConsumerSupervisor.init([worker(Foo, [])], strategy: :one_for_one)
+      spec = {Foo, {Foo, :start_link, []}, :permanent, 5000, :worker, [Foo]}
+      expected = {:ok, [spec], strategy: :one_for_one}
+      assert ConsumerSupervisor.init([spec], strategy: :one_for_one) == expected
     end
 
     test "supports new child spec as tuple" do
@@ -573,12 +567,14 @@ defmodule ConsumerSupervisorTest do
 
   defmodule Consumer do
     def start_link(opts \\ []) do
-      children = [
-        worker(__MODULE__, [self()], opts ++ [function: :start_child, restart: :temporary])
-      ]
+      spec =
+        opts
+        |> Keyword.take([:restart, :shutdown])
+        |> Keyword.put_new(:restart, :temporary)
+        |> Enum.into(%{id: __MODULE__, start: {__MODULE__, :start_child, [self()]}})
 
       opts = opts ++ [strategy: :one_for_one, max_restarts: 0]
-      ConsumerSupervisor.start_link(children, opts)
+      ConsumerSupervisor.start_link([spec], opts)
     end
 
     def start_child(pid, :ok2) do
@@ -923,6 +919,10 @@ defmodule ConsumerSupervisorTest do
       assert_receive {:child_started, _child2}
       refute_received {:child_started, _child3}
     end
+  end
+
+  defp worker(mod, args, extra \\ []) do
+    extra |> Enum.into(%{id: mod, start: {mod, :start_link, args}})
   end
 
   defp assert_kill(pid, reason) do

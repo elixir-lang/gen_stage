@@ -254,7 +254,7 @@ defmodule ConsumerSupervisor do
 
   """
   @spec which_children(Supervisor.supervisor()) :: [
-          {:undefined, pid | :restarting, Supervisor.Spec.worker(), Supervisor.Spec.modules()}
+          {:undefined, pid | :restarting, :worker | :supervisor, :dynamic | [module()]}
         ]
   def which_children(supervisor) do
     call(supervisor, :which_children)
