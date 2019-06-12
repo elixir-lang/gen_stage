@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.14.2 (2019-06-12)
+
+### Enhancements
+
+  * Add `GenStage.demand/1`
+
+### Bug fixes
+
+  * Fix code_change callback implementation
+
 ## v0.14.1 (2018-10-08)
 
 ### Bug fixes
