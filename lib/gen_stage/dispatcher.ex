@@ -90,7 +90,7 @@ defmodule GenStage.Dispatcher do
   option as the consumers are all monitored by the producer. For
   example:
 
-      Process.send(consumer, {:"$gen_consumer, {self(), consumer_ref}, events}, [:noconnect])
+      Process.send(consumer, {:"$gen_consumer", {self(), consumer_ref}, events}, [:noconnect])
 
   """
   @callback dispatch(events :: nonempty_list(term), length :: pos_integer, state :: term) ::
