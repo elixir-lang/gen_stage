@@ -258,8 +258,8 @@ defmodule GenStage do
   Then we can define our supervision tree like this:
 
       children = [
-        {A, [0]},
-        {B, [2]},
+        {A, 0},
+        {B, 2},
         Supervisor.child_spec({C, []}, id: :c1),
         Supervisor.child_spec({C, []}, id: :c2),
         Supervisor.child_spec({C, []}, id: :c3),
