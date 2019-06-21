@@ -34,4 +34,10 @@ defmodule GenStage.Streamer do
   def handle_info(:stop, state) do
     {:stop, :normal, state}
   end
+
+  def handle_info(msg, state) do
+    log = '** Undefined handle_info in #{inspect __MODULE__}~n** Unhandled message: ~tp~n'
+    :error_logger.warning_msg(log, [msg])
+    {:noreply, [], state}
+  end
 end
