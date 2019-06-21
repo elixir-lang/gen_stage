@@ -646,7 +646,7 @@ defmodule GenStage do
   defined module to be put under a supervision tree in Elixir v1.5+.
   The generated `child_spec/1` can be customized with the following options:
 
-    * `:id` - the child specification id, defauts to the current module
+    * `:id` - the child specification id, defaults to the current module
     * `:start` - how to start the child process (defaults to calling `__MODULE__.start_link/1`)
     * `:restart` - when the child should be restarted, defaults to `:permanent`
     * `:shutdown` - how to shut down the child
@@ -1576,7 +1576,7 @@ defmodule GenStage do
   the enumerable stage and the `:cancel` option is set to
   `:permanent`, which is the default, the consumer will also exit
   with `:normal` reason. This behaviour can be changed by setting
-  setting the `:cancel` option to either `:transient` or `:temporary`
+  the `:cancel` option to either `:transient` or `:temporary`
   at the moment of subscription as described in the `sync_subscribe/3`
   docs.
 
