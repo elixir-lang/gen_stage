@@ -112,17 +112,17 @@ defmodule GenStage do
       defmodule B do
         use GenStage
 
-        def start_link(number) do
-          GenStage.start_link(B, number)
+        def start_link(multiplier) do
+          GenStage.start_link(B, multiplier)
         end
 
-        def init(number) do
-          {:producer_consumer, number}
+        def init(multiplier) do
+          {:producer_consumer, multiplier}
         end
 
-        def handle_events(events, _from, number) do
-          events = Enum.map(events, & &1 * number)
-          {:noreply, events, number}
+        def handle_events(events, _from, multiplier) do
+          events = Enum.map(events, & &1 * multiplier)
+          {:noreply, events, multiplier}
         end
       end
 
