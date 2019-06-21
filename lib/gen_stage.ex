@@ -1576,7 +1576,7 @@ defmodule GenStage do
   the enumerable stage and the `:cancel` option is set to
   `:permanent`, which is the default, the consumer will also exit
   with `:normal` reason. This behaviour can be changed by setting
-  setting the `:cancel` option to either `:transient` or `:temporary`
+  the `:cancel` option to either `:transient` or `:temporary`
   at the moment of subscription as described in the `sync_subscribe/3`
   docs.
 
