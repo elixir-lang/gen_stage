@@ -13,21 +13,22 @@ defmodule GenStage.Streamer do
         x, {acc, counter} -> {:cont, {[x | acc], counter - 1}}
       end)
 
-    {:producer, continuation, Keyword.take(opts, [:dispatcher, :demand])}
+    {:current_stacktrace, [_info_call | stack]} = Process.info(self(), :current_stacktrace)
+    {:producer, {stack, continuation}, Keyword.take(opts, [:dispatcher, :demand])}
   end
 
-  def handle_demand(_demand, continuation) when is_atom(continuation) do
-    {:noreply, [], continuation}
+  def handle_demand(_demand, {stack, continuation}) when is_atom(continuation) do
+    {:noreply, [], {stack, continuation}}
   end
 
-  def handle_demand(demand, continuation) when demand > 0 do
+  def handle_demand(demand, {stack, continuation}) when demand > 0 do
     case continuation.({:cont, {[], demand}}) do
       {:suspended, {list, 0}, continuation} ->
-        {:noreply, :lists.reverse(list), continuation}
+        {:noreply, :lists.reverse(list), {stack, continuation}}
 
       {status, {list, _}} ->
         GenStage.async_info(self(), :stop)
-        {:noreply, :lists.reverse(list), status}
+        {:noreply, :lists.reverse(list), {stack, status}}
     end
   end
 
@@ -35,9 +36,9 @@ defmodule GenStage.Streamer do
     {:stop, :normal, state}
   end
 
-  def handle_info(msg, state) do
-    log = '** Undefined handle_info in #{inspect __MODULE__}~n** Unhandled message: ~tp~n'
+  def handle_info(msg, {stack, continuation}) do
+    log = '** Undefined handle_info in #{inspect(__MODULE__)}~n** Unhandled message: ~tp~n#{Exception.format_stacktrace(stack)}'
     :error_logger.warning_msg(log, [msg])
-    {:noreply, [], state}
+    {:noreply, [], {stack, continuation}}
   end
 end
