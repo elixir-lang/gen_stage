@@ -772,6 +772,7 @@ defmodule GenStage do
   @typedoc "Option used by the `subscribe*` functions"
   @type subscription_option ::
           {:cancel, :permanent | :transient | :temporary}
+          | {:to, GenServer.server()}
           | {:min_demand, integer}
           | {:max_demand, integer}
 
