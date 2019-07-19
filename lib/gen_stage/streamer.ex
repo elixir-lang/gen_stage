@@ -3,17 +3,17 @@ defmodule GenStage.Streamer do
   use GenStage
 
   def start_link({_, opts} = pair) do
-    GenStage.start_link(__MODULE__, pair, opts)
+    {:current_stacktrace, [_info_call | stack]} = Process.info(self(), :current_stacktrace)
+    GenStage.start_link(__MODULE__, {pair, stack}, opts)
   end
 
-  def init({stream, opts}) do
+  def init({{stream, opts}, stack}) do
     continuation =
       &Enumerable.reduce(stream, &1, fn
         x, {acc, 1} -> {:suspend, {[x | acc], 0}}
         x, {acc, counter} -> {:cont, {[x | acc], counter - 1}}
       end)
 
-    {:current_stacktrace, [_info_call | stack]} = Process.info(self(), :current_stacktrace)
     {:producer, {stack, continuation}, Keyword.take(opts, [:dispatcher, :demand])}
   end
 
@@ -37,8 +37,8 @@ defmodule GenStage.Streamer do
   end
 
   def handle_info(msg, {stack, continuation}) do
-    log = '** Undefined handle_info in #{inspect(__MODULE__)}~n** Unhandled message: ~tp~n#{Exception.format_stacktrace(stack)}'
-    :error_logger.warning_msg(log, [msg])
+    log = '** Undefined handle_info in ~tp~n** Unhandled message: ~tp~n~s'
+    :error_logger.warning_msg(log, [inspect(__MODULE__), msg, Exception.format_stacktrace(stack)])
     {:noreply, [], {stack, continuation}}
   end
 end
