@@ -17,11 +17,6 @@ defmodule GenStage.Streamer do
     {:producer, {stack, continuation}, Keyword.take(opts, [:dispatcher, :demand])}
   end
 
-  def init({stream, opts}) do
-    {:current_stacktrace, [_info_call | stack]} = Process.info(self(), :current_stacktrace)
-    init({{stream, opts}, stack})
-  end
-
   def handle_demand(_demand, {stack, continuation}) when is_atom(continuation) do
     {:noreply, [], {stack, continuation}}
   end
