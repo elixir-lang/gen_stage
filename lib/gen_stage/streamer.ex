@@ -2,12 +2,12 @@ defmodule GenStage.Streamer do
   @moduledoc false
   use GenStage
 
-  def start_link({_, opts} = pair) do
+  def start_link({stream, opts}) do
     {:current_stacktrace, [_info_call | stack]} = Process.info(self(), :current_stacktrace)
-    GenStage.start_link(__MODULE__, {pair, stack}, opts)
+    GenStage.start_link(__MODULE__, {stream, stack, opts}, opts)
   end
 
-  def init({{stream, opts}, stack}) do
+  def init({stream, stack, opts}) do
     continuation =
       &Enumerable.reduce(stream, &1, fn
         x, {acc, 1} -> {:suspend, {[x | acc], 0}}

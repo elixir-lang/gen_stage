@@ -1606,9 +1606,10 @@ defmodule GenStage do
   @spec from_enumerable(Enumerable.t(), keyword) :: GenServer.on_start()
   def from_enumerable(stream, opts \\ []) do
     {:current_stacktrace, [_info_call | stack]} = Process.info(self(), :current_stacktrace)
+
     case Keyword.pop(opts, :link, true) do
-      {true, opts} -> start_link(GenStage.Streamer, {{stream, opts}, stack}, opts)
-      {false, opts} -> start(GenStage.Streamer, {{stream, opts}, stack}, opts)
+      {true, opts} -> start_link(GenStage.Streamer, {stream, stack, opts}, opts)
+      {false, opts} -> start(GenStage.Streamer, {stream, stack, opts}, opts)
     end
   end
 
