@@ -775,7 +775,7 @@ defmodule GenStage do
           | {:to, GenServer.server()}
           | {:min_demand, integer}
           | {:max_demand, integer}
-          | custom_option :: {atom(), term()}
+          | {atom(), term()}
 
   @typedoc "Options used by the `subscribe*` functions"
   @type subscription_options :: [subscription_option()]
