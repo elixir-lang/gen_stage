@@ -208,6 +208,18 @@ defmodule GenStage.PartitionDispatcherTest do
     assert error =~ "The known partitions are [:bar, :foo]"
   end
 
+  test "errors if the :hash function returns a bad value" do
+    pid = self()
+    ref = make_ref()
+    disp = dispatcher(partitions: [:foo, :bar], hash: fn _ -> :not_a_tuple end)
+    {:ok, 0, disp} = D.subscribe([partition: :foo], {pid, ref}, disp)
+    {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
+
+    assert_raise RuntimeError, ~r/the :hash function should return/, fn ->
+      D.dispatch([1, 2, 5], 3, disp)
+    end
+  end
+
   test "errors on init" do
     assert_raise ArgumentError, ~r/the enumerable of :partitions is required/, fn ->
       dispatcher([])
