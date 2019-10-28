@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.3 (2019-10-28)
+
+### Enhancements
+
+  * Improvements to typespecs and error messages
+
 ## v0.14.2 (2019-06-12)
 
 ### Enhancements
