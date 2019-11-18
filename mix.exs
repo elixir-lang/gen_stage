@@ -9,7 +9,7 @@ defmodule GenStage.Mixfile do
       version: @version,
       elixir: "~> 1.5",
       package: package(),
-      description: "Producer and consumer pipelines with back-pressure for Elixir",
+      description: "Producer and consumer actors with back-pressure for Elixir",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       docs: [
