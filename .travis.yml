@@ -4,15 +4,12 @@ elixir:
 sudo: false # to use faster container based build environment
 notifications:
   recipients:
-    - jose.valim@plataformatec.com.br
+    - jose.valim@dashbit.co
 otp_release:
   - 22.0
 script:
   - if [[ $(elixir --version) = *"1.6"* ]]; then mix format --check-formatted; fi
   - mix test
-after_script:
-  - mix deps.get --only docs
-  - MIX_ENV=docs mix inch.report
 matrix:
   include:
     - elixir: 1.5.1

@@ -1,7 +1,7 @@
 defmodule GenStage.Mixfile do
   use Mix.Project
 
-  @version "0.14.3"
+  @version "1.0.0"
 
   def project do
     [
@@ -26,8 +26,7 @@ defmodule GenStage.Mixfile do
 
   defp deps do
     [
-      {:ex_doc, "~> 0.12", only: :docs},
-      {:inch_ex, ">= 0.4.0", only: :docs}
+      {:ex_doc, "~> 0.12", only: :docs}
     ]
   end
 

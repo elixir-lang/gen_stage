@@ -24,7 +24,8 @@ defmodule GenStage.PartitionDispatcher do
       and the partition as second. The partition must be one of the partitions
       specified in `:partitions` above. The default uses
       `fn event -> {event, :erlang.phash2(event, Enum.count(partitions))} end`
-      on the event to select the partition.
+      on the event to select the partition. If it returns `:none`, the event
+      is discarded.
 
   ### Examples
 
@@ -239,30 +240,7 @@ defmodule GenStage.PartitionDispatcher do
 
   @doc false
   def dispatch(events, _length, {tag, hash, waiting, pending, partitions, references, infos}) do
-    {deliver_now, deliver_later, waiting} = split_events(events, waiting, [])
-
-    for event <- deliver_now do
-      {event, partition} =
-        case hash.(event) do
-          {event, partition} ->
-            {event, partition}
-
-          other ->
-            raise "the :hash function should return {event, partition}, got: #{inspect(other)}"
-        end
-
-      case :erlang.get(partition) do
-        :undefined ->
-          Logger.error(fn ->
-            "Unknown partition #{inspect(partition)} computed for GenStage/Flow event " <>
-              "#{inspect(event)}. The known partitions are #{inspect(Map.keys(partitions))}. " <>
-              "See the :partitions option to set your own. This event has been discarded."
-          end)
-
-        current ->
-          Process.put(partition, [event | current])
-      end
-    end
+    {deliver_later, waiting} = split_events(events, waiting, hash, partitions)
 
     partitions =
       partitions
@@ -273,11 +251,30 @@ defmodule GenStage.PartitionDispatcher do
     {:ok, deliver_later, {tag, hash, waiting, pending, partitions, references, infos}}
   end
 
-  defp split_events(events, 0, acc), do: {:lists.reverse(acc), events, 0}
-  defp split_events([], counter, acc), do: {:lists.reverse(acc), [], counter}
+  defp split_events(events, 0, _hash, _partitions), do: {events, 0}
+  defp split_events([], counter, _hash, _partitions), do: {[], counter}
 
-  defp split_events([event | events], counter, acc),
-    do: split_events(events, counter - 1, [event | acc])
+  defp split_events([event | events], counter, hash, partitions) do
+    case hash.(event) do
+      {event, partition} ->
+        case :erlang.get(partition) do
+          :undefined ->
+            raise "unknown partition #{inspect(partition)} computed for GenStage event " <>
+                    "#{inspect(event)}. The known partitions are #{inspect(Map.keys(partitions))}. " <>
+                    "See the :partitions option to set your own. This event has been discarded."
+
+          current ->
+            Process.put(partition, [event | current])
+            split_events(events, counter - 1, hash, partitions)
+        end
+
+      :none ->
+        split_events(events, counter, hash, partitions)
+
+      other ->
+        raise "the :hash function should return {event, partition}, got: #{inspect(other)}"
+    end
+  end
 
   defp dispatch_per_partition([{partition, {pid, ref, demand_or_queue} = value} | rest]) do
     case Process.put(partition, []) do

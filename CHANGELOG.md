@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.0 (2020-02-03)
+
+### Enhancements
+
+  * Allow events to be discarded in PartitionDispatcher by returning `:none`
+  * Raise for unknown partitionis in PartitionDispatcher
+
 ## v0.14.3 (2019-10-28)
 
 ### Enhancements
