@@ -397,7 +397,8 @@ defmodule GenStage do
   we will serve the existing demand, otherwise the event will be queued in
   `GenStage`'s internal buffer. In case events are being queued and not being
   consumed, a log message will be emitted when we exceed the `:buffer_size`
-  configuration.
+  configuration. This behavior can be customized by implementing the optional
+  `c:handle_discarded\2` callback.
 
   While the implementation above is enough to solve the constraints above,
   a more robust implementation would have tighter control over the events
@@ -760,6 +761,7 @@ defmodule GenStage do
     :dispatcher_state,
     :buffer,
     :buffer_keep,
+    mod_handle_discarded: false,
     events: :forward,
     monitors: %{},
     producers: %{},
@@ -975,6 +977,14 @@ defmodule GenStage do
             when new_state: term, reason: term
 
   @doc """
+  Invoked when items are discarded from the buffer.
+
+  It receives the number of excess (discarded) items from this invocation.
+  When this callback is implemented, the error log for discarded items is bypassed so that the callback can handle it.
+  """
+  @callback handle_discarded(discarded :: non_neg_integer, state :: term) :: none
+
+  @doc """
   Invoked when a consumer is no longer subscribed to a producer.
 
   It receives the cancellation reason, the `from` tuple representing the
@@ -1122,6 +1132,7 @@ defmodule GenStage do
     handle_cancel: 3,
     handle_demand: 2,
     handle_events: 3,
+    handle_discarded: 2,
 
     # GenServer
     code_change: 3,
@@ -1693,6 +1704,14 @@ defmodule GenStage do
           "GenStage.stream/1 expects a list of subscriptions, got: #{inspect(subscriptions)}"
   end
 
+  @doc """
+  Returns the number of buffered items for a producer.
+  """
+  @spec buffered_count(stage) :: non_neg_integer
+  def buffered_count(stage) do
+    call(stage, :"$buffered_count")
+  end
+
   ## Callbacks
 
   @compile :inline_list_funcs
@@ -1746,6 +1765,7 @@ defmodule GenStage do
         type: :producer,
         buffer: Buffer.new(buffer_size),
         buffer_keep: buffer_keep,
+        mod_handle_discarded: function_exported?(mod, :handle_discarded, 2),
         events: if(demand == :accumulate, do: [], else: :forward),
         dispatcher_mod: dispatcher_mod,
         dispatcher_state: dispatcher_state
@@ -1787,6 +1807,7 @@ defmodule GenStage do
         type: :producer_consumer,
         buffer: Buffer.new(buffer_size),
         buffer_keep: buffer_keep,
+        mod_handle_discarded: function_exported?(mod, :handle_discarded, 2),
         events: {:queue.new(), 0},
         dispatcher_mod: dispatcher_mod,
         dispatcher_state: dispatcher_state
@@ -1820,6 +1841,10 @@ defmodule GenStage do
 
   def handle_call({:"$subscribe", current, to, opts}, _from, stage) do
     consumer_subscribe(current, to, opts, stage)
+  end
+
+  def handle_call(:"$buffered_count", _from, stage) do
+    producer_buffered_count(stage)
   end
 
   def handle_call(msg, from, %{mod: mod, state: state} = stage) do
@@ -2313,7 +2338,16 @@ defmodule GenStage do
     stage
   end
 
-  defp buffer_events(events, %{buffer: buffer, buffer_keep: keep} = stage) do
+  defp buffer_events(
+         events,
+         %{
+           mod: mod,
+           buffer: buffer,
+           buffer_keep: keep,
+           mod_handle_discarded: mod_handle_discarded,
+           state: state
+         } = stage
+       ) do
     {buffer, excess, perms} = Buffer.store_temporary(buffer, events, keep)
 
     case excess do
@@ -2321,11 +2355,25 @@ defmodule GenStage do
         :ok
 
       excess ->
-        error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
-        :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
+        if mod_handle_discarded do
+          mod.handle_discarded(excess, state)
+        else
+          error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
+          :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
+        end
     end
 
     :lists.foldl(&dispatch_info/2, %{stage | buffer: buffer}, perms)
+  end
+
+  defp producer_buffered_count(%{type: :consumer} = stage) do
+    error_msg = 'Buffered count can only be requested for producers, GenStage ~tp is a consumer'
+    :error_logger.error_msg(error_msg, [Utils.self_name()])
+    {:reply, 0, stage}
+  end
+
+  defp producer_buffered_count(%{buffer: buffer} = stage) do
+    {:reply, Buffer.estimate_size(buffer), stage}
   end
 
   ## Info helpers

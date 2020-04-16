@@ -263,6 +263,41 @@ defmodule GenStageTest do
     end
   end
 
+  defmodule DiscardedBufferLogger do
+    @moduledoc """
+    Logs about the buffered size and any discarded items
+    """
+
+    use GenStage
+
+    def start_link(init, opts \\ []) do
+      GenStage.start_link(__MODULE__, init, opts)
+    end
+
+    def init(init) do
+      init
+    end
+
+    def sync_queue(stage, events) do
+      GenStage.call(stage, {:queue, events})
+    end
+
+    def handle_call({:queue, events}, _from, state) do
+      {:reply, state, events, state}
+    end
+
+    def handle_discarded(discarded, _state) do
+      :error_logger.info_msg("DiscardedBufferLogger has discarded ~tp events from buffer", [
+        discarded
+      ])
+    end
+
+    def handle_demand(_demand, state) do
+      # We don't care about the demand
+      {:noreply, [], state}
+    end
+  end
+
   test "generates child_spec/1" do
     assert Counter.child_spec([:hello]) == %{
              id: Counter,
@@ -742,6 +777,44 @@ defmodule GenStageTest do
       :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
       assert_receive {:consumed, [:a, :b, :c, :d]}
       assert_receive {:consumed, [:e, :f, :g, :h]}
+    end
+
+    test "calls optional handle_discarded callback with discarded count when it exceeds configured size" do
+      {:ok, producer} =
+        DiscardedBufferLogger.start_link({:producer, 0, buffer_size: 5, buffer_keep: :first})
+
+      log =
+        capture_log(fn ->
+          DiscardedBufferLogger.sync_queue(producer, [:a, :b, :c, :d, :e, :f, :g, :h])
+        end)
+
+      assert log =~ "DiscardedBufferLogger has discarded 3 events from buffer"
+
+      log =
+        capture_log(fn ->
+          {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+          :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
+          assert_receive {:consumed, [:a, :b, :c, :d]}
+          assert_receive {:consumed, [:e]}
+        end)
+
+      assert log =~ ""
+    end
+
+    test "returns the correct buffer count when polled" do
+      {:ok, producer} = Counter.start_link({:producer, 0, buffer_size: :infinity})
+      0 = Counter.sync_queue(producer, [:a, :b, :c, :d, :e])
+      assert 5 == GenStage.buffered_count(producer)
+
+      0 = Counter.sync_queue(producer, [:f, :g, :h])
+      assert 8 == GenStage.buffered_count(producer)
+
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
+      assert_receive {:consumed, [:a, :b, :c, :d]}
+      assert_receive {:consumed, [:e, :f, :g, :h]}
+
+      assert 0 == GenStage.buffered_count(producer)
     end
   end
 
