@@ -976,15 +976,17 @@ defmodule GenStage do
               | {:stop, reason, new_state}
             when new_state: term, reason: term
 
-
   @doc """
   Invoked when items are added or removed from the buffer.
 
   It receives the current number of buffered items and the number of excess (discarded) items from this invocation.
   When this callback is implemented, the error log for discarded items is bypassed so that the callback can handle it.
   """
-  @callback handle_buffered(buffered_count :: non_neg_integer, discarded :: non_neg_integer, state :: term) :: none
-
+  @callback handle_buffered(
+              buffered_count :: non_neg_integer,
+              discarded :: non_neg_integer,
+              state :: term
+            ) :: none
 
   @doc """
   Invoked when a consumer is no longer subscribed to a producer.
@@ -2310,7 +2312,11 @@ defmodule GenStage do
     buffer_events(events, stage)
   end
 
-  defp take_from_buffer(counter, %{buffer: buffer, mod: mod, mod_handle_buffered: mod_handle_buffered, state: state} = stage) do
+  defp take_from_buffer(
+         counter,
+         %{buffer: buffer, mod: mod, mod_handle_buffered: mod_handle_buffered, state: state} =
+           stage
+       ) do
     case Buffer.take_count_or_until_permanent(buffer, counter) do
       :empty ->
         {:ok, counter, stage}
@@ -2320,6 +2326,7 @@ defmodule GenStage do
           buffered_count = Buffer.estimate_size(buffer)
           mod.handle_buffered(buffered_count, 0, state)
         end
+
         # Update the buffer because dispatch events may
         # trigger more events to be buffered.
         stage = dispatch_events(temps, counter - new_counter, %{stage | buffer: buffer})
@@ -2332,7 +2339,16 @@ defmodule GenStage do
     stage
   end
 
-  defp buffer_events(events, %{mod: mod, buffer: buffer, buffer_keep: keep, mod_handle_buffered: mod_handle_buffered, state: state} = stage) do
+  defp buffer_events(
+         events,
+         %{
+           mod: mod,
+           buffer: buffer,
+           buffer_keep: keep,
+           mod_handle_buffered: mod_handle_buffered,
+           state: state
+         } = stage
+       ) do
     {buffer, excess, perms} = Buffer.store_temporary(buffer, events, keep)
 
     if mod_handle_buffered do
@@ -2342,10 +2358,11 @@ defmodule GenStage do
       case excess do
         0 ->
           :ok
+
         excess ->
           error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
           :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
-        end
+      end
     end
 
     :lists.foldl(&dispatch_info/2, %{stage | buffer: buffer}, perms)

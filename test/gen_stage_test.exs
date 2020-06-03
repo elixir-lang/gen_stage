@@ -288,16 +288,19 @@ defmodule GenStageTest do
 
     def handle_buffered(buffered_count, discarded, _state) do
       :error_logger.info_msg("BufferLogger has a buffered count of ~tp", [buffered_count])
+
       case discarded do
         0 ->
           :ok
+
         discarded ->
           :error_logger.info_msg("BufferLogger has discarded ~tp events from buffer", [discarded])
-        end
+      end
     end
 
     def handle_demand(_demand, state) do
-      {:noreply, [], state} # We don't care about the demand
+      # We don't care about the demand
+      {:noreply, [], state}
     end
   end
 
@@ -782,8 +785,9 @@ defmodule GenStageTest do
       assert_receive {:consumed, [:e, :f, :g, :h]}
     end
 
-   test "calls optional handle_buffered callback when adding to the buffer" do
-      {:ok, producer} = BufferLogger.start_link({:producer, 0, buffer_size: 5, buffer_keep: :first})
+    test "calls optional handle_buffered callback when adding to the buffer" do
+      {:ok, producer} =
+        BufferLogger.start_link({:producer, 0, buffer_size: 5, buffer_keep: :first})
 
       log =
         capture_log(fn ->
@@ -814,8 +818,10 @@ defmodule GenStageTest do
       assert_receive {:consumed, [:f, :g, :h]}
     end
 
-     test "calls optional handle_buffered callback with discarded count when it exceeds configured size" do
-      {:ok, producer} = BufferLogger.start_link({:producer, 0, buffer_size: 5, buffer_keep: :first})
+    test "calls optional handle_buffered callback with discarded count when it exceeds configured size" do
+      {:ok, producer} =
+        BufferLogger.start_link({:producer, 0, buffer_size: 5, buffer_keep: :first})
+
       log =
         capture_log(fn ->
           BufferLogger.sync_queue(producer, [:a, :b, :c, :d, :e])
@@ -836,7 +842,7 @@ defmodule GenStageTest do
           :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
           assert_receive {:consumed, [:a, :b, :c, :d]}
           assert_receive {:consumed, [:e]}
-      end)
+        end)
 
       assert log =~ "BufferLogger has a buffered count of 0"
     end
