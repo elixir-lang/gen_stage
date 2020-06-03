@@ -286,7 +286,7 @@ defmodule GenStageTest do
       {:reply, state, events, state}
     end
 
-    def handle_buffered(buffered_count, discarded) do
+    def handle_buffered(buffered_count, discarded, _state) do
       :error_logger.info_msg("BufferLogger has a buffered count of ~tp", [buffered_count])
       case discarded do
         0 ->
