@@ -265,7 +265,7 @@ defmodule GenStageTest do
 
   defmodule DiscardedBufferLogger do
     @moduledoc """
-    Logs about the buffered size and any discarded items
+    Logs about any discarded items
     """
 
     use GenStage
