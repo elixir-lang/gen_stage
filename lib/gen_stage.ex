@@ -1707,9 +1707,9 @@ defmodule GenStage do
   @doc """
   Returns the number of buffered items for a producer.
   """
-  @spec buffered_count(stage) :: non_neg_integer
-  def buffered_count(stage) do
-    call(stage, :"$buffered_count")
+  @spec buffered_count(stage, timeout) :: non_neg_integer
+  def buffered_count(stage, timeout \\ 5000) do
+    call(stage, :"$buffered_count", timeout)
   end
 
   ## Callbacks
