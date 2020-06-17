@@ -761,7 +761,6 @@ defmodule GenStage do
     :dispatcher_state,
     :buffer,
     :buffer_keep,
-    mod_handle_discarded: false,
     events: :forward,
     monitors: %{},
     producers: %{},
@@ -1765,7 +1764,6 @@ defmodule GenStage do
         type: :producer,
         buffer: Buffer.new(buffer_size),
         buffer_keep: buffer_keep,
-        mod_handle_discarded: function_exported?(mod, :handle_discarded, 2),
         events: if(demand == :accumulate, do: [], else: :forward),
         dispatcher_mod: dispatcher_mod,
         dispatcher_state: dispatcher_state
@@ -1807,7 +1805,6 @@ defmodule GenStage do
         type: :producer_consumer,
         buffer: Buffer.new(buffer_size),
         buffer_keep: buffer_keep,
-        mod_handle_discarded: function_exported?(mod, :handle_discarded, 2),
         events: {:queue.new(), 0},
         dispatcher_mod: dispatcher_mod,
         dispatcher_state: dispatcher_state
@@ -2344,7 +2341,6 @@ defmodule GenStage do
            mod: mod,
            buffer: buffer,
            buffer_keep: keep,
-           mod_handle_discarded: mod_handle_discarded,
            state: state
          } = stage
        ) do
@@ -2355,7 +2351,7 @@ defmodule GenStage do
         :ok
 
       excess ->
-        if mod_handle_discarded do
+        if function_exported?(mod, :handle_discarded, 2) do
           mod.handle_discarded(excess, state)
         else
           error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
