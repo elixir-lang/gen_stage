@@ -982,8 +982,7 @@ defmodule GenStage do
   This callback returns a boolean that controls whether the default error log for discarded items is printed or not.
   Return true to print the log, return false to skip the log.
   """
-  @callback format_discarded(discarded :: non_neg_integer, state :: term) ::
-              {log_discarded :: boolean, new_state :: term}
+  @callback format_discarded(discarded :: non_neg_integer, state :: term) :: boolean
 
   @doc """
   Invoked when a consumer is no longer subscribed to a producer.
@@ -2238,7 +2237,7 @@ defmodule GenStage do
     if function_exported?(mod, :format_discarded, 2) do
       mod.format_discarded(excess, state)
     else
-      {true, state}
+      true
     end
   end
 
@@ -2356,23 +2355,18 @@ defmodule GenStage do
        ) do
     {buffer, excess, perms} = Buffer.store_temporary(buffer, events, keep)
 
-    state =
-      case excess do
-        0 ->
-          state
+    case excess do
+      0 ->
+        :ok
 
-        excess ->
-          {log_discarded, state} = maybe_format_discarded(mod, excess, state)
+      excess ->
+        if maybe_format_discarded(mod, excess, state) do
+          error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
+          :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
+        end
+    end
 
-          if log_discarded do
-            error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
-            :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
-          end
-
-          state
-      end
-
-    :lists.foldl(&dispatch_info/2, %{stage | buffer: buffer, state: state}, perms)
+    :lists.foldl(&dispatch_info/2, %{stage | buffer: buffer}, perms)
   end
 
   defp producer_estimate_buffered_count(%{type: :consumer} = stage) do
