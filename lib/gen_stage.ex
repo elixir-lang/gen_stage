@@ -1847,12 +1847,12 @@ defmodule GenStage do
   def handle_call(msg, from, %{mod: mod, state: state} = stage) do
     case mod.handle_call(msg, from, state) do
       {:reply, reply, events, state} when is_list(events) ->
-        stage = dispatch_events(events, length(events), stage)
-        {:reply, reply, %{stage | state: state}}
+        stage = dispatch_events(events, length(events), %{stage | state: state})
+        {:reply, reply, stage}
 
       {:reply, reply, events, state, :hibernate} when is_list(events) ->
-        stage = dispatch_events(events, length(events), stage)
-        {:reply, reply, %{stage | state: state}, :hibernate}
+        stage = dispatch_events(events, length(events), %{stage | state: state})
+        {:reply, reply, stage, :hibernate}
 
       {:stop, reason, reply, state} ->
         {:stop, reason, reply, %{stage | state: state}}
