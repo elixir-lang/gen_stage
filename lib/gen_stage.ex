@@ -398,7 +398,7 @@ defmodule GenStage do
   `GenStage`'s internal buffer. In case events are being queued and not being
   consumed, a log message will be emitted when we exceed the `:buffer_size`
   configuration. This behavior can be customized by implementing the optional
-  `c:handle_discarded\2` callback.
+  `c:format_discarded\2` callback.
 
   While the implementation above is enough to solve the constraints above,
   a more robust implementation would have tighter control over the events
@@ -979,9 +979,11 @@ defmodule GenStage do
   Invoked when items are discarded from the buffer.
 
   It receives the number of excess (discarded) items from this invocation.
-  When this callback is implemented, the error log for discarded items is bypassed so that the callback can handle it.
+  This callback returns a boolean that controls whether the default error log for discarded items is printed or not.
+  Return true to print the log, return false to skip the log.
   """
-  @callback handle_discarded(discarded :: non_neg_integer, state :: term) :: none
+  @callback format_discarded(discarded :: non_neg_integer, state :: term) ::
+              {log_discarded :: boolean, new_state :: term}
 
   @doc """
   Invoked when a consumer is no longer subscribed to a producer.
@@ -1131,7 +1133,7 @@ defmodule GenStage do
     handle_cancel: 3,
     handle_demand: 2,
     handle_events: 3,
-    handle_discarded: 2,
+    format_discarded: 2,
 
     # GenServer
     code_change: 3,
@@ -2232,6 +2234,14 @@ defmodule GenStage do
     {:noreply, stage}
   end
 
+  defp maybe_format_discarded(mod, excess, state) do
+    if function_exported?(mod, :format_discarded, 2) do
+      mod.format_discarded(excess, state)
+    else
+      {true, state}
+    end
+  end
+
   defp producer_cancel(ref, kind, reason, stage) do
     %{consumers: consumers, monitors: monitors, state: state} = stage
 
@@ -2346,20 +2356,23 @@ defmodule GenStage do
        ) do
     {buffer, excess, perms} = Buffer.store_temporary(buffer, events, keep)
 
-    case excess do
-      0 ->
-        :ok
+    state =
+      case excess do
+        0 ->
+          state
 
-      excess ->
-        if function_exported?(mod, :handle_discarded, 2) do
-          mod.handle_discarded(excess, state)
-        else
-          error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
-          :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
-        end
-    end
+        excess ->
+          {log_discarded, state} = maybe_format_discarded(mod, excess, state)
 
-    :lists.foldl(&dispatch_info/2, %{stage | buffer: buffer}, perms)
+          if log_discarded do
+            error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
+            :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
+          end
+
+          state
+      end
+
+    :lists.foldl(&dispatch_info/2, %{stage | buffer: buffer, state: state}, perms)
   end
 
   defp producer_buffered_count(%{type: :consumer} = stage) do

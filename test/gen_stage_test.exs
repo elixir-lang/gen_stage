@@ -263,7 +263,7 @@ defmodule GenStageTest do
     end
   end
 
-  defmodule DiscardedBufferLogger do
+  defmodule DiscardedBufferCounter do
     @moduledoc """
     Logs about any discarded items
     """
@@ -282,14 +282,23 @@ defmodule GenStageTest do
       GenStage.call(stage, {:queue, events})
     end
 
-    def handle_call({:queue, events}, _from, state) do
-      {:reply, state, events, state}
+    def discarded(stage) do
+      GenStage.call(stage, :discarded)
     end
 
-    def handle_discarded(discarded, _state) do
-      :error_logger.info_msg("DiscardedBufferLogger has discarded ~tp events from buffer", [
-        discarded
-      ])
+    def handle_call({:queue, events}, _from, state) do
+      {:reply, :ok, events, state}
+    end
+
+    def handle_call(:discarded, _from, %{discarded_total: discarded_total} = state) do
+      {:reply, discarded_total, [], state}
+    end
+
+    def format_discarded(
+          discarded,
+          %{discarded_total: discarded_total, log_discarded: log_discarded} = state
+        ) do
+      {log_discarded, %{state | discarded_total: discarded_total + discarded}}
     end
 
     def handle_demand(_demand, state) do
@@ -779,16 +788,22 @@ defmodule GenStageTest do
       assert_receive {:consumed, [:e, :f, :g, :h]}
     end
 
-    test "calls optional handle_discarded callback with discarded count when it exceeds configured size" do
+    test "calls optional format_discarded callback with discarded count when it exceeds configured size" do
       {:ok, producer} =
-        DiscardedBufferLogger.start_link({:producer, 0, buffer_size: 5, buffer_keep: :first})
+        DiscardedBufferCounter.start_link(
+          {:producer, %{discarded_total: 0, log_discarded: false},
+           buffer_size: 5, buffer_keep: :first}
+        )
+
+      assert DiscardedBufferCounter.discarded(producer) == 0
 
       log =
         capture_log(fn ->
-          DiscardedBufferLogger.sync_queue(producer, [:a, :b, :c, :d, :e, :f, :g, :h])
+          DiscardedBufferCounter.sync_queue(producer, [:a, :b, :c, :d, :e, :f, :g, :h])
         end)
 
-      assert log =~ "DiscardedBufferLogger has discarded 3 events from buffer"
+      assert log == ""
+      assert DiscardedBufferCounter.discarded(producer) == 3
 
       log =
         capture_log(fn ->
@@ -798,7 +813,23 @@ defmodule GenStageTest do
           assert_receive {:consumed, [:e]}
         end)
 
-      assert log =~ ""
+      assert log == ""
+    end
+
+    test "format_discarded can allow printing the default log when items are discarded" do
+      {:ok, producer} =
+        DiscardedBufferCounter.start_link(
+          {:producer, %{discarded_total: 0, log_discarded: true}, buffer_size: 5}
+        )
+
+      DiscardedBufferCounter.sync_queue(producer, [:a, :b, :c, :d, :e])
+
+      log =
+        capture_log(fn ->
+          DiscardedBufferCounter.sync_queue(producer, [:f, :g, :h])
+        end)
+
+      assert log =~ "GenStage producer #{inspect(producer)} has discarded 3 events from buffer"
     end
 
     test "returns the correct buffer count when polled" do
