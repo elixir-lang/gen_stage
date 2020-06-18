@@ -1706,11 +1706,11 @@ defmodule GenStage do
   end
 
   @doc """
-  Returns the number of buffered items for a producer.
+  Returns the estimated number of buffered items for a producer.
   """
-  @spec buffered_count(stage, timeout) :: non_neg_integer
-  def buffered_count(stage, timeout \\ 5000) do
-    call(stage, :"$buffered_count", timeout)
+  @spec estimate_buffered_count(stage, timeout) :: non_neg_integer
+  def estimate_buffered_count(stage, timeout \\ 5000) do
+    call(stage, :"$estimate_buffered_count", timeout)
   end
 
   ## Callbacks
@@ -1842,8 +1842,8 @@ defmodule GenStage do
     consumer_subscribe(current, to, opts, stage)
   end
 
-  def handle_call(:"$buffered_count", _from, stage) do
-    producer_buffered_count(stage)
+  def handle_call(:"$estimate_buffered_count", _from, stage) do
+    producer_estimate_buffered_count(stage)
   end
 
   def handle_call(msg, from, %{mod: mod, state: state} = stage) do
@@ -2130,12 +2130,12 @@ defmodule GenStage do
   defp handle_noreply_callback(return, stage) do
     case return do
       {:noreply, events, state} when is_list(events) ->
-        stage = dispatch_events(events, length(events), stage)
-        {:noreply, %{stage | state: state}}
+        stage = dispatch_events(events, length(events), %{stage | state: state})
+        {:noreply, stage}
 
       {:noreply, events, state, :hibernate} when is_list(events) ->
-        stage = dispatch_events(events, length(events), stage)
-        {:noreply, %{stage | state: state}, :hibernate}
+        stage = dispatch_events(events, length(events), %{stage | state: state})
+        {:noreply, stage, :hibernate}
 
       {:stop, reason, state} ->
         {:stop, reason, %{stage | state: state}}
@@ -2375,13 +2375,13 @@ defmodule GenStage do
     :lists.foldl(&dispatch_info/2, %{stage | buffer: buffer, state: state}, perms)
   end
 
-  defp producer_buffered_count(%{type: :consumer} = stage) do
+  defp producer_estimate_buffered_count(%{type: :consumer} = stage) do
     error_msg = 'Buffered count can only be requested for producers, GenStage ~tp is a consumer'
     :error_logger.error_msg(error_msg, [Utils.self_name()])
     {:reply, 0, stage}
   end
 
-  defp producer_buffered_count(%{buffer: buffer} = stage) do
+  defp producer_estimate_buffered_count(%{buffer: buffer} = stage) do
     {:reply, Buffer.estimate_size(buffer), stage}
   end
 

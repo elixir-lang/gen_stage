@@ -282,6 +282,10 @@ defmodule GenStageTest do
       GenStage.call(stage, {:queue, events})
     end
 
+    def async_queue(stage, events) do
+      GenStage.cast(stage, {:queue, events})
+    end
+
     def discarded(stage) do
       GenStage.call(stage, :discarded)
     end
@@ -292,6 +296,10 @@ defmodule GenStageTest do
 
     def handle_call(:discarded, _from, %{discarded_total: discarded_total} = state) do
       {:reply, discarded_total, [], state}
+    end
+
+    def handle_cast({:queue, events}, state) do
+      {:noreply, events, state}
     end
 
     def format_discarded(
@@ -807,6 +815,14 @@ defmodule GenStageTest do
 
       log =
         capture_log(fn ->
+          DiscardedBufferCounter.async_queue(producer, [:i, :j, :k])
+        end)
+
+      assert log == ""
+      assert DiscardedBufferCounter.discarded(producer) == 6
+
+      log =
+        capture_log(fn ->
           {:ok, consumer} = Forwarder.start_link({:consumer, self()})
           :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
           assert_receive {:consumed, [:a, :b, :c, :d]}
@@ -835,17 +851,17 @@ defmodule GenStageTest do
     test "returns the correct buffer count when polled" do
       {:ok, producer} = Counter.start_link({:producer, 0, buffer_size: :infinity})
       0 = Counter.sync_queue(producer, [:a, :b, :c, :d, :e])
-      assert 5 == GenStage.buffered_count(producer)
+      assert 5 == GenStage.estimate_buffered_count(producer)
 
       0 = Counter.sync_queue(producer, [:f, :g, :h])
-      assert 8 == GenStage.buffered_count(producer)
+      assert 8 == GenStage.estimate_buffered_count(producer)
 
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
       :ok = GenStage.async_subscribe(consumer, to: producer, max_demand: 4, min_demand: 0)
       assert_receive {:consumed, [:a, :b, :c, :d]}
       assert_receive {:consumed, [:e, :f, :g, :h]}
 
-      assert 0 == GenStage.buffered_count(producer)
+      assert 0 == GenStage.estimate_buffered_count(producer)
     end
   end
 
