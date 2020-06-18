@@ -398,7 +398,7 @@ defmodule GenStage do
   `GenStage`'s internal buffer. In case events are being queued and not being
   consumed, a log message will be emitted when we exceed the `:buffer_size`
   configuration. This behavior can be customized by implementing the optional
-  `c:format_discarded\2` callback.
+  `c:format_discarded/2` callback.
 
   While the implementation above is enough to solve the constraints above,
   a more robust implementation would have tighter control over the events
