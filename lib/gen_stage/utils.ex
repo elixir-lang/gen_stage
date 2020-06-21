@@ -91,7 +91,7 @@ defmodule GenStage.Utils do
   end
 
   @doc """
-  Splits a list of events into messages cotroller by min, max, and demand.
+  Splits a list of events into messages configured by min, max, and demand.
   """
   def split_batches(events, from, min, max, demand) do
     split_batches(events, from, min, max, demand, demand, [])
