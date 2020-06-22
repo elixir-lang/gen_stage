@@ -542,8 +542,8 @@ defmodule GenStageTest do
       assert_receive {:postponed, [4, 5]}
       assert_receive {:postponed, [6, 7]}
       assert_receive {:postponed, [8, 9]}
-      refute_receive {:sleep, [2, 3]}
-      refute_receive {:postponed, [10, 11]}
+      refute_received {:sleep, [2, 3]}
+      refute_received {:postponed, [10, 11]}
     end
 
     test "keeps emitting events even when discarded" do

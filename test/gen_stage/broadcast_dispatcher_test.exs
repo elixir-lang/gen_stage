@@ -117,7 +117,7 @@ defmodule GenStage.BroadcastDispatcherTest do
 
     {:ok, [:d], disp} = D.dispatch([:d], 1, disp)
     assert disp == {[{1, pid2, ref2, nil}, {0, pid1, ref1, nil}], 0, expected_subscribers}
-    refute_receive {:"$gen_consumer", {_, _}, _}
+    refute_received {:"$gen_consumer", {_, _}, _}
 
     # Add a late subscriber
     {:ok, 1, disp} = D.ask(1, {pid1, ref1}, disp)

@@ -839,7 +839,7 @@ defmodule ConsumerSupervisorTest do
       assert %{workers: 1, active: 1} = ConsumerSupervisor.count_children(sup)
       assert [{:undefined, ^child3, :worker, [Consumer]}] = ConsumerSupervisor.which_children(sup)
 
-      refute_receive {:child_started, _}
+      refute_received {:child_started, _}
     end
 
     test "children remain after producer down" do
