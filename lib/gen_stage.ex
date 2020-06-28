@@ -792,7 +792,7 @@ defmodule GenStage do
 
   @typedoc "Option values used by the `init*` common to `:consumer` and `:producer_consumer` types"
   @type consumer_and_producer_consumer_option ::
-          {:subscribe_to, [module | {module, subscription_options}]}
+          {:subscribe_to, [atom | pid | {GenServer.server(), subscription_options}]}
 
   @typedoc "Option values used by the `init*` functions when stage type is `:producer`"
   @type producer_option :: producer_only_option | producer_and_producer_consumer_option
@@ -2419,6 +2419,8 @@ defmodule GenStage do
   defp consumer_init_subscribe(producers, stage) do
     fold_fun = fn
       to, {:ok, stage} ->
+        maybe_print_subscribe_to_deprecation_warning(to)
+
         case consumer_subscribe(to, stage) do
           {:reply, _, stage} -> {:ok, stage}
           {:stop, reason, _, _} -> {:stop, reason}
@@ -2430,6 +2432,21 @@ defmodule GenStage do
     end
 
     :lists.foldl(fold_fun, {:ok, stage}, producers)
+  end
+
+  defp maybe_print_subscribe_to_deprecation_warning(to) do
+    log = ':subscribe_to value with type ~ts is deprecated. Change ~tp to {~tp, []} instead.'
+
+    case to do
+      {:global, _} ->
+        :error_logger.warning_msg(log, ['{:global, term()}', to, to])
+
+      {:via, _, _} ->
+        :error_logger.warning_msg(log, ['{:via, module(), term()}', to, to])
+
+      _ ->
+        :ok
+    end
   end
 
   defp consumer_receive({_, ref} = from, {producer_id, cancel, {demand, min, max}}, events, stage) do

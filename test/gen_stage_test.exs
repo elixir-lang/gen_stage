@@ -1868,4 +1868,51 @@ defmodule GenStageTest do
                {:registered_name, :gen_stage_from_enumerable}
     end
   end
+
+  describe "subscribe_to names" do
+    test "can be pid" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+      assert_receive {:consumed, _}
+    end
+
+    test "can be an atom name" do
+      producer_name = :producer_atom_name
+      {:ok, _} = Counter.start_link({:producer, 0}, name: producer_name)
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_name]})
+      assert_receive {:consumed, _}
+    end
+
+    test "can be a via name if passed with options to avoid ambiguity" do
+      producer_name = {:via, :global, {:producer, :name}}
+      {:ok, _} = Counter.start_link({:producer, 0}, name: producer_name)
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [{producer_name, []}]})
+      assert_receive {:consumed, _}
+    end
+
+    test "can be a global name if passed with options to avoid ambiguity" do
+      producer_name = {:global, {:producer, :name}}
+      {:ok, _} = Counter.start_link({:producer, 0}, name: producer_name)
+      {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [{producer_name, []}]})
+      assert_receive {:consumed, _}
+    end
+
+    test "logs warning about ambiguity if global name is passed without options" do
+      producer_name = {:global, {:producer, :name}}
+      {:ok, _} = Counter.start_link({:producer, 0}, name: producer_name)
+
+      assert capture_log(fn ->
+               {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_name]})
+             end) =~ ":subscribe_to value with type {:global, term()} is deprecated."
+    end
+
+    test "logs warning about ambiguity if via name is passed without options" do
+      producer_name = {:via, :global, {:producer, :name}}
+      {:ok, _} = Counter.start_link({:producer, 0}, name: producer_name)
+
+      assert capture_log(fn ->
+               {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer_name]})
+             end) =~ ":subscribe_to value with type {:via, module(), term()} is deprecated."
+    end
+  end
 end
