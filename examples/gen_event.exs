@@ -21,7 +21,7 @@ defmodule Broadcaster do
   @doc """
   Starts the broadcaster.
   """
-  def start_link() do
+  def start_link(_args) do
     GenStage.start_link(__MODULE__, :ok, name: __MODULE__)
   end
 
@@ -64,7 +64,7 @@ defmodule Consumer do
 
   use GenStage
 
-  def start_link() do
+  def start_link(_args) do
     GenStage.start_link(__MODULE__, :ok)
   end
 
@@ -87,19 +87,17 @@ end
 defmodule App do
   @moduledoc """
   Your application entry-point.
-
-  For actual applications, start/0 should be start/2.
   """
+  use Supervisor
 
-  def start do
-    import Supervisor.Spec
-
+  @impl true
+  def init(_arg) do
     children = [
-      worker(Broadcaster, []),
-      worker(Consumer, [], id: 1),
-      worker(Consumer, [], id: 2),
-      worker(Consumer, [], id: 3),
-      worker(Consumer, [], id: 4)
+      Supervisor.child_spec({Broadcaster, []}, id: 1),
+      Supervisor.child_spec({Consumer, []}, id: 2),
+      Supervisor.child_spec({Consumer, []}, id: 3),
+      Supervisor.child_spec({Consumer, []}, id: 4),
+      Supervisor.child_spec({Consumer, []}, id: 5),
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one)
@@ -107,7 +105,7 @@ defmodule App do
 end
 
 # Start the app
-App.start
+App.init(0)
 
 # Broadcast events
 Broadcaster.sync_notify(1)
