@@ -611,7 +611,7 @@ defmodule ConsumerSupervisorTest do
         try do
           throw(:oops)
         catch
-          :oops -> System.stacktrace()
+          :oops -> __STACKTRACE__
         end
 
       :erlang.raise(class, :oops, stack)
