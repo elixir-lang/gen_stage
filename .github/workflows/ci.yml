@@ -27,8 +27,10 @@ jobs:
             warnings_as_errors: true # not 1.10 as its --warnigs-as-errors has bugs https://github.com/elixir-lang/elixir/issues/10073
           - elixir: 1.10.3
             otp: 21.3.8.17
-          - elixir: 1.10.3
-            otp: 23.0.3
+          - elixir: 1.11.1
+            otp: 21.3.8.17
+          - elixir: 1.11.1
+            otp: 23.1.1
             check_formatted: true
     env:
       MIX_ENV: test
