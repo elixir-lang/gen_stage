@@ -53,7 +53,7 @@ defmodule GenStage.BroadcastDispatcher do
     if subscribed?(subscribed_processes, pid) do
       Logger.error(fn ->
         "#{inspect(pid)} is already registered with #{inspect(self())}. " <>
-          "This subscription has been discared."
+          "This subscription has been discarded."
       end)
 
       {:error, :already_subscribed}
