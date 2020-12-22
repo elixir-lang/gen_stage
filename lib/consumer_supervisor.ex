@@ -166,7 +166,8 @@ defmodule ConsumerSupervisor do
   and will exit not only on crashes but also if the parent process
   exits with `:normal` reason.
   """
-  @spec start_link([Supervisor.Spec.spec()], [option]) :: Supervisor.on_start()
+  @spec start_link([Supervisor.Spec.spec() | Supervisor.child_spec()], [option]) ::
+          Supervisor.on_start()
   def start_link(children, options) when is_list(children) do
     {sup_options, start_options} =
       Keyword.split(options, [:strategy, :max_restarts, :max_seconds, :subscribe_to])
