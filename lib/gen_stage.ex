@@ -515,10 +515,9 @@ defmodule GenStage do
 
   Both `:producer_consumer` and `:consumer` stages have been designed to do
   their work in the `c:handle_events/3` callback. This means that, after
-  `c:handle_events/3` is invoked, both `:producer_consumer` and `:consumer`
-  stages will immediately send demand upstream and ask for more items, as the
-  stage that produced the events assumes events have been fully processed by
-  `c:handle_events/3`.
+  `c:handle_events/3` has been executed, both `:producer_consumer` and `:consumer`
+  stages will immediately send demand upstream and ask for more items. It is 
+  assumed that events have been fully processed by `c:handle_events/3`.
 
   Such default behaviour makes `:producer_consumer` and `:consumer` stages
   unfeasible for doing asynchronous work. However, given `GenStage` was designed
