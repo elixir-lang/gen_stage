@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.0 (2021-02-05)
+
+v1.1 requires Elixir v1.7+.
+
+### Enhancements
+
+  * Fix warnings on latest Elixir versions
+  * Support more process specifications in the `:subscribe_to` option
+  * Add callback to allow instrumenting discarded count and function to get estimated buffer size
+
 ## v1.0.0 (2020-02-03)
 
 ### Enhancements
