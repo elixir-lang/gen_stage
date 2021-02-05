@@ -242,7 +242,7 @@ defmodule GenStage do
       GenStage.start_link(C, :ok)
 
   In a supervision tree, this is often done by starting multiple workers. Typically
-  we update each `c:start_link/1` call to start a named process:
+  we update each `start_link/1` call to start a named process:
 
       def start_link(number) do
         GenStage.start_link(A, number, name: A)
