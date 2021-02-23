@@ -21,7 +21,9 @@ defmodule GenStage.Mixfile do
   end
 
   def application do
-    [applications: [:logger]]
+    [
+      extra_applications: [:logger]
+    ]
   end
 
   defp deps do
@@ -32,7 +34,7 @@ defmodule GenStage.Mixfile do
 
   defp package do
     %{
-      licenses: ["Apache 2"],
+      licenses: ["Apache-2.0"],
       maintainers: ["José Valim", "James Fish"],
       links: %{"GitHub" => "https://github.com/elixir-lang/gen_stage"}
     }
