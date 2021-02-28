@@ -11,7 +11,7 @@ This project currently provides the following functionality:
 You may also be interested in two other projects built on top of GenStage:
 
   * [Flow](https://github.com/plataformatec/flow) for building computational flows using map-reduce, partitions, windows, and more that run concurrently. See the documentation for [Flow](https://hexdocs.pm/flow) or [José Valim's keynote at ElixirConf 2016](https://youtu.be/srtMWzyqdp8?t=244) introducing the main concepts behind GenStage and Flow
-  
+
   * [Broadway](https://github.com/plataformatec/broadway) for building concurrent and multi-stage data ingestion and data processing pipelines to consume events from Amazon SQS, RabbitMQ, and others. See [Broadway's documentation](https://hexdocs.pm/broadway) or [José Valim's introduction to Broadway](https://www.youtube.com/watch?v=ZOExnT1PYjs)
 
 ## Examples
