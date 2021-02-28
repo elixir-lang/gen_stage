@@ -1182,7 +1182,7 @@ defmodule GenStage do
       registration" section of the module documentation
 
     * `:debug` - if present, the corresponding function in the [`:sys`
-      module](http://www.erlang.org/doc/man/sys.html) is invoked
+      module](https://erlang.org/doc/man/sys.html) is invoked
 
   This function also accepts all the options accepted by
   `GenServer.start_link/3`.
