@@ -2513,8 +2513,15 @@ defmodule GenStage do
           consumer_subscribe(opts, ref, producer_pid, cancel, min, max, stage)
 
         cancel == :permanent or cancel == :transient ->
-          error_msg = 'Unable to subscribe to ~tp because the process registered by that name or pid is not alive~n'
-          :error_logger.error_msg(error_msg, [to])
+          error_msg = 'GenStage consumer ~tp was not able to subscribe to the process ~tp because that process is not alive~n'
+
+          mod =
+            case stage do
+              %{state: %{mod: mod}} -> mod
+              %{mod: mod} -> mod
+            end
+
+          :error_logger.error_msg(error_msg, [mod, to])
           {:stop, :noproc, {:ok, make_ref()}, stage}
 
         cancel == :temporary ->
