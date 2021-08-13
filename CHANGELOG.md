@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.1 (2021-08-13)
+
+### Enhancements
+
+  * Log a clear error messages when stage terminates due to noproc on non-temporary subscription
+
 ## v1.1.0 (2021-02-05)
 
 v1.1 requires Elixir v1.7+.
