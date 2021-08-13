@@ -1049,12 +1049,14 @@ defmodule GenStageTest do
       assert message == "expected :min_demand to be equal to or less than 999, got: 2000"
     end
 
-    @tag :capture_log
     test "consumer exits when there is no named producer and subscription is permanent" do
       Process.flag(:trap_exit, true)
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
-      assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown)
-      assert_receive {:EXIT, ^consumer, :noproc}
+
+      assert ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown)
+        assert_receive {:EXIT, ^consumer, :noproc}
+      end) =~ "Unable to subscribe to :unknown because the process registered by that name or pid is not alive"
     end
 
     @tag :capture_log
