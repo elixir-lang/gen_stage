@@ -1053,13 +1053,14 @@ defmodule GenStageTest do
       Process.flag(:trap_exit, true)
       {:ok, consumer} = Forwarder.start_link({:consumer, self()})
 
-      expected_error_msg = "GenStage consumer GenStageTest.Forwarder was not able to subscribe " <>
-        "to the process :unknown because that process is not alive"
+      expected_error_msg =
+        "GenStage consumer GenStageTest.Forwarder was not able to subscribe " <>
+          "to the process :unknown because that process is not alive"
 
       assert ExUnit.CaptureLog.capture_log(fn ->
-        assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown)
-        assert_receive {:EXIT, ^consumer, :noproc}
-      end) =~ expected_error_msg
+               assert {:ok, _} = GenStage.sync_subscribe(consumer, to: :unknown)
+               assert_receive {:EXIT, ^consumer, :noproc}
+             end) =~ expected_error_msg
     end
 
     @tag :capture_log
