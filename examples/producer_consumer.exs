@@ -28,7 +28,7 @@ defmodule B do
   end
 
   def handle_events(events, _from, number) do
-    # If we receive [0, 1, 2], this will transform
+    # If we receive [0, 1, 2], the number is 2, this will transform
     # it into [0, 1, 2, 1, 2, 3, 2, 3, 4].
     events =
       for event <- events,
