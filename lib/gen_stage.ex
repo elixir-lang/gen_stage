@@ -1593,11 +1593,12 @@ defmodule GenStage do
   docs.
 
   Keep in mind that streams that require the use of the process
-  inbox to work most likely won't behave as expected with this
-  function since the mailbox is controlled by the stage process
-  itself. As explained above, stateful or blocking enumerables
-  are generally discouraged, as `GenStage` was designed precisely
-  to support exchange of data in such cases.
+  inbox to work won't behave as expected with this function since
+  the mailbox is controlled by the stage process itself. For example,
+  you must not pass the result `Task.async_stream/3` to this function.
+  As explained above, stateful or blocking enumerables are generally
+  discouraged in `GenStage`, as `GenStage` was designed precisely to
+  support exchange of data in such cases.
 
   ## Options
 
@@ -1611,12 +1612,19 @@ defmodule GenStage do
     * `:demand` - configures the demand to `:forward` or `:accumulate`
       mode. See `c:init/1` and `demand/2` for more information.
 
+    * `:stacktrace` - the stacktrace of the function that started the
+      stream.
+
   All other options that would be given for `start_link/3` are
   also accepted.
   """
   @spec from_enumerable(Enumerable.t(), keyword) :: GenServer.on_start()
   def from_enumerable(stream, opts \\ []) do
-    {:current_stacktrace, [_info_call | stack]} = Process.info(self(), :current_stacktrace)
+    {stack, opts} =
+      Keyword.pop_lazy(opts, :stacktrace, fn ->
+        {:current_stacktrace, [_info_call | stack]} = Process.info(self(), :current_stacktrace)
+        stack
+      end)
 
     case Keyword.pop(opts, :link, true) do
       {true, opts} -> start_link(GenStage.Streamer, {stream, stack, opts}, opts)
@@ -1674,14 +1682,15 @@ defmodule GenStage do
   which receives an enumerable (like a stream) and creates a stage
   that emits data from the enumerable.
 
-  Given both `GenStage.from_enumerable/2` and `GenStage.stream/1`
-  require the process inbox to send and receive messages, it is
-  impossible to run a `stream/2` inside a `from_enumerable/2` as
-  the `stream/2` will never receive the messages it expects.
+  Given both `GenStage.from_enumerable/2` and `GenStage.stream/2`
+  require the process inbox to send and receive messages, passing
+  the result of `from_enumerable/2` to this function will lead to
+  unexpected behaviour, as `stream/2` will never receive the
+  messages it expects.
 
   ### Remote nodes
 
-  While it is possible to stream messages from remote nodes
+  While it is possible to stream messages from remote nodes,
   such should be done with care. In particular, in case of
   disconnections, there is a chance the producer will send
   messages after the consumer receives its DOWN messages and
