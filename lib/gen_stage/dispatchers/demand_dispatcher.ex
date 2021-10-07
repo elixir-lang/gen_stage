@@ -5,13 +5,30 @@ defmodule GenStage.DemandDispatcher do
   This is the default dispatcher used by `GenStage`. In order
   to avoid greedy consumers, it is recommended that all consumers
   have exactly the same maximum demand.
+
+  ## Options
+
+  The demand dispatcher accepts the following options
+  on initialization:
+
+    * `:shuffle_demands_on_first_dispatch` - when true, shuffle the initial demands list
+      which is constructed on subscription before first dispatch. It prevents overloading
+      the first consumer on first dispatch.  Defaults to `false`.
+
+  ### Examples
+
+  To start a producer with demands shuffled on first dispatch:
+
+      {:producer, state, dispatcher: {GenStage.DemandDispatcher, shuffle_demands_on_first_dispatch: true}}
   """
 
   @behaviour GenStage.Dispatcher
 
   @doc false
-  def init(_opts) do
-    {:ok, {[], 0, nil}}
+  def init(opts) do
+    shuffle_demand = Keyword.get(opts, :shuffle_demands_on_first_dispatch, false)
+
+    {:ok, {[], 0, nil, %{shuffle_demands_on_first_dispatch: shuffle_demand, demands_seq: :natural}}}
   end
 
   @doc false
@@ -21,18 +38,18 @@ defmodule GenStage.DemandDispatcher do
   end
 
   @doc false
-  def subscribe(_opts, {pid, ref}, {demands, pending, max}) do
-    {:ok, 0, {demands ++ [{0, pid, ref}], pending, max}}
+  def subscribe(_opts, {pid, ref}, {demands, pending, max, infos}) do
+    {:ok, 0, {demands ++ [{0, pid, ref}], pending, max, infos}}
   end
 
   @doc false
-  def cancel({_, ref}, {demands, pending, max}) do
+  def cancel({_, ref}, {demands, pending, max, infos}) do
     {current, demands} = pop_demand(ref, demands)
-    {:ok, 0, {demands, current + pending, max}}
+    {:ok, 0, {demands, current + pending, max, infos}}
   end
 
   @doc false
-  def ask(counter, {pid, ref}, {demands, pending, max}) do
+  def ask(counter, {pid, ref}, {demands, pending, max, infos}) do
     max = max || counter
 
     if counter > max do
@@ -48,13 +65,17 @@ defmodule GenStage.DemandDispatcher do
     demands = add_demand(current + counter, pid, ref, demands)
 
     already_sent = min(pending, counter)
-    {:ok, counter - already_sent, {demands, pending - already_sent, max}}
+    {:ok, counter - already_sent, {demands, pending - already_sent, max, infos}}
   end
 
   @doc false
-  def dispatch(events, length, {demands, pending, max}) do
+  def dispatch(events, length, {demands, pending, max, %{shuffle_demands_on_first_dispatch: true, demands_seq: :natural}}) do
+    dispatch(events, length, {Enum.shuffle(demands), pending, max, %{shuffle_demands_on_first_dispatch: true, demands_seq: :shuffled}})
+  end
+
+  def dispatch(events, length, {demands, pending, max, infos}) do
     {events, demands} = dispatch_demand(events, length, demands)
-    {:ok, events, {demands, pending, max}}
+    {:ok, events, {demands, pending, max, infos}}
   end
 
   defp dispatch_demand([], _length, demands) do
