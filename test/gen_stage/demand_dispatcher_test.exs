@@ -159,6 +159,7 @@ defmodule GenStage.DemandDispatcherTest do
 
     # shuffled flag is reset to false after first dispatch
     {[{0, pid, ref1_actual}, {0, pid, ref2_actual}], 0, 3, @default_shuffle_flag} = disp
+
     if ref1_actual == ref1 do
       assert ref2_actual == ref2
       assert_received {:"$gen_consumer", {_, ^ref1}, [:a, :b, :c]}
