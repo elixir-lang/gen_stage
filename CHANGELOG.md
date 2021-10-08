@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.2 (2021-10-08)
+
+### Enhancements
+
+  * Support `:shuffle_demands_on_first_dispatch` on `GenStage.DemandDispatcher`
+
 ## v1.1.1 (2021-08-13)
 
 ### Enhancements
