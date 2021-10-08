@@ -28,7 +28,7 @@ defmodule GenStage.DemandDispatcher do
   def init(opts) do
     shuffle_demand = Keyword.get(opts, :shuffle_demands_on_first_dispatch, false)
 
-    {:ok, {[], 0, nil, %{shuffle_demands_on_first_dispatch: shuffle_demand, demands_seq: :natural}}}
+    {:ok, {[], 0, nil, shuffle_demand}}
   end
 
   @doc false
@@ -38,18 +38,18 @@ defmodule GenStage.DemandDispatcher do
   end
 
   @doc false
-  def subscribe(_opts, {pid, ref}, {demands, pending, max, infos}) do
-    {:ok, 0, {demands ++ [{0, pid, ref}], pending, max, infos}}
+  def subscribe(_opts, {pid, ref}, {demands, pending, max, shuffle_demand}) do
+    {:ok, 0, {demands ++ [{0, pid, ref}], pending, max, shuffle_demand}}
   end
 
   @doc false
-  def cancel({_, ref}, {demands, pending, max, infos}) do
+  def cancel({_, ref}, {demands, pending, max, shuffle_demand}) do
     {current, demands} = pop_demand(ref, demands)
-    {:ok, 0, {demands, current + pending, max, infos}}
+    {:ok, 0, {demands, current + pending, max, shuffle_demand}}
   end
 
   @doc false
-  def ask(counter, {pid, ref}, {demands, pending, max, infos}) do
+  def ask(counter, {pid, ref}, {demands, pending, max, shuffle_demand}) do
     max = max || counter
 
     if counter > max do
@@ -65,17 +65,17 @@ defmodule GenStage.DemandDispatcher do
     demands = add_demand(current + counter, pid, ref, demands)
 
     already_sent = min(pending, counter)
-    {:ok, counter - already_sent, {demands, pending - already_sent, max, infos}}
+    {:ok, counter - already_sent, {demands, pending - already_sent, max, shuffle_demand}}
   end
 
   @doc false
-  def dispatch(events, length, {demands, pending, max, %{shuffle_demands_on_first_dispatch: true, demands_seq: :natural}}) do
-    dispatch(events, length, {Enum.shuffle(demands), pending, max, %{shuffle_demands_on_first_dispatch: true, demands_seq: :shuffled}})
+  def dispatch(events, length, {demands, pending, max, true}) do
+    dispatch(events, length, {Enum.shuffle(demands), pending, max, false})
   end
 
-  def dispatch(events, length, {demands, pending, max, infos}) do
+  def dispatch(events, length, {demands, pending, max, false}) do
     {events, demands} = dispatch_demand(events, length, demands)
-    {:ok, events, {demands, pending, max, infos}}
+    {:ok, events, {demands, pending, max, false}}
   end
 
   defp dispatch_demand([], _length, demands) do
