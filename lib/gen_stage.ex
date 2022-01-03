@@ -185,11 +185,10 @@ defmodule GenStage do
   goes down to `900`. Another batch is produced and the demand goes down to `800`.
   At this point, the producer has not been asked for more events yet since the demand
   didn't go below `:min_demand` yet. When the producer produces the next batch of
-  `100` events, the remaining demand goes down to `700`, which is lower than
-  `:min_demand`. At this point, the consumer asks the producer for as many events
-  as necessary to bring the demand up to `:max_demand` again. In this case, it means
-  that the consumer will send a demand of `300` to the producer. `c:handle_demand/2`
-  will be called on the producer with a demand of `300`.
+  `100` events, the consumer will process `50` events and the demand reaches the
+  minimum of `750`. The consume sends `250` demand upstream (which is up to `:max_demand`).
+  of `250` to reach `:min_demand` again, and then consume the `50` events left.
+  `c:handle_demand/2` will be called on the producer with a demand of `250`.
 
   In the example above, B is a `:producer_consumer` and therefore
   acts as a buffer. Getting the proper demand values in B is
@@ -332,15 +331,22 @@ defmodule GenStage do
 
   ## Buffering
 
-  In many situations, producers may attempt to emit events while no consumers
-  have yet subscribed. Similarly, consumers may ask producers for events
-  that are not yet available. Lastly, producers may emit more events than the
-  consumer sends demand for. In the first two cases, it is necessary for producers
-  to buffer events until a consumer is available or has demand. In the last case,
-  the producers have to buffer the consumer demand until events arrive.
-  As we will see next, buffering events can be done automatically by `GenStage`,
-  while buffering the demand is a case that must be explicitly considered by
-  developers implementing producers.
+  In many situations, mismatches might happen between how many events can be produced
+  and how many events can be consumed. In those cases, we usually need to *buffer*
+  some things. Let's explore the possible scenarios.
+
+  In the first scenario, producers may attempt to emit events while no consumers
+  have yet subscribed. Alternatively, producers may produce more events than the
+  consumers' demand asked for. In these cases, producers will have to buffer events
+  until a consumer is available or consumers have enough demand again.
+
+  In the second scenario, consumers may ask producers for events that are not
+  yet available. In this case, producers have to buffer consumer demand
+  until new events can be produced.
+
+  As we will see next, buffering events emitted by producers can be done
+  automatically by `GenStage`. Buffering the demand, instead, is a case that
+  must be explicitly considered by developers implementing producers.
 
   ### Buffering events
 
