@@ -2054,12 +2054,6 @@ defmodule GenStage do
     consumer_cancel(ref, :cancel, reason, stage)
   end
 
-  ## Stop after having delivered buffered events
-
-  def handle_info({:"$gen_stop", reason}, stage) do
-    {:stop, reason, stage}
-  end
-
   ## Catch-all messages
 
   def handle_info(msg, %{state: state} = stage) do
@@ -2190,11 +2184,6 @@ defmodule GenStage do
 
       {:stop, reason, state} ->
         {:stop, reason, %{stage | state: state}}
-
-      {:stop, reason, events, state} ->
-        stage = dispatch_events(events, length(events), %{stage | state: state})
-        async_info(self(), {:stop, reason})
-        {:noreply, stage}
 
       other ->
         {:stop, {:bad_return_value, other}, stage}
