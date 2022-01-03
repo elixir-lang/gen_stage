@@ -933,7 +933,7 @@ defmodule GenStage do
   GenStage will buffer the excess events. These events will be "used"
   by the consumer/dispatcher next time demand is sent upstream. It's only once
   the events in the buffer don't satisfy the demand anymore that the
-  `c:handle_demand/2` callback is invokde again. See the "Buffering" section
+  `c:handle_demand/2` callback is invoked again. See the "Buffering" section
   in the module documentation.
 
   ## Examples
