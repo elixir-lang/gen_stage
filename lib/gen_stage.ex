@@ -187,7 +187,7 @@ defmodule GenStage do
   didn't go below `:min_demand` yet. When the producer produces the next batch of
   `100` events, the consumer will process `50` events and the demand reaches the
   minimum of `750`. The consume sends `250` demand upstream (which is up to `:max_demand`).
-  of `250` to reach `:min_demand` again, and then consume the `50` events left.
+  of `250` to reach `:min_demand` again, and then consume the `50` events remaining.
   `c:handle_demand/2` will be called on the producer with a demand of `250`.
 
   In the example above, B is a `:producer_consumer` and therefore
