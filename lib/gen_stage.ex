@@ -3,9 +3,9 @@ defmodule GenStage do
   Stages are data-exchange steps that send and/or receive data
   from other stages.
 
-  When a stage sends data, it acts as a producer. When it receives
-  data, it acts as a consumer. Stages may take both producer and
-  consumer roles at once.
+  When a stage sends data, it acts as a **producer**. When it receives
+  data, it acts as a **consumer**. Stages may take both producer and
+  consumer roles at once, acting as **consumer producers**.
 
   ## Stage types
 
@@ -24,19 +24,19 @@ defmodule GenStage do
     * B is both producer and consumer
     * C is only a consumer (and therefore a sink)
 
-  As we will see in the upcoming Examples section, we must
-  specify the type of the stage when we implement each of them.
+  As we will see in the upcoming "Examples" section, we must
+  specify the type of the stage when we implement it.
 
-  To start the flow of events, we subscribe consumers to
-  producers. Once the communication channel between them is
-  established, consumers will ask the producers for events.
-  We typically say the consumer is sending demand upstream.
-  Once demand arrives, the producer will emit items, never
-  emitting more items than the consumer asked for. This provides
+  To start the flow of events, we always subscribe consumers to
+  producers. Once the communication channel between consumers and producers
+  is established, consumers will ask producers for events.
+  We typically say that the consumer is sending demand upstream.
+  Once demand arrives, the producer will emit events, never
+  emitting more events than the consumer asked for. This provides
   a back-pressure mechanism.
 
   A consumer may have multiple producers and a producer may have
-  multiple consumers. When a consumer asks for data, each producer
+  multiple consumers. When a consumer asks for data to many producers, each producer
   is handled separately, with its own demand. When a producer
   receives demand and sends data to multiple consumers, the demand
   is tracked and the events are sent by a dispatcher. This allows
@@ -102,7 +102,7 @@ defmodule GenStage do
         end
       end
 
-  B is a producer-consumer. This means it does not explicitly
+  B is a consumer-producer. This means it does not explicitly
   handle the demand because the demand is always forwarded to
   its producer. Once A receives the demand from B, it will send
   events to B which will be transformed by B as desired. In
@@ -167,13 +167,28 @@ defmodule GenStage do
   you subscribe all of them, demand will start flowing upstream and
   events downstream.
 
+  ## Demand
+
   When implementing consumers, we often set the `:max_demand` and
   `:min_demand` on subscription. The `:max_demand` specifies the
   maximum amount of events that must be in flow while the `:min_demand`
-  specifies the minimum threshold to trigger for more demand. For
-  example, if `:max_demand` is 1000 and `:min_demand` is 750,
-  the consumer will ask for 1000 events initially and ask for more
-  only after it processes at least 250.
+  specifies the minimum threshold to trigger for more demand. The consumer
+  will never ask the producer for more than `:max_demand` events at a time.
+  When the producer emits enough events for the consumer's demand to go
+  down to `:min_demand`, only then the consumer will ask for more events
+  (in other words, it will "send more demand upstream").
+
+  An example with numbers will help clarify this. Say that `:max_demand` is
+  `1000` and `:min_demand` is `750`. Initially, the consumer asks for `1000`
+  events to the producer. Say that the producer producers `100` events at a time.
+  The first "batch" of `100` events goes to the consumer and the consumer's demand
+  goes down to `900`. Another batch is produced and the demand goes down to `800`.
+  At this point, the producer has not been asked for more events yet since the demand
+  didn't go below `:min_demand` yet. When the producer produces the next batch of
+  `100` events, the consumer will process `50` events and the demand reaches the
+  minimum of `750`. The consume sends `250` demand upstream (which is up to `:max_demand`).
+  of `250` to reach `:min_demand` again, and then consume the `50` events remaining.
+  `c:handle_demand/2` will be called on the producer with a demand of `250`.
 
   In the example above, B is a `:producer_consumer` and therefore
   acts as a buffer. Getting the proper demand values in B is
@@ -230,7 +245,7 @@ defmodule GenStage do
 
   And we will no longer need to call `sync_subscribe/2`.
 
-  Another advantage of using `subscribe_to` is that it makes it straight-forward
+  Another advantage of using `:subscribe_to` is that it makes it straight-forward
   to leverage concurrency by simply starting multiple consumers that subscribe
   to their producer (or producer-consumer). This can be done in the example above
   by simply calling start link multiple times:
@@ -316,14 +331,22 @@ defmodule GenStage do
 
   ## Buffering
 
-  In many situations, producers may attempt to emit events while no consumers
-  have yet subscribed. Similarly, consumers may ask producers for events
-  that are not yet available. In such cases, it is necessary for producers
-  to buffer events until a consumer is available or buffer the consumer
-  demand until events arrive, respectively. As we will see next, buffering
-  events can be done automatically by `GenStage`, while buffering the demand
-  is a case that must be explicitly considered by developers implementing
-  producers.
+  In many situations, mismatches might happen between how many events can be produced
+  and how many events can be consumed. In those cases, we usually need to *buffer*
+  some things. Let's explore the possible scenarios.
+
+  In the first scenario, producers may attempt to emit events while no consumers
+  have yet subscribed. Alternatively, producers may produce more events than the
+  consumers' demand asked for. In these cases, producers will have to buffer events
+  until a consumer is available or consumers have enough demand again.
+
+  In the second scenario, consumers may ask producers for events that are not
+  yet available. In this case, producers have to buffer consumer demand
+  until new events can be produced.
+
+  As we will see next, buffering events emitted by producers can be done
+  automatically by `GenStage`. Buffering the demand, instead, is a case that
+  must be explicitly considered by developers implementing producers.
 
   ### Buffering events
 
@@ -335,20 +358,22 @@ defmodule GenStage do
   now produced events but it no longer has a consumer to send those events to.
   In such cases, the producer will automatically buffer the events until another
   consumer subscribes. Note however, all of the events being consumed by
-  `B` in its `handle_events` at the moment of the crash will be lost.
+  `B` in its `c:handle_events/3` at the moment of the crash will be lost.
 
   The buffer can also be used in cases where external sources only send
   events in batches larger than asked for. For example, if you are
   receiving events from an external source that only sends events
   in batches of 1000 and the internal demand is smaller than
   that, the buffer allows you to always emit batches of 1000 events
-  even when the consumer has asked for less.
+  even when the consumer has asked for less. This tends to simplify
+  code in producers since they don't need to emit exactly as many events
+  as the demand but can just emit events as they come.
 
   In all of those cases when an event cannot be sent immediately by
   a producer, the event will be automatically stored and sent the next
   time consumers ask for events. The size of the buffer is configured
-  via the `:buffer_size` option returned by `init/1` and the default
-  value is `10_000`. If the `buffer_size` is exceeded, an error is logged.
+  via the `:buffer_size` option returned by `c:init/1` and the default
+  value is `10_000`. If the `:buffer_size` is exceeded, an error is logged.
   See the documentation for `c:init/1` for more detailed information about
   the `:buffer_size` option.
 
@@ -898,26 +923,38 @@ defmodule GenStage do
 
   This callback is invoked on `:producer` stages with the demand from
   consumers/dispatcher. The producer that implements this callback must either
-  store the demand, or return the amount of requested events.
+  store the demand or return the amount of requested events.
+
+  See the "Demand" section in the module documentation.
 
   Must always be explicitly implemented by `:producer` stages.
 
+  If the producer emits more events from this callback than the asked `demand`,
+  GenStage will buffer the excess events. These events will be "used"
+  by the consumer/dispatcher next time demand is sent upstream. It's only once
+  the events in the buffer don't satisfy the demand anymore that the
+  `c:handle_demand/2` callback is invoked again. See the "Buffering" section
+  in the module documentation.
+
   ## Examples
 
+  In the following example, the producer emits enough events to at least
+  satisfy the demand, letting GenStage buffer any excess events:
+
       def handle_demand(demand, state) do
-        # We check if we're able to satisfy the demand and fetch
-        # events if we aren't.
-        events =
-          if length(state.events) >= demand do
-            state.events
-          else
-            # fetch_events()
-          end
+        events = List.flatten(fetch_at_least_n_events(demand))
+        {:noreply, events, state}
+      end
 
-        # We dispatch only the requested number of events.
-        {to_dispatch, remaining} = Enum.split(events, demand)
+      defp fetch_at_least_n_events(demand) do
+        events = fetch_events()
+        demand_left = demand - length(events)
 
-        {:noreply, to_dispatch, %{state | events: remaining}}
+        if demand_left > 0 do
+          [events | fetch_at_least_n_events(demand_left)]
+        else
+          events
+        end
       end
 
   """
@@ -1033,11 +1070,13 @@ defmodule GenStage do
   to the caller after events are dispatched (or buffered) and continues the
   loop with new state `new_state`. In case you want to deliver the reply before
   processing events, use `reply/2` and return `{:noreply, [event],
-  state}`.
+  state}`. Only `:producer` and `:producer_consumer` stages can return a
+  non-empty list of events.
 
   Returning `{:noreply, [event], new_state}` does not send a response to the
   caller and processes the given events before continuing the loop with new
-  state `new_state`. The response must be sent with `reply/2`.
+  state `new_state`. The response must be sent with `reply/2`. Only `:producer` and
+  `:producer_consumer` stages can return a non-empty list of events.
 
   Hibernating is also supported as an atom to be returned from either
   `:reply` and `:noreply` tuples.
@@ -1068,12 +1107,14 @@ defmodule GenStage do
   state of the `GenStage`.
 
   Returning `{:noreply, [event], new_state}` dispatches the events and continues
-  the loop with new state `new_state`.
+  the loop with new state `new_state`. Only `:producer` and `:producer_consumer`
+  stages can return a non-empty list of events.
 
   Returning `{:noreply, [event], new_state, :hibernate}` is similar to
   `{:noreply, new_state}` except the process is hibernated before continuing the
   loop. See the return values for `c:GenServer.handle_call/3` for more information
-  on hibernation.
+  on hibernation. Only `:producer` and `:producer_consumer` stages can return a
+  non-empty list of events.
 
   Returning `{:stop, reason, new_state}` stops the loop and `terminate/2` is
   called with the reason `reason` and state `new_state`. The process exits with
@@ -1093,6 +1134,9 @@ defmodule GenStage do
 
   `message` is the message and `state` is the current state of the `GenStage`. When
   a timeout occurs the message is `:timeout`.
+
+  Only `:producer` and `:producer_consumer` stages can return a non-empty list
+  of events.
 
   If this callback is not implemented, the default implementation by
   `use GenStage` will return `{:noreply, [], state}`.
@@ -1219,7 +1263,7 @@ defmodule GenStage do
 
   This call is synchronous and will return after the stage has queued
   the info message. The message will be eventually handled by the
-  `handle_info/2` callback.
+  `c:handle_info/2` callback.
 
   If the stage is a consumer, it does not have buffered events, so the
   messaged is queued immediately.
