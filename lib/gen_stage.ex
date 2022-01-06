@@ -1303,7 +1303,7 @@ defmodule GenStage do
   @doc """
   Sets the demand mode for a producer.
 
-  When `:forward`, the demand is always forwarded to the `handle_demand`
+  When `:forward`, the demand is always forwarded to the `c:handle_demand/2`
   callback. When `:accumulate`, demand is accumulated until its mode is
   set to `:forward`. This is useful as a synchronization mechanism, where
   the demand is accumulated until all consumers are subscribed. Defaults
