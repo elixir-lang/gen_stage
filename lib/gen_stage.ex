@@ -1938,6 +1938,10 @@ defmodule GenStage do
   end
 
   @doc false
+  def handle_info(message, state)
+
+  ## Internal messages (not part of the GenStage protocol)
+
   def handle_info({:DOWN, ref, _, _, reason} = msg, stage) do
     %{producers: producers, monitors: monitors, state: state} = stage
 
@@ -1954,6 +1958,10 @@ defmodule GenStage do
             noreply_callback(:handle_info, [msg, state], stage)
         end
     end
+  end
+
+  def handle_info({:"$gen_stop", reason}, state) do
+    {:stop, reason, state}
   end
 
   ## Producer messages
@@ -2190,6 +2198,11 @@ defmodule GenStage do
 
       {:stop, reason, state} ->
         {:stop, reason, %{stage | state: state}}
+
+      {:stop, reason, events, state} ->
+        stage = dispatch_events(events, length(events), %{stage | state: state})
+        :ok = async_info(self(), {:"$gen_stop", reason})
+        {:noreply, stage, :hibernate}
 
       other ->
         {:stop, {:bad_return_value, other}, stage}
