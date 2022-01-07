@@ -922,25 +922,34 @@ defmodule GenStage do
   Invoked on `:producer` stages.
 
   This callback is invoked on `:producer` stages with the demand from
-  consumers/dispatcher. The producer that implements this callback must either
-  store the demand or return the amount of requested events.
+  consumers/dispatcher. The producer that implements this callback can use it to
+  dispatch events.
+
+  The producer can do one of these:
+
+      * Dispatch exactly as many events as `demand`.
+
+      * Dispatch *more events* than `demand` - in this case, GenStage will
+        buffer the excess events. These events will be "used" by the
+        consumer/dispatcher next time demand is sent upstream. It's only
+        once the events in the buffer don't satisfy the demand anymore that
+        the `c:handle_demand/2` callback is invoked again. See the "Buffering"
+        section in the module documentation.
+
+      * Dispatch less events than `demand` - in this case, the producer is
+        responsibile for storing the demand ("buffering demand") and then emitting
+        events when they are available.
 
   See the "Demand" section in the module documentation.
 
-  Must always be explicitly implemented by `:producer` stages.
-
-  If the producer emits more events from this callback than the asked `demand`,
-  GenStage will buffer the excess events. These events will be "used"
-  by the consumer/dispatcher next time demand is sent upstream. It's only once
-  the events in the buffer don't satisfy the demand anymore that the
-  `c:handle_demand/2` callback is invoked again. See the "Buffering" section
-  in the module documentation.
+  This callback must always be explicitly implemented by `:producer` stages.
 
   ## Examples
 
   In the following example, the producer emits enough events to at least
   satisfy the demand, letting GenStage buffer any excess events:
 
+      @impl true
       def handle_demand(demand, state) do
         events = List.flatten(fetch_at_least_n_events(demand))
         {:noreply, events, state}
@@ -957,6 +966,32 @@ defmodule GenStage do
         end
       end
 
+  ### Stopping when events are over
+
+  In the next example, we implement the scenario where a producer can only
+  produce a limited number of events and should terminate gracefully when
+  events are not available anymore.
+
+      @impl true
+      def handle_demand(demand, state) do
+        case fetch_events() do
+          {:available, events} ->
+            {:noreply, events, state}
+
+          {:finished, last_events} ->
+            GenStage.async_info(self(), :events_finished)
+            {:noreply, last_events, state, :hibernate}
+        end
+      end
+
+      @impl true
+      def handle_info(:events_finished, state) do
+        {:stop, :normal, state}
+      end
+
+  We use the `async_info/2` function to send the producer itself a message
+  that gets delivered only after the `last_events` are dispatched. When handling
+  said message, the producer stops with reason `:normal`, terminating gracefully.
   """
   @callback handle_demand(demand :: pos_integer, state :: term) ::
               {:noreply, [event], new_state}
@@ -1938,6 +1973,10 @@ defmodule GenStage do
   end
 
   @doc false
+  def handle_info(message, state)
+
+  ## Internal messages (not part of the GenStage protocol)
+
   def handle_info({:DOWN, ref, _, _, reason} = msg, stage) do
     %{producers: producers, monitors: monitors, state: state} = stage
 
