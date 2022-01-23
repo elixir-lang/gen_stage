@@ -895,7 +895,7 @@ defmodule GenStage do
       Defaults to `:last`.
 
     * `:dispatcher` - the dispatcher responsible for handling demands.
-      Defaults to `GenStage.DemandDispatch`. May be either an atom
+      Defaults to `GenStage.DemandDispatcher`. May be either an atom
       representing a dispatcher module or a two-element tuple with
       the dispatcher module and the dispatcher options.
 
@@ -1685,7 +1685,7 @@ defmodule GenStage do
       process. Defaults to `true`.
 
     * `:dispatcher` - the dispatcher responsible for handling demands.
-      Defaults to `GenStage.DemandDispatch`. May be either an atom or
+      Defaults to `GenStage.DemandDispatcher`. May be either an atom or
       a tuple with the dispatcher and the dispatcher options.
 
     * `:demand` - configures the demand to `:forward` or `:accumulate`
