@@ -2,8 +2,28 @@ defmodule GenStage.PartitionDispatcher do
   @moduledoc """
   A dispatcher that sends events according to partitions.
 
-  Keep in mind that, if partitions are not evenly distributed,
-  a backed-up partition will slow all other ones.
+  This dispatcher assumes that partitions are evenly distributed.
+  If the data is uneven for long periods of time, then you may
+  buffer excessive data from busy partitions for long periods of
+  time. This happens because the producer is unable to distinguish
+  from which particular consumer/partition demand arrives.
+
+  Let's see an example. Imagine you have three consumers/partitions:
+  A, B, and C. Let's assume 60% of the data goes to A, 20% to B, and
+  20% to C. Let's also say `max_demand` is 10 and `min_demand` is 5.
+  When they initially request data, 10 events for each, A will receive
+  18 while B and C receive 6 each. After processing 5 events (min demand),
+  they request additional 5 events each, which at this point will be 9
+  additional elements for A, and 3 additional elements for B and C.
+  At the end of these two rounds, we will have:
+
+      A = 18 - 5 + 9 = 22 events
+      B = 6 - 5 + 3 = 4 events
+      C = 6 - 5 + 3 = 4 events
+
+  Furthermore, as B and C request more items, A will only go further
+  behind. This behaviour is fine for spikes that should quickly
+  resolve, but it can be problematic if the data is consistently uneven.
 
   ## Options
 
