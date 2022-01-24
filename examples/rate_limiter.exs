@@ -76,7 +76,7 @@ defmodule RateLimiter do
 end
 
 {:ok, a} = GenStage.start_link(Producer, 0)      # starting from zero
-{:ok, b} = GenStage.start_link(RateLimiter, :ok) # expand by 2
+{:ok, b} = GenStage.start_link(RateLimiter, :ok) # state does not matter
 
 # Ask for 10 items every 2 seconds.
 GenStage.sync_subscribe(b, to: a, max_demand: 10, interval: 2000)
