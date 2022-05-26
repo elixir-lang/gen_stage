@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - uses: erlef/setup-elixir@v1
+      - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ matrix.pair.otp }}
           elixir-version: ${{ matrix.pair.elixir }}
@@ -43,7 +43,7 @@ jobs:
         run: mix deps.get && mix deps.unlock --check-unused
         if: ${{ matrix.lint }}
 
-      - Compile with --warnings-as-errors
+      - name: Compile with --warnings-as-errors
         run: mix compile --warnings-as-errors
         if: ${{ matrix.lint }}
 
