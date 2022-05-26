@@ -145,7 +145,7 @@ defmodule GenStage.DemandDispatcherTest do
     pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
-    disp = dispatcher([shuffle_demands_on_first_dispatch: true])
+    disp = dispatcher(shuffle_demands_on_first_dispatch: true)
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
