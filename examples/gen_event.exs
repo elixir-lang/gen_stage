@@ -2,7 +2,7 @@
 defmodule Broadcaster do
   @moduledoc """
   Using a GenStage for implementing a GenEvent manager
-  replacement where each handler runs as a separate process.
+  replacement, where each handler runs as a separate process.
   It is around 40 LOC without docs and comments.
 
   This implementation will keep events in an internal queue

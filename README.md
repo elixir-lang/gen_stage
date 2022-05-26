@@ -38,4 +38,5 @@ end
 
 ## License
 
-Same as Elixir.
+Same as Elixir under Apache License 2.0.
+Check [NOTICE](https://github.com/elixir-lang/elixir/blob/main/NOTICE) and [LICENSE](https://github.com/elixir-lang/elixir/blob/main/LICENSE) for more information.
