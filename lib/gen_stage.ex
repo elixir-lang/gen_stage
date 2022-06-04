@@ -294,7 +294,7 @@ defmodule GenStage do
   see multiple processes shutting down at the same time, and conclude there are
   too many failures in a short interval. However, if the strategy is
   `:rest_for_one`, the supervisor will shut down the rest of tree, and already
-  expect the remaining process to fail. One downside of `:rest_for_one` though
+  expect the remaining processes to fail. One downside of `:rest_for_one` though
   is that if a `C` process dies, any other `C` process after it will die too.
   You can solve this by putting them under their own supervisor.
 
