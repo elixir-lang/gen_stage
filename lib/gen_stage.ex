@@ -287,16 +287,16 @@ defmodule GenStage do
   concurrency in a GenStage pipeline, especially if events can be processed out
   of order.
 
-  Also note that we set the supervision strategy to `:rest_for_one`. This
-  is important because if the producer A terminates, all of the other
-  processes will terminate too, since they are consuming events produced
-  by A. In this scenario, the supervisor will see multiple processes shutting
-  down at the same time, and conclude there are too many failures in a short
-  interval. However, if the strategy is `:rest_for_one`, the supervisor will
-  shut down the rest of tree, and already expect the remaining process to fail.
-  One downside of `:rest_for_one` though is that if a `C` process dies, any other
-  `C` process after it will die too. You can solve this by putting them under
-  their own supervisor.
+  Also note that we set the supervision strategy to `:rest_for_one`. This is
+  important. Consider an alternative case where `:one_for_one` is used. If the
+  producer `A` terminates, all of the other processes will terminate too, since
+  they are consuming events produced by `A`. In this scenario, the supervisor will
+  see multiple processes shutting down at the same time, and conclude there are
+  too many failures in a short interval. However, if the strategy is
+  `:rest_for_one`, the supervisor will shut down the rest of tree, and already
+  expect the remaining process to fail. One downside of `:rest_for_one` though
+  is that if a `C` process dies, any other `C` process after it will die too.
+  You can solve this by putting them under their own supervisor.
 
   Another alternative to the scenario above is to use a `ConsumerSupervisor`
   for consuming the events instead of N consumers. The `ConsumerSupervisor`
