@@ -33,23 +33,24 @@ defmodule GenStage.PartitionDispatcher do
     * `:partitions` - the number of partitions to dispatch to. It may be
       an integer with a total number of partitions, where each partition
       is named from 0 up to `integer - 1`. For example, `partitions: 4`
-      will contain 4 partitions named 0, 1, 2 and 3.
+      will contain four partitions named `0`, `1`, `2` and `3`.
 
-      It may also be an enumerable that specifies the name of every partition.
+      It may also be an *enumerable* that specifies the name of every partition.
       For instance, `partitions: [:odd, :even]` will build two partitions,
       named `:odd` and `:even`.
 
-    * `:hash` - the hashing algorithm, which receives the event and returns
-      a tuple with two elements, the event to be dispatched as first argument
-      and the partition as second. The partition must be one of the partitions
-      specified in `:partitions` above. The default uses
-      `fn event -> {event, :erlang.phash2(event, Enum.count(partitions))} end`
-      on the event to select the partition. If it returns `:none`, the event
-      is discarded.
+    * `:hash` - the hashing algorithm. It's a function of type
+      `t:hash_function/0`, which receives the event and returns a tuple with two
+      elements, the event to be dispatched as first argument and the partition
+      as second. The function can also return `:none`, in which case the event
+      is discarded. The partition must be one of the partitions specified in
+      `:partitions` above. The default uses:
+
+          fn event -> {event, :erlang.phash2(event, Enum.count(partitions))} end
 
   ### Examples
 
-  To start a producer with four partitions named 0, 1, 2 and 3:
+  To start a producer with four partitions named `0`, `1`, `2`, and `3`:
 
       {:producer, state, dispatcher: {GenStage.PartitionDispatcher, partitions: 0..3}}
 
@@ -76,6 +77,12 @@ defmodule GenStage.PartitionDispatcher do
       GenStage.sync_subscribe(consumer, to: producer, partition: 0)
 
   """
+
+  @typedoc """
+  The type used for the function passed to the `:hash` option.
+  """
+  @typedoc since: "1.2.0"
+  @type hash_function :: (event :: any -> {event :: any, partition :: any} | :none)
 
   @behaviour GenStage.Dispatcher
   @init {nil, nil, 0}
