@@ -8,7 +8,8 @@ defmodule GenStage.DemandDispatcherTest do
 
   defp dispatcher(opts) do
     shuffle_demand = Keyword.get(opts, :shuffle_demands_on_first_dispatch, false)
-    {:ok, {[], 0, nil, ^shuffle_demand} = state} = D.init(opts)
+    max_demand = Keyword.get(opts, :max_demand)
+    {:ok, {[], 0, ^max_demand, ^shuffle_demand} = state} = D.init(opts)
     state
   end
 
@@ -191,14 +192,13 @@ defmodule GenStage.DemandDispatcherTest do
     pid = self()
     ref1 = make_ref()
     ref2 = make_ref()
-    disp = dispatcher([])
+    disp = dispatcher(max_demand: 3)
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
 
     log =
       capture_log(fn ->
-        {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
         {:ok, 4, disp} = D.ask(4, {pid, ref2}, disp)
         disp
       end)

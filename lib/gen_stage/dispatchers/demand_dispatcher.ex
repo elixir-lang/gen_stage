@@ -11,9 +11,12 @@ defmodule GenStage.DemandDispatcher do
   The demand dispatcher accepts the following options
   on initialization:
 
-    * `:shuffle_demands_on_first_dispatch` - when true, shuffle the initial demands list
+    * `:shuffle_demands_on_first_dispatch` - when `true`, shuffle the initial demands list
       which is constructed on subscription before first dispatch. It prevents overloading
-      the first consumer on first dispatch.  Defaults to `false`.
+      the first consumer on first dispatch. Defaults to `false`.
+
+    * `:max_demand` - the maximum demand expected on `GenStage.ask/3`.
+      Defaults to the first demand asked.
 
   ### Examples
 
@@ -27,8 +30,9 @@ defmodule GenStage.DemandDispatcher do
   @doc false
   def init(opts) do
     shuffle_demand = Keyword.get(opts, :shuffle_demands_on_first_dispatch, false)
+    max_demand = Keyword.get(opts, :max_demand)
 
-    {:ok, {[], 0, nil, shuffle_demand}}
+    {:ok, {[], 0, max_demand, shuffle_demand}}
   end
 
   @doc false
@@ -102,7 +106,7 @@ defmodule GenStage.DemandDispatcher do
     {now, later, length - counter, 0}
   end
 
-  defp add_demand(counter, pid, ref, [{c, _, _} | _] = demands) when counter > c do
+  defp add_demand(counter, pid, ref, [{current, _, _} | _] = demands) when counter > current do
     [{counter, pid, ref} | demands]
   end
 
