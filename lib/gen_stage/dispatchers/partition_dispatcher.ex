@@ -2,28 +2,12 @@ defmodule GenStage.PartitionDispatcher do
   @moduledoc """
   A dispatcher that sends events according to partitions.
 
-  This dispatcher assumes that partitions are evenly distributed.
-  If the data is uneven for long periods of time, then you may
-  buffer excessive data from busy partitions for long periods of
-  time. This happens because the producer is unable to distinguish
-  from which particular consumer/partition demand arrives.
+  This dispatcher assumes that partitions are *evenly distributed*.
+  See the ["Even distribution"](#module-even-distribution) section for
+  more information.
 
-  Let's see an example. Imagine you have three consumers/partitions:
-  A, B, and C. Let's assume 60% of the data goes to A, 20% to B, and
-  20% to C. Let's also say `max_demand` is 10 and `min_demand` is 5.
-  When they initially request data, 10 events for each, A will receive
-  18 while B and C receive 6 each. After processing 5 events (min demand),
-  they request additional 5 events each, which at this point will be 9
-  additional elements for A, and 3 additional elements for B and C.
-  At the end of these two rounds, we will have:
-
-      A = 18 - 5 + 9 = 22 events
-      B = 6 - 5 + 3 = 4 events
-      C = 6 - 5 + 3 = 4 events
-
-  Furthermore, as B and C request more items, A will only go further
-  behind. This behaviour is fine for spikes that should quickly
-  resolve, but it can be problematic if the data is consistently uneven.
+  When multiple consumers subscribe to one partition, the producer
+  behaves like a `GenStage.DemandDispatcher` *within that partition*.
 
   ## Options
 
@@ -35,14 +19,14 @@ defmodule GenStage.PartitionDispatcher do
       is named from 0 up to `integer - 1`. For example, `partitions: 4`
       will contain four partitions named `0`, `1`, `2` and `3`.
 
-      It may also be an *enumerable* that specifies the name of every partition.
+      It may also be an *enumerable* that specifies the name of each partition.
       For instance, `partitions: [:odd, :even]` will build two partitions,
       named `:odd` and `:even`.
 
     * `:hash` - the hashing algorithm. It's a function of type
       `t:hash_function/0`, which receives the event and returns a tuple with two
-      elements, the event to be dispatched as first argument and the partition
-      as second. The function can also return `:none`, in which case the event
+      elements: the event to be dispatched and the partition to dispatch it to.
+      The function can also return `:none`, in which case the event
       is discarded. The partition must be one of the partitions specified in
       `:partitions` above. The default uses:
 
@@ -76,6 +60,35 @@ defmodule GenStage.PartitionDispatcher do
 
       GenStage.sync_subscribe(consumer, to: producer, partition: 0)
 
+  ## Even distribution
+
+  This dispatcher assumes that partitions are *evenly distributed*.
+  If the data is uneven for long periods of time, then you may
+  buffer excessive data from busy partitions for long periods of
+  time. This happens because the producer is unable to distinguish
+  from which particular consumer/partition demand arrives.
+
+  Let's see an example. Imagine you have three consumers, each
+  for one partition: `A`, `B`, and `C`.
+
+  Let's assume 60% of the data goes to `A`, 20% to `B`, and 20% to
+  `C`. Let's also say that `max_demand` is `10` and `min_demand` is
+  `5`. When the consumers initially request data (`10` events each),
+  the producer receives a total demand of `30`. A will receive `18` of
+  those (60%), while `B` and `C` receive `6` each (20%). After
+  processing `5` events (the `min_demand`), each consumer requests
+  additional `5` events, for a total of `15` additional events. At
+  this point, that will be `9` additional elements for A, and 3
+  additional elements for B and C. At the end of these two rounds, we
+  will have:
+
+      A = 18 - 5 + 9 = 22 events
+      B = 6 - 5 + 3 = 4 events
+      C = 6 - 5 + 3 = 4 events
+
+  Furthermore, as B and C request more items, A will only go further
+  behind. This behaviour is fine for spikes that should quickly
+  resolve, but it can be problematic if the data is consistently uneven.
   """
 
   @typedoc """
