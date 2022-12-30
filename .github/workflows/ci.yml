@@ -20,9 +20,7 @@ jobs:
               elixir: 1.14.2
               otp: 25.0
             lint: lint
-          - pair:
-              elixir: 1.7.4
-              otp: 19.3.6.13
+
     steps:
       - uses: actions/checkout@v2
 
@@ -45,6 +43,31 @@ jobs:
       - name: Compile with --warnings-as-errors
         run: mix compile --warnings-as-errors
         if: ${{ matrix.lint }}
+
+      - name: Run tests
+        run: mix test
+
+  test_older_elixir:
+    runs-on: ubuntu-18.04
+    env:
+      MIX_ENV: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pair:
+              elixir: 1.7.4
+              otp: 19.3.6.13
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.pair.otp }}
+          elixir-version: ${{ matrix.pair.elixir }}
+
+      - name: Install dependencies
+        run: mix do deps.get --only $MIX_ENV, deps.compile
 
       - name: Run tests
         run: mix test
