@@ -37,7 +37,9 @@ defmodule GenStage.Streamer do
   end
 
   def handle_info(msg, {stack, continuation}) do
-    log = '** Undefined handle_info in ~tp~n** Unhandled message: ~tp~n** Stream started at:~n~ts'
+    log =
+      ~c"** Undefined handle_info in ~tp~n** Unhandled message: ~tp~n** Stream started at:~n~ts"
+
     :error_logger.warning_msg(log, [inspect(__MODULE__), msg, Exception.format_stacktrace(stack)])
     {:noreply, [], {stack, continuation}}
   end

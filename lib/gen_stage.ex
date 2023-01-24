@@ -1998,7 +1998,7 @@ defmodule GenStage do
   ## Producer messages
 
   def handle_info({:"$gen_producer", _, _} = msg, %{type: :consumer} = stage) do
-    error_msg = 'GenStage consumer ~tp received $gen_producer message: ~tp~n'
+    error_msg = ~c"GenStage consumer ~tp received $gen_producer message: ~tp~n"
     :error_logger.error_msg(error_msg, [Utils.self_name(), msg])
     {:noreply, stage}
   end
@@ -2009,7 +2009,7 @@ defmodule GenStage do
       ) do
     case consumers do
       %{^ref => _} ->
-        error_msg = 'GenStage producer ~tp received duplicated subscription from: ~tp~n'
+        error_msg = ~c"GenStage producer ~tp received duplicated subscription from: ~tp~n"
         :error_logger.error_msg(error_msg, [Utils.self_name(), from])
 
         msg = {:"$gen_consumer", {self(), ref}, {:cancel, :duplicated_subscription}}
@@ -2056,7 +2056,7 @@ defmodule GenStage do
   ## Consumer messages
 
   def handle_info({:"$gen_consumer", _, _} = msg, %{type: :producer} = stage) do
-    error_msg = 'GenStage producer ~tp received $gen_consumer message: ~tp~n'
+    error_msg = ~c"GenStage producer ~tp received $gen_consumer message: ~tp~n"
     :error_logger.error_msg(error_msg, [Utils.self_name(), msg])
     {:noreply, stage}
   end
@@ -2199,7 +2199,7 @@ defmodule GenStage do
     if function_exported?(mod, :handle_info, 2) do
       handle_noreply_callback(mod.handle_info(msg, state), stage)
     else
-      log = '** Undefined handle_info in ~tp~n** Unhandled message: ~tp~n'
+      log = ~c"** Undefined handle_info in ~tp~n** Unhandled message: ~tp~n"
       :error_logger.warning_msg(log, [mod, msg])
       {:noreply, %{stage | state: state}}
     end
@@ -2251,7 +2251,7 @@ defmodule GenStage do
   end
 
   defp producer_demand(_mode, %{type: type} = stage) when type != :producer do
-    error_msg = 'Demand mode can only be set for producers, GenStage ~tp is a ~ts'
+    error_msg = ~c"Demand mode can only be set for producers, GenStage ~tp is a ~ts"
     :error_logger.error_msg(error_msg, [Utils.self_name(), type])
     {:noreply, stage}
   end
@@ -2389,7 +2389,7 @@ defmodule GenStage do
 
   defp dispatch_events(events, _length, %{type: :consumer} = stage) do
     error_msg =
-      'GenStage consumer ~tp cannot dispatch events (an empty list must be returned): ~tp~n'
+      ~c"GenStage consumer ~tp cannot dispatch events (an empty list must be returned): ~tp~n"
 
     :error_logger.error_msg(error_msg, [Utils.self_name(), events])
     stage
@@ -2452,7 +2452,7 @@ defmodule GenStage do
 
       excess ->
         if maybe_format_discarded(mod, excess, state) do
-          error_msg = 'GenStage producer ~tp has discarded ~tp events from buffer'
+          error_msg = ~c"GenStage producer ~tp has discarded ~tp events from buffer"
           :error_logger.warning_msg(error_msg, [Utils.self_name(), excess])
         end
     end
@@ -2461,7 +2461,7 @@ defmodule GenStage do
   end
 
   defp producer_estimate_buffered_count(%{type: :consumer} = stage) do
-    error_msg = 'Buffered count can only be requested for producers, GenStage ~tp is a consumer'
+    error_msg = ~c"Buffered count can only be requested for producers, GenStage ~tp is a consumer"
     :error_logger.error_msg(error_msg, [Utils.self_name()])
     {:reply, 0, stage}
   end
@@ -2526,14 +2526,14 @@ defmodule GenStage do
   end
 
   defp maybe_print_subscribe_to_deprecation_warning(to) do
-    log = ':subscribe_to value with type ~ts is deprecated. Change ~tp to {~tp, []} instead.'
+    log = ~c":subscribe_to value with type ~ts is deprecated. Change ~tp to {~tp, []} instead."
 
     case to do
       {:global, _} ->
-        :error_logger.warning_msg(log, ['{:global, term()}', to, to])
+        :error_logger.warning_msg(log, [~c"{:global, term()}", to, to])
 
       {:via, _, _} ->
-        :error_logger.warning_msg(log, ['{:via, module(), term()}', to, to])
+        :error_logger.warning_msg(log, [~c"{:via, module(), term()}", to, to])
 
       _ ->
         :ok
@@ -2584,7 +2584,7 @@ defmodule GenStage do
   defp consumer_subscribe(to, stage), do: consumer_subscribe(nil, to, [], stage)
 
   defp consumer_subscribe(_cancel, to, _opts, %{type: :producer} = stage) do
-    error_msg = 'GenStage producer ~tp cannot be subscribed to another stage: ~tp~n'
+    error_msg = ~c"GenStage producer ~tp cannot be subscribed to another stage: ~tp~n"
     :error_logger.error_msg(error_msg, [Utils.self_name(), to])
     {:reply, {:error, :not_a_consumer}, stage}
   end
@@ -2606,7 +2606,7 @@ defmodule GenStage do
 
         cancel == :permanent or cancel == :transient ->
           error_msg =
-            'GenStage consumer ~tp was not able to subscribe to the process ~tp because that process is not alive~n'
+            ~c"GenStage consumer ~tp was not able to subscribe to the process ~tp because that process is not alive~n"
 
           mod =
             case stage do
@@ -2622,7 +2622,7 @@ defmodule GenStage do
       end
     else
       {:error, message} ->
-        error_msg = 'GenStage consumer ~tp subscribe received invalid option: ~ts~n'
+        error_msg = ~c"GenStage consumer ~tp subscribe received invalid option: ~ts~n"
         :error_logger.error_msg(error_msg, [Utils.self_name(), message])
         {:reply, {:error, {:bad_opts, message}}, stage}
     end
@@ -2691,7 +2691,7 @@ defmodule GenStage do
 
           _other ->
             error_msg =
-              'GenStage consumer ~tp is stopping after receiving cancel from producer ~tp with reason: ~tp~n'
+              ~c"GenStage consumer ~tp is stopping after receiving cancel from producer ~tp with reason: ~tp~n"
 
             :error_logger.info_msg(error_msg, [Utils.self_name(), pid, reason])
             {:stop, reason, stage}

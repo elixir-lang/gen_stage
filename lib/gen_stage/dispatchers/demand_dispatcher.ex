@@ -58,9 +58,9 @@ defmodule GenStage.DemandDispatcher do
 
     if counter > max do
       warning =
-        'GenStage producer DemandDispatcher expects a maximum demand of ~tp. ' ++
-          'Using different maximum demands will overload greedy consumers. ' ++
-          'Got demand for ~tp events from ~tp~n'
+        ~c"GenStage producer DemandDispatcher expects a maximum demand of ~tp. " ++
+          ~c"Using different maximum demands will overload greedy consumers. " ++
+          ~c"Got demand for ~tp events from ~tp~n"
 
       :error_logger.warning_msg(warning, [max, counter, pid])
     end

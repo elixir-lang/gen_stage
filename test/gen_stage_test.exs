@@ -1355,11 +1355,11 @@ defmodule GenStageTest do
                :sys.get_status(producer)
 
       assert data == [
-               {'State', self()},
-               {'Stage', :producer},
-               {'Dispatcher', GenStage.DemandDispatcher},
-               {'Consumers', [consumer]},
-               {'Buffer size', 0}
+               {~c"State", self()},
+               {~c"Stage", :producer},
+               {~c"Dispatcher", GenStage.DemandDispatcher},
+               {~c"Consumers", [consumer]},
+               {~c"Buffer size", 0}
              ]
     end
   end
@@ -1501,7 +1501,7 @@ defmodule GenStageTest do
       assert {:status, _, _, [_, _, _, _, [header: _, data: _, data: data]]} =
                :sys.get_status(consumer)
 
-      assert data == [{'State', self()}, {'Stage', :consumer}, {'Producers', [producer]}]
+      assert data == [{~c"State", self()}, {~c"Stage", :consumer}, {~c"Producers", [producer]}]
     end
   end
 
@@ -1667,12 +1667,12 @@ defmodule GenStageTest do
                :sys.get_status(producer_consumer)
 
       assert data == [
-               {'State', self()},
-               {'Stage', :producer_consumer},
-               {'Dispatcher', GenStage.DemandDispatcher},
-               {'Producers', [producer]},
-               {'Consumers', [consumer]},
-               {'Buffer size', 0}
+               {~c"State", self()},
+               {~c"Stage", :producer_consumer},
+               {~c"Dispatcher", GenStage.DemandDispatcher},
+               {~c"Producers", [producer]},
+               {~c"Consumers", [consumer]},
+               {~c"Buffer size", 0}
              ]
     end
   end

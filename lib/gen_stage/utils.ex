@@ -108,7 +108,7 @@ defmodule GenStage.Utils do
     {old_demand, batch_size} =
       case old_demand - batch_size do
         diff when diff < 0 ->
-          error_msg = 'GenStage consumer ~tp has received ~tp events in excess from: ~tp~n'
+          error_msg = ~c"GenStage consumer ~tp has received ~tp events in excess from: ~tp~n"
           :error_logger.error_msg(error_msg, [self_name(), abs(diff), from])
           {0, old_demand}
 
