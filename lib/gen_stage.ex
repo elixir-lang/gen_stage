@@ -1339,9 +1339,9 @@ defmodule GenStage do
   Sets the demand mode for a producer.
 
   When `:forward`, the demand is always forwarded to the `c:handle_demand/2`
-  callback. When `:accumulate`, demand is accumulated until its mode is
-  set to `:forward`. This is useful as a synchronization mechanism, where
-  the demand is accumulated until all consumers are subscribed. Defaults
+  callback. When `:accumulate`, both demand and events are accumulated until
+  its mode is set to `:forward`. This is useful as a synchronization mechanism,
+  where the demand is accumulated until all consumers are subscribed. Defaults
   to `:forward`.
 
   This command is asynchronous.
@@ -2261,11 +2261,11 @@ defmodule GenStage do
 
     if is_list(events) do
       fold_fun = fn
-        d, {:noreply, %{state: state} = stage} ->
-          noreply_callback(:handle_demand, [d, state], stage)
+        event, {:noreply, stage} ->
+          handle_accumulated_event(event, stage)
 
-        d, {:noreply, %{state: state} = stage, _} ->
-          noreply_callback(:handle_demand, [d, state], stage)
+        event, {:noreply, stage, _} ->
+          handle_accumulated_event(event, stage)
 
         _, {:stop, _, _} = acc ->
           acc
@@ -2283,6 +2283,14 @@ defmodule GenStage do
     else
       {:noreply, %{stage | events: []}}
     end
+  end
+
+  defp handle_accumulated_event({:demand, d}, stage) do
+    take_from_buffer_or_handle_demand(d, stage)
+  end
+
+  defp handle_accumulated_event({:dispatch, events, length}, stage) do
+    {:noreply, dispatch_events(events, length, stage)}
   end
 
   defp producer_subscribe(opts, from, stage) do
@@ -2370,21 +2378,31 @@ defmodule GenStage do
         take_pc_events(queue, counter, stage)
 
       %{} ->
-        case take_from_buffer(counter, %{stage | dispatcher_state: dispatcher_state}) do
-          {:ok, 0, stage} ->
-            {:noreply, stage}
+        take_from_buffer_or_handle_demand(counter, %{stage | dispatcher_state: dispatcher_state})
+    end
+  end
 
-          {:ok, counter, %{events: :forward, state: state} = stage} ->
-            noreply_callback(:handle_demand, [counter, state], stage)
+  defp take_from_buffer_or_handle_demand(counter, stage) do
+    case take_from_buffer(counter, stage) do
+      {:ok, 0, stage} ->
+        {:noreply, stage}
 
-          {:ok, counter, %{events: events} = stage} when is_list(events) ->
-            {:noreply, %{stage | events: [counter | events]}}
-        end
+      {:ok, counter, %{events: :forward, state: state} = stage} ->
+        noreply_callback(:handle_demand, [counter, state], stage)
+
+      {:ok, counter, %{events: events} = stage} when is_list(events) ->
+        {:noreply, %{stage | events: [{:demand, counter} | events]}}
     end
   end
 
   defp dispatch_events([], _length, stage) do
     stage
+  end
+
+  # We don't dispatch when we are accumulating demand
+  defp dispatch_events(to_dispatch, length, %{events: events, type: :producer} = stage)
+       when is_list(events) do
+    %{stage | events: [{:dispatch, to_dispatch, length} | events]}
   end
 
   defp dispatch_events(events, _length, %{type: :consumer} = stage) do
