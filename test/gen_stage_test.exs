@@ -3,6 +3,29 @@ defmodule GenStageTest do
 
   import ExUnit.CaptureLog
 
+  defmodule EventProducer do
+    @moduledoc """
+    Produce events when receives a cast
+    """
+    use GenStage
+
+    def start_link(init) do
+      GenStage.start_link(__MODULE__, init)
+    end
+
+    @impl GenStage
+    @doc false
+    def init(init), do: init
+
+    @impl GenStage
+    @doc false
+    def handle_cast(event, state), do: {:noreply, [event], state}
+
+    @impl GenStage
+    @doc false
+    def handle_demand(_demand, state), do: {:noreply, [], state}
+  end
+
   defmodule Counter do
     @moduledoc """
     A producer that works as a counter in batches.
@@ -671,6 +694,38 @@ defmodule GenStageTest do
       GenStage.demand(producer, :forward)
       assert GenStage.demand(producer) == :forward
       assert_receive {:consumed, [0, 1, 2, 3]}
+    end
+
+    test "can be set to :accumulate via API using broadcast" do
+      {:ok, producer} =
+        EventProducer.start_link({:producer, [], dispatcher: GenStage.BroadcastDispatcher})
+
+      assert GenStage.demand(producer) == :forward
+      {:ok, consumer1} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+      {:ok, consumer2} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+      GenStage.demand(producer, :accumulate)
+      assert GenStage.demand(producer) == :accumulate
+
+      GenStage.stop(consumer1)
+      GenStage.stop(consumer2)
+
+      assert :ok = GenStage.cast(producer, 1)
+      assert :ok = GenStage.cast(producer, 2)
+      assert :ok = GenStage.cast(producer, 3)
+      assert :ok = GenStage.cast(producer, 4)
+
+      Process.sleep(200)
+      {:ok, _consumer1} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+      {:ok, _consumer2} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+      refute_receive {:consumed, _}
+
+      GenStage.demand(producer, :forward)
+      assert GenStage.demand(producer) == :forward
+      assert {{[], []}, 0, _} = :sys.get_state(producer).buffer
+      assert_receive {:consumed, [1]}
+      assert_receive {:consumed, [2]}
+      assert_receive {:consumed, [3]}
+      assert_receive {:consumed, [4]}
     end
 
     test "can be set to :accumulate via API" do
