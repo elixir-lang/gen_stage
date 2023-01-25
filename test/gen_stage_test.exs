@@ -3,35 +3,12 @@ defmodule GenStageTest do
 
   import ExUnit.CaptureLog
 
-  defmodule EventProducer do
-    @moduledoc """
-    Produce events when receives a cast
-    """
-    use GenStage
-
-    def start_link(init) do
-      GenStage.start_link(__MODULE__, init)
-    end
-
-    @impl GenStage
-    @doc false
-    def init(init), do: init
-
-    @impl GenStage
-    @doc false
-    def handle_cast(event, state), do: {:noreply, [event], state}
-
-    @impl GenStage
-    @doc false
-    def handle_demand(_demand, state), do: {:noreply, [], state}
-  end
-
   defmodule Counter do
     @moduledoc """
     A producer that works as a counter in batches.
     It also supports events to be queued via sync
-    and async calls. A negative counter disables
-    the counting behaviour.
+    and async calls. A pid disables the counting
+    behaviour.
     """
 
     use GenStage
@@ -698,7 +675,7 @@ defmodule GenStageTest do
 
     test "can be set to :accumulate via API using broadcast" do
       {:ok, producer} =
-        EventProducer.start_link({:producer, [], dispatcher: GenStage.BroadcastDispatcher})
+        Counter.start_link({:producer, self(), dispatcher: GenStage.BroadcastDispatcher})
 
       assert GenStage.demand(producer) == :forward
       {:ok, consumer1} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
@@ -709,10 +686,10 @@ defmodule GenStageTest do
       GenStage.stop(consumer1)
       GenStage.stop(consumer2)
 
-      assert :ok = GenStage.cast(producer, 1)
-      assert :ok = GenStage.cast(producer, 2)
-      assert :ok = GenStage.cast(producer, 3)
-      assert :ok = GenStage.cast(producer, 4)
+      assert :ok = Counter.async_queue(producer, [1])
+      assert :ok = Counter.async_queue(producer, [2])
+      assert :ok = Counter.async_queue(producer, [3])
+      assert :ok = Counter.async_queue(producer, [4])
 
       Process.sleep(200)
       {:ok, _consumer1} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
@@ -1384,7 +1361,7 @@ defmodule GenStageTest do
 
     test "handle_call/3 may shut stage down" do
       Process.flag(:trap_exit, true)
-      {:ok, producer} = Counter.start_link({:producer, -1})
+      {:ok, producer} = Counter.start_link({:producer, self()})
       assert Counter.stop(producer) == :ok
       assert_receive {:EXIT, ^producer, :shutdown}
     end
