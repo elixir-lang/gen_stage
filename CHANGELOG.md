@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.2.0-dev
+
+### Enhancements
+
+  * Shuffle the demands on first dispatch for load balancing across consumers
+  * Allow explicitly specifying :max_demand in DemandDispatcher
+
+### Bug fixes
+
+  * Do not dispatch when accumulating demand
+
 ## v1.1.1 (2021-08-13)
 
 ### Enhancements
