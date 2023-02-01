@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.2.0-dev
+## v1.2.0 (2023-02-01)
 
 ### Enhancements
 
