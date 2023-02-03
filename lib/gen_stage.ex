@@ -937,7 +937,7 @@ defmodule GenStage do
         section in the module documentation.
 
       * Dispatch less events than `demand` - in this case, the producer is
-        responsibile for storing the demand ("buffering demand") and then emitting
+        responsible for storing the demand ("buffering demand") and then emitting
         events when they are available.
 
   See the "Demand" section in the module documentation.
