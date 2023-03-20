@@ -1694,6 +1694,12 @@ defmodule GenStage do
     * `:stacktrace` - the stacktrace of the function that started the
       stream.
 
+    * `:on_cancel` - what happens when all consumers cancel. The default
+      is to keep the stream running. Set it to `:stop` to stop the producer.
+      To avoid race conditions, it is recommend to only set this option if
+      `:demand` is set to `:accumulate` and forwarded only after all consumers
+      subscribe
+
   All other options that would be given for `start_link/3` are
   also accepted.
   """

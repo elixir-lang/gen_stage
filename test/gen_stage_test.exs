@@ -1905,6 +1905,21 @@ defmodule GenStageTest do
       assert Process.info(producer, :registered_name) ==
                {:registered_name, :gen_stage_from_enumerable}
     end
+
+    test "accepts a :on_cancel option" do
+      {:ok, pid} = GenStage.from_enumerable(Stream.cycle([1, 2, 3]))
+      assert [pid] |> GenStage.stream() |> Enum.take(5) == [1, 2, 3, 1, 2]
+      assert Process.alive?(pid)
+
+      {:ok, pid} = GenStage.from_enumerable(Stream.cycle([1, 2, 3]), on_cancel: :continue)
+      assert [pid] |> GenStage.stream() |> Enum.take(5) == [1, 2, 3, 1, 2]
+      assert Process.alive?(pid)
+
+      {:ok, pid} = GenStage.from_enumerable(Stream.cycle([1, 2, 3]), on_cancel: :stop)
+      assert [pid] |> GenStage.stream() |> Enum.take(5) == [1, 2, 3, 1, 2]
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, _, _, _}
+    end
   end
 
   describe "subscribe_to names" do
