@@ -180,7 +180,7 @@ defmodule GenStage do
 
   An example with numbers will help clarify this. Say that `:max_demand` is
   `1000` and `:min_demand` is `750`. Initially, the consumer asks for `1000`
-  events to the producer. Say that the producer producers `100` events at a time.
+  events to the producer. Say that the producer produces `100` events at a time.
   The first "batch" of `100` events goes to the consumer and the consumer's demand
   goes down to `900`. Another batch is produced and the demand goes down to `800`.
   At this point, the producer has not been asked for more events yet since the demand
