@@ -909,18 +909,15 @@ defmodule GenStage do
 
   @callback init(args :: term) ::
               {:producer, state}
-              | {:producer, state, {:continue, term} | :hibernate}
               | {:producer, state, [producer_option]}
-              | {:producer, state, {:continue, term} | :hibernate, [producer_option]}
+              | {:producer, state, [producer_option], {:continue, term} | :hibernate}
               | {:producer_consumer, state}
-              | {:producer_consumer, state, {:continue, term} | :hibernate}
               | {:producer_consumer, state, [producer_consumer_option]}
-              | {:producer_consumer, state, {:continue, term} | :hibernate,
-                 [producer_consumer_option]}
+              | {:producer_consumer, state, [producer_consumer_option],
+                 {:continue, term} | :hibernate}
               | {:consumer, state}
-              | {:consumer, state, {:continue, term} | :hibernate}
               | {:consumer, state, [consumer_option]}
-              | {:consumer, state, {:continue, term} | :hibernate, [consumer_option]}
+              | {:consumer, state, [consumer_option], {:continue, term} | :hibernate}
               | :ignore
               | {:stop, reason :: any}
             when state: any
