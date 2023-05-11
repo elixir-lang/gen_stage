@@ -442,7 +442,7 @@ defmodule GenStageTest do
   if otp_version >= 21 do
     describe "handle_continue tests" do
       test "producing_init with continue instruction setting counter start position" do
-        {:ok, producer} = Counter.start_link({:producer, 0, {:continue, 500}})
+        {:ok, producer} = Counter.start_link({:producer, 0, [], {:continue, 500}})
         {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
         batch = Enum.to_list(0..499)
@@ -454,7 +454,7 @@ defmodule GenStageTest do
       end
 
       test "producer_init with nested continue instruction setting counter start position" do
-        {:ok, producer} = CounterNestedContinue.start_link({:producer, 0, {:continue, 500}})
+        {:ok, producer} = CounterNestedContinue.start_link({:producer, 0, [], {:continue, 500}})
         {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
 
         # The nested continue sets the counter to 2000
@@ -471,11 +471,11 @@ defmodule GenStageTest do
       end
 
       test "consumer_init with continue instruction" do
-        {:ok, producer} = Counter.start_link({:producer, 0, {:continue, 500}})
+        {:ok, producer} = Counter.start_link({:producer, 0, [], {:continue, 500}})
 
         {:ok, _} =
           Forwarder.start_link(
-            {:consumer, self(), {:continue, :continue_reached}, subscribe_to: [producer]}
+            {:consumer, self(), [subscribe_to: [producer]], {:continue, :continue_reached}}
           )
 
         assert_receive :continue_reached
@@ -486,8 +486,9 @@ defmodule GenStageTest do
 
         {:ok, _doubler} =
           Doubler.start_link(
-            {:producer_consumer, self(), {:continue, :continue_reached},
-             subscribe_to: [{producer, max_demand: 100, min_demand: 80}]}
+            {:producer_consumer, self(),
+             [subscribe_to: [{producer, max_demand: 100, min_demand: 80}]],
+             {:continue, :continue_reached}}
           )
 
         assert_receive :continue_reached
@@ -497,7 +498,7 @@ defmodule GenStageTest do
 
   describe "hibernate tests" do
     test "producer_init with hibernate instruction" do
-      {:ok, producer} = Counter.start_link({:producer, 0, :hibernate})
+      {:ok, producer} = Counter.start_link({:producer, 0, [], :hibernate})
 
       assert :erlang.process_info(producer, :current_function) ==
                {:current_function, {:erlang, :hibernate, 3}}
@@ -507,7 +508,7 @@ defmodule GenStageTest do
       {:ok, producer} = Counter.start_link({:producer, 0})
 
       {:ok, consumer} =
-        Forwarder.start_link({:consumer, self(), :hibernate, subscribe_to: [producer]})
+        Forwarder.start_link({:consumer, self(), [subscribe_to: [producer]], :hibernate})
 
       assert :erlang.process_info(consumer, :current_function) ==
                {:current_function, {:erlang, :hibernate, 3}}
@@ -518,8 +519,8 @@ defmodule GenStageTest do
 
       {:ok, doubler} =
         Doubler.start_link(
-          {:producer_consumer, self(), :hibernate,
-           subscribe_to: [{producer, max_demand: 100, min_demand: 80}]}
+          {:producer_consumer, self(),
+           [subscribe_to: [{producer, max_demand: 100, min_demand: 80}]], :hibernate}
         )
 
       assert :erlang.process_info(doubler, :current_function) ==

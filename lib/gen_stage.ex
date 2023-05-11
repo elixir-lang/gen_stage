@@ -1199,10 +1199,12 @@ defmodule GenStage do
             when new_state: term, event: term
 
   @doc """
-  Invoked to handle `continue` instructions.
+  Invoked to handle `:continue` instructions.
 
-  It is useful for performing work after initialization or for splitting the work
-  in a callback in multiple steps, updating the process state along the way.
+  This callback can be used to perform work right after emitting events from
+  other callbacks. The "continue mechanism" makes sure that no messages,
+  calls, casts, or anything else will be handled between a callback emitting
+  a `:continue` tuple and the `c:handle_continue/2` callback being invoked.
 
   Return values are the same as `c:handle_cast/2`.
 
@@ -1852,56 +1854,29 @@ defmodule GenStage do
       {:producer, state} ->
         init_producer(mod, [], state, nil)
 
-      {:producer, state, {:continue, _term} = continue} ->
-        init_producer(mod, [], state, continue)
-
-      {:producer, state, :hibernate} ->
-        init_producer(mod, [], state, :hibernate)
-
       {:producer, state, opts} when is_list(opts) ->
         init_producer(mod, opts, state, nil)
 
-      {:producer, state, {:continue, _term} = continue, opts} when is_list(opts) ->
-        init_producer(mod, opts, state, continue)
-
-      {:producer, state, :hibernate, opts} when is_list(opts) ->
-        init_producer(mod, opts, state, :hibernate)
+      {:producer, state, opts, continue_or_hibernate} when is_list(opts) ->
+        init_producer(mod, opts, state, continue_or_hibernate)
 
       {:producer_consumer, state} ->
         init_producer_consumer(mod, [], state, nil)
 
-      {:producer_consumer, state, {:continue, _term} = continue} ->
-        init_producer_consumer(mod, [], state, continue)
-
-      {:producer_consumer, state, :hibernate} ->
-        init_producer_consumer(mod, [], state, :hibernate)
-
       {:producer_consumer, state, opts} when is_list(opts) ->
         init_producer_consumer(mod, opts, state, nil)
 
-      {:producer_consumer, state, {:continue, _term} = continue, opts} when is_list(opts) ->
-        init_producer_consumer(mod, opts, state, continue)
-
-      {:producer_consumer, state, :hibernate, opts} when is_list(opts) ->
-        init_producer_consumer(mod, opts, state, :hibernate)
+      {:producer_consumer, state, opts, continue_or_hibernate} when is_list(opts) ->
+        init_producer_consumer(mod, opts, state, continue_or_hibernate)
 
       {:consumer, state} ->
         init_consumer(mod, [], state, nil)
 
-      {:consumer, state, {:continue, _term} = continue} ->
-        init_consumer(mod, [], state, continue)
-
-      {:consumer, state, :hibernate} ->
-        init_consumer(mod, [], state, :hibernate)
-
       {:consumer, state, opts} when is_list(opts) ->
         init_consumer(mod, opts, state, nil)
 
-      {:consumer, state, {:continue, _term} = continue, opts} when is_list(opts) ->
-        init_consumer(mod, opts, state, continue)
-
-      {:consumer, state, :hibernate, opts} when is_list(opts) ->
-        init_consumer(mod, opts, state, :hibernate)
+      {:consumer, state, opts, continue_or_hibernate} when is_list(opts) ->
+        init_consumer(mod, opts, state, continue_or_hibernate)
 
       {:stop, _} = stop ->
         stop
