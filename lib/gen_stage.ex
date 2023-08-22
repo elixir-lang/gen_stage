@@ -927,18 +927,18 @@ defmodule GenStage do
 
   The producer can do one of these:
 
-      * Dispatch exactly as many events as `demand`.
+    * Dispatch exactly as many events as `demand`.
 
-      * Dispatch *more events* than `demand` - in this case, GenStage will
-        buffer the excess events. These events will be "used" by the
-        consumer/dispatcher next time demand is sent upstream. It's only
-        once the events in the buffer don't satisfy the demand anymore that
-        the `c:handle_demand/2` callback is invoked again. See the "Buffering"
-        section in the module documentation.
+    * Dispatch *more events* than `demand` - in this case, GenStage will
+      buffer the excess events. These events will be "used" by the
+      consumer/dispatcher next time demand is sent upstream. It's only
+      once the events in the buffer don't satisfy the demand anymore that
+      the `c:handle_demand/2` callback is invoked again. See the "Buffering"
+      section in the module documentation.
 
-      * Dispatch less events than `demand` - in this case, the producer is
-        responsible for storing the demand ("buffering demand") and then emitting
-        events when they are available.
+    * Dispatch less events than `demand` - in this case, the producer is
+      responsible for storing the demand ("buffering demand") and then emitting
+      events when they are available.
 
   See the "Demand" section in the module documentation.
 
