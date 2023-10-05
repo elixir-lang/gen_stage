@@ -39,16 +39,14 @@ defmodule GenStage.BroadcastDispatcher do
                 [Producer Consumer 2]
   ```
 
-  When starting `Producer Consumer 1` before `Producer Consumer 2`, it is
-  possible that the first batch of events is only delivered to
+  When starting `Producer Consumer 1` before `Producer Consumer 2` (or even
+  regular consumers), it is the first batch of events is only delivered to
   `Producer Consumer 1` since `Producer Consummer 2` is not registered yet.
-  Since `producer_consumer` is buffering, it is irrelenvant if the `Consumer`
-  has been started yet, the demand arises on start of the `producer_consumer`.
-  The more stages you register, the more likely it is, that you will miss events.
 
-  It is therefore recommended to start the consumers with the `demand` option
-  set to `:accumulate` - which pauses demand in the producers - and after all
-  stages have been initialized, call `GenStage.demand/2` to unpause the producer.
+  It is therefore recommended to start the producer with
+  `{:producer, state, demand: :accumulate}`, which pauses demand in the producers,
+  and after all stages have been initialized, call `GenStage.demand/2` to resume
+  the producer.
   """
 
   @behaviour GenStage.Dispatcher
