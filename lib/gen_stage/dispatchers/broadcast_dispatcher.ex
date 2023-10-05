@@ -1,5 +1,5 @@
 defmodule GenStage.BroadcastDispatcher do
-  @moduledoc """
+  @moduledoc ~S"""
   A dispatcher that accumulates demand from all consumers
   before broadcasting events to all of them.
 
@@ -29,6 +29,24 @@ defmodule GenStage.BroadcastDispatcher do
           [{producer, selector: fn %{key: key} -> String.starts_with?(key, "foo-") end}]}
       end
 
+  ## Demand while Setup
+
+  ```
+                [Producer Consumer 1]
+               /                     \
+  [Producer] -                        - [Consumer]
+               \                     /
+                [Producer Consumer 2]
+  ```
+
+  When starting `Producer Consumer 1` before `Producer Consumer 2` (or even
+  regular consumers), it is the first batch of events is only delivered to
+  `Producer Consumer 1` since `Producer Consummer 2` is not registered yet.
+
+  It is therefore recommended to start the producer with
+  `{:producer, state, demand: :accumulate}`, which pauses demand in the producers,
+  and after all stages have been initialized, call `GenStage.demand/2` to resume
+  the producer.
   """
 
   @behaviour GenStage.Dispatcher
