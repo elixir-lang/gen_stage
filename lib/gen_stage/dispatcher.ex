@@ -27,6 +27,12 @@ defmodule GenStage.Dispatcher do
       fixed amount of consumers that works as partitions according
       to a hash function.
 
+  > ### Dispatcher State {: .info }
+  >
+  >  Note that the Dispatcher state is stored separately from the state of the
+  >  `GenStage` itself and neither side will have direct access to the state of
+  >  the other.
+
   """
 
   @typedoc "Options used by `init/1`"
@@ -84,11 +90,13 @@ defmodule GenStage.Dispatcher do
   exists, meaning they must be returned as left_over events until
   another consumer subscribes.
 
-  It is guaranteed the reference given in `from` points to a
-  reference previously given in subscribe. It is also recommended
-  for events to be sent with `Process.send/3` and the `[:noconnect]`
-  option as the consumers are all monitored by the producer. For
-  example:
+  This callback is responsible for sending events to consumer 
+  stages. In order to do so, you must store a `from` value from a 
+  previous `ask/3` callback.  
+
+  It is recommended for these events to be sent with `Process.send/3` 
+  and the `[:noconnect]` option as the consumers are all monitored 
+  by the producer. For example:
 
       Process.send(consumer, {:"$gen_consumer", {self(), consumer_ref}, events}, [:noconnect])
 
