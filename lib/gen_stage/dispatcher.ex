@@ -91,7 +91,7 @@ defmodule GenStage.Dispatcher do
   another consumer subscribes.
 
   This callback is responsible for sending events to consumer 
-  stages.  In order to do so, you must store a `from` value from a 
+  stages. In order to do so, you must store a `from` value from a 
   previous `ask/3` callback.  
 
   It is recommended for these events to be sent with `Process.send/3` 
