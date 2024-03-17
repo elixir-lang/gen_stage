@@ -1872,8 +1872,8 @@ defmodule GenStage do
       {:producer, state, opts} when is_list(opts) ->
         init_producer(mod, opts, state, nil)
 
-      {:producer, state, opts, continue_or_hibernate} when is_list(opts) ->
-        init_producer(mod, opts, state, continue_or_hibernate)
+      {:producer, state, opts, additional_info} when is_list(opts) ->
+        init_producer(mod, opts, state, additional_info)
 
       {:producer_consumer, state} ->
         init_producer_consumer(mod, [], state, nil)
@@ -1881,8 +1881,8 @@ defmodule GenStage do
       {:producer_consumer, state, opts} when is_list(opts) ->
         init_producer_consumer(mod, opts, state, nil)
 
-      {:producer_consumer, state, opts, continue_or_hibernate} when is_list(opts) ->
-        init_producer_consumer(mod, opts, state, continue_or_hibernate)
+      {:producer_consumer, state, opts, additional_info} when is_list(opts) ->
+        init_producer_consumer(mod, opts, state, additional_info)
 
       {:consumer, state} ->
         init_consumer(mod, [], state, nil)
@@ -1890,8 +1890,8 @@ defmodule GenStage do
       {:consumer, state, opts} when is_list(opts) ->
         init_consumer(mod, opts, state, nil)
 
-      {:consumer, state, opts, continue_or_hibernate} when is_list(opts) ->
-        init_consumer(mod, opts, state, continue_or_hibernate)
+      {:consumer, state, opts, additional_info} when is_list(opts) ->
+        init_consumer(mod, opts, state, additional_info)
 
       {:stop, _} = stop ->
         stop
@@ -1904,7 +1904,7 @@ defmodule GenStage do
     end
   end
 
-  defp init_producer(mod, opts, state, continue_or_hibernate) do
+  defp init_producer(mod, opts, state, additional_info) do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
          {:ok, buffer_size, opts} <-
            Utils.validate_integer(opts, :buffer_size, 10000, 0, :infinity, true),
@@ -1924,7 +1924,7 @@ defmodule GenStage do
         dispatcher_state: dispatcher_state
       }
 
-      if continue_or_hibernate, do: {:ok, stage, continue_or_hibernate}, else: {:ok, stage}
+      if additional_info, do: {:ok, stage, additional_info}, else: {:ok, stage}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
     end
@@ -1946,7 +1946,7 @@ defmodule GenStage do
     end
   end
 
-  defp init_producer_consumer(mod, opts, state, continue_or_hibernate) do
+  defp init_producer_consumer(mod, opts, state, additional_info) do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
          {:ok, subscribe_to, opts} <- Utils.validate_list(opts, :subscribe_to, []),
          {:ok, buffer_size, opts} <-
@@ -1965,7 +1965,7 @@ defmodule GenStage do
         dispatcher_state: dispatcher_state
       }
 
-      case handle_gen_server_init_args(continue_or_hibernate, stage) do
+      case handle_gen_server_init_args(additional_info, stage) do
         {:ok, stage} ->
           consumer_init_subscribe(subscribe_to, stage)
 
@@ -1981,12 +1981,12 @@ defmodule GenStage do
     end
   end
 
-  defp init_consumer(mod, opts, state, continue_or_hibernate) do
+  defp init_consumer(mod, opts, state, additional_info) do
     with {:ok, subscribe_to, opts} <- Utils.validate_list(opts, :subscribe_to, []),
          :ok <- Utils.validate_no_opts(opts) do
       stage = %GenStage{mod: mod, state: state, type: :consumer}
 
-      case handle_gen_server_init_args(continue_or_hibernate, stage) do
+      case handle_gen_server_init_args(additional_info, stage) do
         {:ok, stage} ->
           consumer_init_subscribe(subscribe_to, stage)
 
