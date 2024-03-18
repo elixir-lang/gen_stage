@@ -1867,10 +1867,10 @@ defmodule GenStage do
   def init({mod, args}) do
     case mod.init(args) do
       {:producer, state} ->
-        init_producer(mod, [], state, nil)
+        init_producer(mod, [], state)
 
       {:producer, state, opts} when is_list(opts) ->
-        init_producer(mod, opts, state, nil)
+        init_producer(mod, opts, state)
 
       {:producer, state, opts, additional_info} when is_list(opts) ->
         init_producer(mod, opts, state, additional_info)
@@ -1904,7 +1904,7 @@ defmodule GenStage do
     end
   end
 
-  defp init_producer(mod, opts, state, additional_info) do
+  defp init_producer(mod, opts, state) do
     with {:ok, dispatcher_mod, dispatcher_state, opts} <- init_dispatcher(opts),
          {:ok, buffer_size, opts} <-
            Utils.validate_integer(opts, :buffer_size, 10000, 0, :infinity, true),
@@ -1923,10 +1923,15 @@ defmodule GenStage do
         dispatcher_mod: dispatcher_mod,
         dispatcher_state: dispatcher_state
       }
-
-      if additional_info, do: {:ok, stage, additional_info}, else: {:ok, stage}
+      {:ok, stage}
     else
       {:error, message} -> {:stop, {:bad_opts, message}}
+    end
+  end
+
+  defp init_producer(mod, opts, state, additional_info) do
+    with {:ok, stage} <- init_producer(mod, opts, state) do
+      {:ok, stage, additional_info}
     end
   end
 
