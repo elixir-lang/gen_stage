@@ -8,6 +8,7 @@ on:
 
 jobs:
   test:
+    name: Elixir ${{ matrix.elixir }}/OTP ${{ matrix.otp }}
     runs-on: ${{ matrix.os }}
     env:
       MIX_ENV: test
