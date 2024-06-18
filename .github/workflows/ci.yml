@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
     env:
       MIX_ENV: test
 
@@ -16,58 +16,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pair:
-              elixir: 1.14.2
-              otp: 25.0
-            lint: lint
+          - os: ubuntu-22.04
+            elixir: "1.14.2"
+            otp: "25.0"
+            lint: true
+
+          - os: ubuntu-18.04
+            elixir: "1.7.4"
+            otp: "19.3.6.13"
 
     steps:
-      - uses: actions/checkout@v2
+      - name: Check out this repository
+        uses: actions/checkout@v4
 
-      - uses: erlef/setup-beam@v1
+      - name: Set up Erlang and Elixir
+        uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.pair.otp }}
-          elixir-version: ${{ matrix.pair.elixir }}
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
 
       - name: Install dependencies
-        run: mix do deps.get --only $MIX_ENV, deps.compile
+        run: mix deps.get --only $MIX_ENV
 
       - name: Check that code is formatted
         run: mix format --check-formatted
         if: ${{ matrix.lint }}
 
       - name: Check that there are no unused dependencies in mix.lock
-        run: mix deps.get && mix deps.unlock --check-unused
+        run: mix do deps.get, mix deps.unlock --check-unused
         if: ${{ matrix.lint }}
 
       - name: Compile with --warnings-as-errors
         run: mix compile --warnings-as-errors
         if: ${{ matrix.lint }}
-
-      - name: Run tests
-        run: mix test
-
-  test_older_elixir:
-    runs-on: ubuntu-18.04
-    env:
-      MIX_ENV: test
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - pair:
-              elixir: 1.7.4
-              otp: 19.3.6.13
-    steps:
-      - uses: actions/checkout@v2
-
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{ matrix.pair.otp }}
-          elixir-version: ${{ matrix.pair.elixir }}
-
-      - name: Install dependencies
-        run: mix do deps.get --only $MIX_ENV, deps.compile
 
       - name: Run tests
         run: mix test
