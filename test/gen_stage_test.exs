@@ -300,6 +300,17 @@ defmodule GenStageTest do
     end
   end
 
+  # TODO: remove this once we require OTP 26+. This is a workaround for changes
+  # in OTP 26 around returning {:stop, _} from start_link and friends. See the
+  # discussion in https://github.com/elixir-lang/gen_stage/pull/306.
+  defmacrop assert_exit_on_older_otp(reason) do
+    quote do
+      if System.otp_release() <= "25" do
+        assert_receive {:EXIT, _, unquote(reason)}
+      end
+    end
+  end
+
   test "generates child_spec/1" do
     assert Counter.child_spec([:hello]) == %{
              id: Counter,
@@ -1256,9 +1267,9 @@ defmodule GenStageTest do
       assert Counter.start_link(:ignore) == :ignore
 
       assert Counter.start_link({:stop, :oops}) == {:error, :oops}
-      assert_receive {:EXIT, _, :oops}
+      assert_exit_on_older_otp(:oops)
       assert Counter.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
-      assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
+      assert_exit_on_older_otp({:bad_return_value, :unknown})
 
       error = {:bad_opts, "expected :buffer_size to be equal to or greater than 0, got: -1"}
       assert Counter.start_link({:producer, 0, buffer_size: -1}) == {:error, error}
@@ -1402,9 +1413,9 @@ defmodule GenStageTest do
       assert Forwarder.start_link(:ignore) == :ignore
 
       assert Forwarder.start_link({:stop, :oops}) == {:error, :oops}
-      assert_receive {:EXIT, _, :oops}
+      assert_exit_on_older_otp(:oops)
       assert Forwarder.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
-      assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
+      assert_exit_on_older_otp({:bad_return_value, :unknown})
 
       assert Forwarder.start_link({:consumer, self(), unknown: :value}) ==
                {:error, {:bad_opts, "unknown options [unknown: :value]"}}
@@ -1543,9 +1554,9 @@ defmodule GenStageTest do
       assert Doubler.start_link(:ignore) == :ignore
 
       assert Doubler.start_link({:stop, :oops}) == {:error, :oops}
-      assert_receive {:EXIT, _, :oops}
+      assert_exit_on_older_otp(:oops)
       assert Doubler.start_link(:unknown) == {:error, {:bad_return_value, :unknown}}
-      assert_receive {:EXIT, _, {:bad_return_value, :unknown}}
+      assert_exit_on_older_otp({:bad_return_value, :unknown})
 
       assert Doubler.start_link({:producer_consumer, self(), unknown: :value}) ==
                {:error, {:bad_opts, "unknown options [unknown: :value]"}}
