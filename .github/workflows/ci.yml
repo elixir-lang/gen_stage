@@ -43,7 +43,7 @@ jobs:
         if: ${{ matrix.lint }}
 
       - name: Check that there are no unused dependencies in mix.lock
-        run: mix do deps.get, mix deps.unlock --check-unused
+        run: mix do deps.get, deps.unlock --check-unused
         if: ${{ matrix.lint }}
 
       - name: Compile with --warnings-as-errors
