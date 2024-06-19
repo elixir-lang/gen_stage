@@ -11,7 +11,7 @@
 ### Enhancements
 
   * Shuffle the demands on first dispatch for load balancing across consumers
-  * Allow explicitly specifying :max_demand in DemandDispatcher
+  * Allow explicitly specifying `:max_demand` in `GenStage.DemandDispatcher`
 
 ### Bug fixes
 
