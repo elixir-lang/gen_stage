@@ -30,9 +30,9 @@ jobs:
             otp: "22.3"
 
           # Oldest supported versions.
-          - os: ubuntu-18.04
-            elixir: "1.7.4"
-            otp: "19.3.6.13"
+          - os: ubuntu-20.04
+            elixir: "1.11"
+            otp: "21.3.8.24"
 
     steps:
       - name: Check out this repository
