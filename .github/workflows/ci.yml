@@ -19,8 +19,8 @@ jobs:
         include:
           # Latest supported versions.
           - os: ubuntu-22.04
-            elixir: "1.17"
-            otp: "27.0"
+            elixir: "1.18"
+            otp: "27.2"
             lint: true
 
           # This is a middle ground: it's old versions that we probably want to start
