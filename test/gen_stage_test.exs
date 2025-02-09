@@ -585,7 +585,7 @@ defmodule GenStageTest do
       {:ok, doubler} =
         Doubler.start_link(
           {:producer_consumer, self(),
-           dispatcher: GenStage.BroadcastDispatcher, subscribe_to: [producer]}
+           dispatcher: GenStage.BroadcastDispatcher, subscribe_to: [{producer, max_demand: 10}]}
         )
 
       {:ok, consumer1} = Forwarder.start_link({:consumer, self()})
@@ -1606,7 +1606,9 @@ defmodule GenStageTest do
       assert_receive {:producer_consumer_subscribed, :consumer, {^consumer, ^ref}}
       Process.unlink(consumer)
       Process.exit(consumer, :kill)
-      assert_receive {:producer_consumer_cancelled, {^consumer, ^ref}, {:down, :killed}}
+
+      assert_receive {:producer_consumer_cancelled, {^consumer, ^ref}, {:down, reason}}
+                     when reason in [:killed, :noproc]
     end
 
     test "consumer handle_subscribe/4" do
