@@ -43,29 +43,6 @@ defmodule GenStage do
   producers to send data using different "strategies". See
   `GenStage.Dispatcher` for more information.
 
-  Many developers tend to create layers of stages, such as A, B and
-  C, for achieving concurrency. If all you want is concurrency, starting
-  multiple instances of the same stage is enough. Layers in GenStage must
-  be created when there is a need for back-pressure or to route the data
-  in different ways.
-
-  For example, if you need the data to go over multiple steps but
-  without a need for back-pressure or without a need to break the
-  data apart, do not design it as such:
-
-      [Producer] -> [Step 1] -> [Step 2] -> [Step 3]
-
-  Instead it is better to design it as:
-
-                   [Consumer]
-                  /
-      [Producer]-<-[Consumer]
-                  \
-                   [Consumer]
-
-  where "Consumer" are multiple processes running the same code that
-  subscribe to the same "Producer".
-
   ## Example
 
   Let's define the simple pipeline below:
@@ -167,6 +144,47 @@ defmodule GenStage do
   you subscribe all of them, demand will start flowing upstream and
   events downstream.
 
+  ## Usage guidelines
+
+  As you get familiar with GenStage, developers may tend to create layers
+  of stages, such as A, B and C, for achieving concurrency. For example,
+  stage A does step 1 in your company workflow, stage B does step 2 and
+  so forth. That's an anti-pattern.
+
+  The same guideline that applies to processes also applies to GenStage:
+  use processes/stages to model runtime properties, such as concurrency and
+  data-transfer, and not for code organization or domain design purposes.
+  For the latter, you should use modules and functions.
+
+  If your domain has to process the data in multiple steps, you should write
+  that logic in separate modules and not directly in a `GenStage`. You only add
+  stages according to runtime needs, typically when you need to provide back-
+  pressure or leverage concurrency. This way you are free to experiment with
+  different `GenStage` pipelines without touching your business rules.
+
+  In particular, if your logic has three distinct steps, instead of starting
+  three different stages for each step, it may be best to start multiple
+  instances of a single stage that executes all steps. Instead of this:
+
+      [Producer Stage] -> [Stage Step 1] -> [Stage Step 2] -> [Stage Step 3]
+
+  You should rather have this:
+
+                   [Consumer Step 1 + Step 2 + Step 3]
+                  /
+      [Producer]->-[Consumer Step 1 + Step 2 + Step 3]
+                  \
+                   [Consumer Step 1 + Step 2 + Step 3]
+
+  The benefit of this approach is that you can scale the code based on the machine
+  resources and runtime needs rather than the number of steps during development.
+
+  Finally, if you don't need back-pressure at all and you just need to process
+  data that is already in-memory in parallel, a simpler solution is available
+  directly in Elixir via `Task.async_stream/2`. This function consumes a stream
+  of data, with each entry running in a separate task. The maximum number of tasks
+  is configurable via the `:max_concurrency` option.
+
   ## Demand
 
   When implementing consumers, we often set the `:max_demand` and
@@ -202,7 +220,7 @@ defmodule GenStage do
   50 seconds to be consumed by C, which will then request another
   batch of 50 items.
 
-  ## `init` and `:subscribe_to`
+  ### `init` and `:subscribe_to`
 
   In the example above, we have started the processes A, B, and C
   independently and subscribed them later on. But most often it is
@@ -304,30 +322,6 @@ defmodule GenStage do
   and start a separate supervised process per event. The number of children
   concurrently running in a `ConsumerSupervisor` is at most `max_demand` and
   the average amount of children is `(max_demand + min_demand) / 2`.
-
-  ## Usage guidelines
-
-  As you get familiar with GenStage, you may want to organize your stages
-  according to your business domain. For example, stage A does step 1 in
-  your company workflow, stage B does step 2 and so forth. That's an anti-
-  pattern.
-
-  The same guideline that applies to processes also applies to GenStage:
-  use processes/stages to model runtime properties, such as concurrency and
-  data-transfer, and not for code organization or domain design purposes.
-  For the latter, you should use modules and functions.
-
-  If your domain has to process the data in multiple steps, you should write
-  that logic in separate modules and not directly in a `GenStage`. You only add
-  stages according to the runtime needs, typically when you need to provide back-
-  pressure or leverage concurrency. This way you are free to experiment with
-  different `GenStage` pipelines without touching your business rules.
-
-  Finally, if you don't need back-pressure at all and you just need to process
-  data that is already in-memory in parallel, a simpler solution is available
-  directly in Elixir via `Task.async_stream/2`. This function consumes a stream
-  of data, with each entry running in a separate task. The maximum number of tasks
-  is configurable via the `:max_concurrency` option.
 
   ## Buffering
 
@@ -945,6 +939,8 @@ defmodule GenStage do
   This callback must always be explicitly implemented by `:producer` stages.
 
   ## Examples
+
+  ### Demand with buffering
 
   In the following example, the producer emits enough events to at least
   satisfy the demand, letting GenStage buffer any excess events:
