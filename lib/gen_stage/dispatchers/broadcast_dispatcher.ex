@@ -6,6 +6,8 @@ defmodule GenStage.BroadcastDispatcher do
   This dispatcher guarantees that events are dispatched to all
   consumers without exceeding the demand of any given consumer.
 
+  ## The `:selector` option
+
   If a producer uses `GenStage.BroadcastDispatcher`, its subscribers
   can specify an optional `:selector` function that receives the event
   and returns a boolean in the subscription options.
@@ -29,7 +31,7 @@ defmodule GenStage.BroadcastDispatcher do
           [{producer, selector: fn %{key: key} -> String.starts_with?(key, "foo-") end}]}
       end
 
-  ## Demand while Setup
+  ## Demand while setting up
 
   ```
                 [Producer Consumer 1]
@@ -77,19 +79,26 @@ defmodule GenStage.BroadcastDispatcher do
       {:error, :already_subscribed}
     else
       subscribed_processes = add_subscriber(subscribed_processes, pid)
-      {:ok, 0, {add_demand(-waiting, pid, ref, selector, demands), waiting, subscribed_processes}}
+      demands = adjust_demand(-waiting, demands)
+      {:ok, 0, {add_demand(0, pid, ref, selector, demands), 0, subscribed_processes}}
     end
   end
 
   @doc false
   def cancel({pid, ref}, {demands, waiting, subscribed_processes}) do
-    # Since we may have removed the process we were waiting on,
-    # cancellation may actually generate demand!
-    demands = delete_demand(ref, demands)
-    new_min = get_min(demands)
-    demands = adjust_demand(new_min, demands)
     subscribed_processes = delete_subscriber(subscribed_processes, pid)
-    {:ok, new_min, {demands, waiting + new_min, subscribed_processes}}
+
+    case delete_demand(ref, demands) do
+      [] ->
+        {:ok, 0, {[], 0, subscribed_processes}}
+
+      demands ->
+        # Since we may have removed the process we were waiting on,
+        # cancellation may actually generate demand!
+        new_min = get_min(demands)
+        demands = adjust_demand(new_min, demands)
+        {:ok, new_min, {demands, waiting + new_min, subscribed_processes}}
+    end
   end
 
   @doc false

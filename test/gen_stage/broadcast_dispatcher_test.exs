@@ -21,6 +21,22 @@ defmodule GenStage.BroadcastDispatcherTest do
     assert disp == {[], 0, MapSet.new()}
   end
 
+  test "subscribes, asks, and cancels" do
+    pid = self()
+    ref = make_ref()
+    disp = dispatcher([])
+    expected_subscribers = MapSet.new([pid])
+
+    {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
+    assert disp == {[{0, pid, ref, nil}], 0, expected_subscribers}
+
+    {:ok, 10, disp} = D.ask(10, {pid, ref}, disp)
+    assert disp == {[{0, pid, ref, nil}], 10, expected_subscribers}
+
+    {:ok, 0, disp} = D.cancel({pid, ref}, disp)
+    assert disp == {[], 0, MapSet.new()}
+  end
+
   test "multiple subscriptions with early demand" do
     pid1 = self()
     pid2 = spawn(fn -> :ok end)
@@ -39,14 +55,14 @@ defmodule GenStage.BroadcastDispatcherTest do
     expected_subscribers = MapSet.put(expected_subscribers, pid2)
 
     {:ok, 0, disp} = D.subscribe([], {pid2, ref2}, disp)
-    assert disp == {[{-10, pid2, ref2, nil}, {0, pid1, ref1, nil}], 10, expected_subscribers}
+    assert disp == {[{0, pid2, ref2, nil}, {10, pid1, ref1, nil}], 0, expected_subscribers}
 
     expected_subscribers = MapSet.delete(expected_subscribers, pid1)
 
     {:ok, 0, disp} = D.cancel({pid1, ref1}, disp)
-    assert disp == {[{-10, pid2, ref2, nil}], 10, expected_subscribers}
+    assert disp == {[{0, pid2, ref2, nil}], 0, expected_subscribers}
 
-    {:ok, 0, disp} = D.ask(10, {pid2, ref2}, disp)
+    {:ok, 10, disp} = D.ask(10, {pid2, ref2}, disp)
     assert disp == {[{0, pid2, ref2, nil}], 10, expected_subscribers}
   end
 
@@ -114,7 +130,6 @@ defmodule GenStage.BroadcastDispatcherTest do
     assert_receive {:"$gen_consumer", {_, ^ref2}, [:c]}
 
     # A batch with no demand
-
     {:ok, [:d], disp} = D.dispatch([:d], 1, disp)
     assert disp == {[{1, pid2, ref2, nil}, {0, pid1, ref1, nil}], 0, expected_subscribers}
     refute_received {:"$gen_consumer", {_, _}, _}
@@ -122,31 +137,27 @@ defmodule GenStage.BroadcastDispatcherTest do
     # Add a late subscriber
     {:ok, 1, disp} = D.ask(1, {pid1, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid3, ref3}, disp)
-    {:ok, [:e], disp} = D.dispatch([:d, :e], 2, disp)
+    {:ok, [:d, :e], disp} = D.dispatch([:d, :e], 2, disp)
 
     expected_subscribers = MapSet.put(expected_subscribers, pid3)
 
     assert disp ==
-             {[{-1, pid3, ref3, nil}, {0, pid1, ref1, nil}, {0, pid2, ref2, nil}], 0,
+             {[{0, pid3, ref3, nil}, {1, pid1, ref1, nil}, {1, pid2, ref2, nil}], 0,
               expected_subscribers}
-
-    assert_receive {:"$gen_consumer", {_, ^ref1}, [:d]}
-    assert_receive {:"$gen_consumer", {_, ^ref2}, [:d]}
-    assert_receive {:"$gen_consumer", {_, ^ref3}, [:d]}
 
     # Even out
     {:ok, 0, disp} = D.ask(2, {pid1, ref1}, disp)
     {:ok, 0, disp} = D.ask(2, {pid2, ref2}, disp)
-    {:ok, 2, disp} = D.ask(3, {pid3, ref3}, disp)
-    {:ok, [], disp} = D.dispatch([:e, :f], 2, disp)
+    {:ok, 3, disp} = D.ask(3, {pid3, ref3}, disp)
+    {:ok, [], disp} = D.dispatch([:d, :e, :f], 3, disp)
 
     assert disp ==
              {[{0, pid3, ref3, nil}, {0, pid2, ref2, nil}, {0, pid1, ref1, nil}], 0,
               expected_subscribers}
 
-    assert_receive {:"$gen_consumer", {_, ^ref1}, [:e, :f]}
-    assert_receive {:"$gen_consumer", {_, ^ref2}, [:e, :f]}
-    assert_receive {:"$gen_consumer", {_, ^ref3}, [:e, :f]}
+    assert_receive {:"$gen_consumer", {_, ^ref1}, [:d, :e, :f]}
+    assert_receive {:"$gen_consumer", {_, ^ref2}, [:d, :e, :f]}
+    assert_receive {:"$gen_consumer", {_, ^ref3}, [:d, :e, :f]}
   end
 
   test "subscribing with a selector function" do
