@@ -207,7 +207,7 @@ defmodule GenStage.PartitionDispatcher do
   end
 
   @doc false
-  def ask(counter, {_, ref}, {tag, hash, waiting, pending, partitions, references, infos}) do
+  def ask(counter, buffer_size, {_, ref}, {tag, hash, waiting, pending, partitions, references, infos}) do
     partition = Map.fetch!(references, ref)
     {pid, ref, demand_or_queue} = Map.fetch!(partitions, partition)
 
@@ -222,9 +222,10 @@ defmodule GenStage.PartitionDispatcher do
 
     partitions = Map.put(partitions, partition, {pid, ref, demand_or_queue})
     already_sent = min(pending, counter)
+    buffered = min(already_sent, buffer_size)
     demand = counter - already_sent
     pending = pending - already_sent
-    {:ok, demand, {tag, hash, waiting + demand, pending, partitions, references, infos}}
+    {:ok, demand + buffered, {tag, hash, waiting + demand, pending, partitions, references, infos}}
   end
 
   defp send_from_queue(queue, _tag, pid, ref, _partition, 0, acc, infos) do

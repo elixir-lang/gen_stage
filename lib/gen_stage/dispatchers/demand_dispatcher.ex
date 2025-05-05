@@ -53,7 +53,7 @@ defmodule GenStage.DemandDispatcher do
   end
 
   @doc false
-  def ask(counter, {pid, ref}, {demands, pending, max, shuffle_demand}) do
+  def ask(counter, buffer_size, {pid, ref}, {demands, pending, max, shuffle_demand}) do
     max = max || counter
 
     if counter > max do
@@ -69,7 +69,8 @@ defmodule GenStage.DemandDispatcher do
     demands = add_demand(current + counter, pid, ref, demands)
 
     already_sent = min(pending, counter)
-    {:ok, counter - already_sent, {demands, pending - already_sent, max, shuffle_demand}}
+    buffered = min(already_sent, buffer_size)
+    {:ok, counter - already_sent + buffered, {demands, pending - already_sent, max, shuffle_demand}}
   end
 
   @doc false

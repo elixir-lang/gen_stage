@@ -102,7 +102,7 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   @doc false
-  def ask(counter, {pid, ref}, {demands, waiting, subscribed_processes}) do
+  def ask(counter, _buffer_size, {pid, ref}, {demands, waiting, subscribed_processes}) do
     {current, selector, demands} = pop_demand(ref, demands)
     demands = add_demand(current + counter, pid, ref, selector, demands)
     new_min = get_min(demands)

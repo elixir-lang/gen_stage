@@ -34,7 +34,7 @@ defmodule GenStage.DemandDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
     assert disp == {[{0, pid, ref}], 0, nil, @default_shuffle_flag}
 
-    {:ok, 10, disp} = D.ask(10, {pid, ref}, disp)
+    {:ok, 10, disp} = D.ask(10, 0, {pid, ref}, disp)
     assert disp == {[{10, pid, ref}], 0, 10, @default_shuffle_flag}
 
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
@@ -44,7 +44,43 @@ defmodule GenStage.DemandDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
     assert disp == {[{0, pid, ref}], 10, 10, @default_shuffle_flag}
 
-    {:ok, 0, disp} = D.ask(5, {pid, ref}, disp)
+    {:ok, 0, disp} = D.ask(5, 0, {pid, ref}, disp)
+    assert disp == {[{5, pid, ref}], 5, 10, @default_shuffle_flag}
+
+    {:ok, 0, disp} = D.cancel({pid, ref}, disp)
+    assert disp == {[], 10, 10, @default_shuffle_flag}
+  end
+
+  test "asks with buffered events" do
+    pid = self()
+    ref = make_ref()
+    disp = dispatcher([])
+
+    # Subscribe, ask and cancel and leave some demand
+    {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
+    assert disp == {[{0, pid, ref}], 0, nil, @default_shuffle_flag}
+
+    {:ok, 10, disp} = D.ask(10, 0, {pid, ref}, disp)
+    assert disp == {[{10, pid, ref}], 0, 10, @default_shuffle_flag}
+
+    {:ok, 0, disp} = D.cancel({pid, ref}, disp)
+    assert disp == {[], 10, 10, @default_shuffle_flag}
+
+    # Subscribe, ask with a buffer greater than the counter and cancel and leave the same demand
+    {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
+    assert disp == {[{0, pid, ref}], 10, 10, @default_shuffle_flag}
+
+    {:ok, 5, disp} = D.ask(5, 7, {pid, ref}, disp)
+    assert disp == {[{5, pid, ref}], 5, 10, @default_shuffle_flag}
+
+    {:ok, 0, disp} = D.cancel({pid, ref}, disp)
+    assert disp == {[], 10, 10, @default_shuffle_flag}
+
+    # Subscribe, ask with a buffer smaller than the counter and cancel and leave the same demand
+    {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
+    assert disp == {[{0, pid, ref}], 10, 10, @default_shuffle_flag}
+
+    {:ok, 3, disp} = D.ask(5, 3, {pid, ref}, disp)
     assert disp == {[{5, pid, ref}], 5, 10, @default_shuffle_flag}
 
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
@@ -57,14 +93,14 @@ defmodule GenStage.DemandDispatcherTest do
     disp = dispatcher([])
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
 
-    {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid, ref}, disp)
     assert disp == {[{3, pid, ref}], 0, 3, @default_shuffle_flag}
 
     {:ok, [], disp} = D.dispatch([:a], 1, disp)
     assert disp == {[{2, pid, ref}], 0, 3, @default_shuffle_flag}
     assert_received {:"$gen_consumer", {_, ^ref}, [:a]}
 
-    {:ok, 3, disp} = D.ask(3, {pid, ref}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid, ref}, disp)
     assert disp == {[{5, pid, ref}], 0, 3, @default_shuffle_flag}
 
     {:ok, [:g, :h], disp} = D.dispatch([:b, :c, :d, :e, :f, :g, :h], 7, disp)
@@ -87,15 +123,15 @@ defmodule GenStage.DemandDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref3}, disp)
 
-    {:ok, 4, disp} = D.ask(4, {pid, ref1}, disp)
-    {:ok, 2, disp} = D.ask(2, {pid, ref2}, disp)
-    {:ok, 3, disp} = D.ask(3, {pid, ref3}, disp)
+    {:ok, 4, disp} = D.ask(4, 0, {pid, ref1}, disp)
+    {:ok, 2, disp} = D.ask(2, 0, {pid, ref2}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid, ref3}, disp)
     assert disp == {[{4, pid, ref1}, {3, pid, ref3}, {2, pid, ref2}], 0, 4, @default_shuffle_flag}
 
-    {:ok, 2, disp} = D.ask(2, {pid, ref3}, disp)
+    {:ok, 2, disp} = D.ask(2, 0, {pid, ref3}, disp)
     assert disp == {[{5, pid, ref3}, {4, pid, ref1}, {2, pid, ref2}], 0, 4, @default_shuffle_flag}
 
-    {:ok, 4, disp} = D.ask(4, {pid, ref2}, disp)
+    {:ok, 4, disp} = D.ask(4, 0, {pid, ref2}, disp)
     assert disp == {[{6, pid, ref2}, {5, pid, ref3}, {4, pid, ref1}], 0, 4, @default_shuffle_flag}
   end
 
@@ -108,8 +144,8 @@ defmodule GenStage.DemandDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
 
-    {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
-    {:ok, 2, disp} = D.ask(2, {pid, ref2}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid, ref1}, disp)
+    {:ok, 2, disp} = D.ask(2, 0, {pid, ref2}, disp)
     assert disp == {[{3, pid, ref1}, {2, pid, ref2}], 0, 3, @default_shuffle_flag}
 
     # One batch fits all
@@ -123,8 +159,8 @@ defmodule GenStage.DemandDispatcherTest do
     refute_received {:"$gen_consumer", {_, _}, _}
 
     # Two batches with left over
-    {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
-    {:ok, 3, disp} = D.ask(3, {pid, ref2}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid, ref1}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid, ref2}, disp)
     assert disp == {[{3, pid, ref1}, {3, pid, ref2}], 0, 3, @default_shuffle_flag}
 
     {:ok, [], disp} = D.dispatch([:a, :b], 2, disp)
@@ -151,8 +187,8 @@ defmodule GenStage.DemandDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
 
-    {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
-    {:ok, 2, disp} = D.ask(2, {pid, ref2}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid, ref1}, disp)
+    {:ok, 2, disp} = D.ask(2, 0, {pid, ref2}, disp)
     assert disp == {[{3, pid, ref1}, {2, pid, ref2}], 0, 3, true}
 
     # demands should be shuffled after first dispatch
@@ -181,7 +217,7 @@ defmodule GenStage.DemandDispatcherTest do
 
     {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
-    {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid, ref1}, disp)
 
     {:ok, notify_disp} = D.info(:hello, disp)
     assert disp == notify_disp
@@ -199,7 +235,7 @@ defmodule GenStage.DemandDispatcherTest do
 
     log =
       capture_log(fn ->
-        {:ok, 4, disp} = D.ask(4, {pid, ref2}, disp)
+        {:ok, 4, disp} = D.ask(4, 0, {pid, ref2}, disp)
         disp
       end)
 

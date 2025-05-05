@@ -2040,8 +2040,9 @@ defmodule GenStage do
       when is_integer(counter) do
     case consumers do
       %{^ref => _} ->
-        %{dispatcher_state: dispatcher_state} = stage
-        dispatcher_callback(:ask, [counter, from, dispatcher_state], stage)
+        %{dispatcher_state: dispatcher_state, buffer: buffer} = stage
+        buffer_size = Buffer.estimate_size(buffer)
+        dispatcher_callback(:ask, [counter, buffer_size, from, dispatcher_state], stage)
 
       %{} ->
         msg = {:"$gen_consumer", {self(), ref}, {:cancel, :unknown_subscription}}

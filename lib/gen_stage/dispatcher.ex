@@ -70,7 +70,7 @@ defmodule GenStage.Dispatcher do
   It is guaranteed the reference given in `from` points to a
   reference previously given in subscribe.
   """
-  @callback ask(demand :: pos_integer, from :: {pid, reference}, state :: term) ::
+  @callback ask(demand :: pos_integer, buffer_size :: pos_integer, from :: {pid, reference}, state :: term) ::
               {:ok, actual_demand :: non_neg_integer, new_state}
             when new_state: term
 

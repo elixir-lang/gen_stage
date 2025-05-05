@@ -30,7 +30,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid, ref}, disp)
     assert disp == {[{0, pid, ref, nil}], 0, expected_subscribers}
 
-    {:ok, 10, disp} = D.ask(10, {pid, ref}, disp)
+    {:ok, 10, disp} = D.ask(10, 0, {pid, ref}, disp)
     assert disp == {[{0, pid, ref, nil}], 10, expected_subscribers}
 
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
@@ -49,7 +49,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid1, ref1}, disp)
     assert disp == {[{0, pid1, ref1, nil}], 0, expected_subscribers}
 
-    {:ok, 10, disp} = D.ask(10, {pid1, ref1}, disp)
+    {:ok, 10, disp} = D.ask(10, 0, {pid1, ref1}, disp)
     assert disp == {[{0, pid1, ref1, nil}], 10, expected_subscribers}
 
     expected_subscribers = MapSet.put(expected_subscribers, pid2)
@@ -62,7 +62,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.cancel({pid1, ref1}, disp)
     assert disp == {[{0, pid2, ref2, nil}], 0, expected_subscribers}
 
-    {:ok, 10, disp} = D.ask(10, {pid2, ref2}, disp)
+    {:ok, 10, disp} = D.ask(10, 0, {pid2, ref2}, disp)
     assert disp == {[{0, pid2, ref2, nil}], 10, expected_subscribers}
   end
 
@@ -83,7 +83,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid2, ref2}, disp)
     assert disp == {[{0, pid2, ref2, nil}, {0, pid1, ref1, nil}], 0, expected_subscribers}
 
-    {:ok, 0, disp} = D.ask(10, {pid1, ref1}, disp)
+    {:ok, 0, disp} = D.ask(10, 0, {pid1, ref1}, disp)
     assert disp == {[{10, pid1, ref1, nil}, {0, pid2, ref2, nil}], 0, expected_subscribers}
 
     expected_subscribers = MapSet.delete(expected_subscribers, pid2)
@@ -91,7 +91,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 10, disp} = D.cancel({pid2, ref2}, disp)
     assert disp == {[{0, pid1, ref1, nil}], 10, expected_subscribers}
 
-    {:ok, 10, disp} = D.ask(10, {pid1, ref1}, disp)
+    {:ok, 10, disp} = D.ask(10, 0, {pid1, ref1}, disp)
     assert disp == {[{0, pid1, ref1, nil}], 20, expected_subscribers}
   end
 
@@ -107,8 +107,8 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([], {pid1, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid2, ref2}, disp)
 
-    {:ok, 0, disp} = D.ask(3, {pid1, ref1}, disp)
-    {:ok, 2, disp} = D.ask(2, {pid2, ref2}, disp)
+    {:ok, 0, disp} = D.ask(3, 0, {pid1, ref1}, disp)
+    {:ok, 2, disp} = D.ask(2, 0, {pid2, ref2}, disp)
 
     expected_subscribers = MapSet.new([pid1, pid2])
 
@@ -122,7 +122,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     assert_receive {:"$gen_consumer", {_, ^ref2}, [:a, :b]}
 
     # A batch with left-over
-    {:ok, 1, disp} = D.ask(2, {pid2, ref2}, disp)
+    {:ok, 1, disp} = D.ask(2, 0, {pid2, ref2}, disp)
 
     {:ok, [:d], disp} = D.dispatch([:c, :d], 2, disp)
     assert disp == {[{1, pid2, ref2, nil}, {0, pid1, ref1, nil}], 0, expected_subscribers}
@@ -135,7 +135,7 @@ defmodule GenStage.BroadcastDispatcherTest do
     refute_received {:"$gen_consumer", {_, _}, _}
 
     # Add a late subscriber
-    {:ok, 1, disp} = D.ask(1, {pid1, ref1}, disp)
+    {:ok, 1, disp} = D.ask(1, 0, {pid1, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid3, ref3}, disp)
     {:ok, [:d, :e], disp} = D.dispatch([:d, :e], 2, disp)
 
@@ -146,9 +146,9 @@ defmodule GenStage.BroadcastDispatcherTest do
               expected_subscribers}
 
     # Even out
-    {:ok, 0, disp} = D.ask(2, {pid1, ref1}, disp)
-    {:ok, 0, disp} = D.ask(2, {pid2, ref2}, disp)
-    {:ok, 3, disp} = D.ask(3, {pid3, ref3}, disp)
+    {:ok, 0, disp} = D.ask(2, 0, {pid1, ref1}, disp)
+    {:ok, 0, disp} = D.ask(2, 0, {pid2, ref2}, disp)
+    {:ok, 3, disp} = D.ask(3, 0, {pid3, ref3}, disp)
     {:ok, [], disp} = D.dispatch([:d, :e, :f], 3, disp)
 
     assert disp ==
@@ -173,8 +173,8 @@ defmodule GenStage.BroadcastDispatcherTest do
     {:ok, 0, disp} = D.subscribe([selector: selector2], {pid2, ref2}, disp)
     assert {[{0, ^pid2, ^ref2, _selector2}, {0, ^pid1, ^ref1, _selector1}], 0, _} = disp
 
-    {:ok, 0, disp} = D.ask(4, {pid2, ref2}, disp)
-    {:ok, 4, disp} = D.ask(4, {pid1, ref1}, disp)
+    {:ok, 0, disp} = D.ask(4, 0, {pid2, ref2}, disp)
+    {:ok, 4, disp} = D.ask(4, 0, {pid1, ref1}, disp)
 
     events = [%{key: "pref-1234"}, %{key: "pref-5678"}, %{key: "pre0000"}, %{key: "foo0000"}]
     {:ok, [], _disp} = D.dispatch(events, 4, disp)
@@ -197,7 +197,7 @@ defmodule GenStage.BroadcastDispatcherTest do
 
     {:ok, 0, disp} = D.subscribe([], {pid1, ref1}, disp)
     {:ok, 0, disp} = D.subscribe([], {pid2, ref2}, disp)
-    {:ok, 0, disp} = D.ask(3, {pid1, ref1}, disp)
+    {:ok, 0, disp} = D.ask(3, 0, {pid1, ref1}, disp)
 
     {:ok, notify_disp} = D.info(:hello, disp)
     assert disp == notify_disp
