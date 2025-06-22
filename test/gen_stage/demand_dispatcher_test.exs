@@ -49,6 +49,35 @@ defmodule GenStage.DemandDispatcherTest do
 
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
     assert disp == {[], 10, 10, @default_shuffle_flag}
+
+    # Now attempt to dispatch with no consumers
+    {:ok, [:a, :b, :c], disp} = D.dispatch([:a, :b, :c], 3, disp)
+    assert disp == {[], 7, 10, @default_shuffle_flag}
+
+    {:ok, _, disp} = D.dispatch(Enum.to_list(1..10), 10, disp)
+    assert disp == {[], 0, 10, @default_shuffle_flag}
+  end
+
+  test "subscribes twice, asks twice and cancel one" do
+    pid = self()
+    ref1 = make_ref()
+    ref2 = make_ref()
+    disp = dispatcher([])
+
+    # Subscribe twice and ask twice
+    {:ok, 0, disp} = D.subscribe([], {pid, ref1}, disp)
+    {:ok, 3, disp} = D.ask(3, {pid, ref1}, disp)
+    {:ok, 0, disp} = D.subscribe([], {pid, ref2}, disp)
+    {:ok, 3, disp} = D.ask(3, {pid, ref2}, disp)
+    assert disp == {[{3, pid, ref1}, {3, pid, ref2}], 0, 3, @default_shuffle_flag}
+
+    # Cancel and leave some demand
+    {:ok, 0, disp} = D.cancel({pid, ref1}, disp)
+    assert disp == {[{3, pid, ref2}], 3, 3, @default_shuffle_flag}
+
+    # Send events for both subscriptions
+    {:ok, [:d, :e], disp} = D.dispatch([:a, :b, :c, :d, :e], 5, disp)
+    assert disp == {[{0, pid, ref2}], 1, 3, @default_shuffle_flag}
   end
 
   test "subscribes, asks and dispatches" do

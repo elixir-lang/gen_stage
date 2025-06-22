@@ -30,6 +30,10 @@ defmodule GenStage.PartitionDispatcherTest do
     assert {10, 5} = waiting_and_pending(disp)
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
     assert {10, 10} = waiting_and_pending(disp)
+
+    # Now attempt to dispatch with no consumers
+    {:ok, [], disp} = D.dispatch([0, 1, 2, 3], 4, disp)
+    assert {6, 10} = waiting_and_pending(disp)
   end
 
   test "subscribes, asks and dispatches" do

@@ -35,6 +35,10 @@ defmodule GenStage.BroadcastDispatcherTest do
 
     {:ok, 0, disp} = D.cancel({pid, ref}, disp)
     assert disp == {[], 0, MapSet.new()}
+
+    # Now attempt to dispatch with no consumers
+    {:ok, [1, 2, 3], disp} = D.dispatch([1, 2, 3], 3, disp)
+    assert disp == {[], 0, MapSet.new()}
   end
 
   test "multiple subscriptions with early demand" do

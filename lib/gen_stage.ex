@@ -2415,11 +2415,6 @@ defmodule GenStage do
     stage
   end
 
-  defp dispatch_events(events, _length, %{consumers: consumers} = stage)
-       when map_size(consumers) == 0 do
-    buffer_events(events, stage)
-  end
-
   defp dispatch_events(events, length, stage) do
     %{dispatcher_mod: dispatcher_mod, dispatcher_state: dispatcher_state} = stage
     {:ok, events, dispatcher_state} = dispatcher_mod.dispatch(events, length, dispatcher_state)

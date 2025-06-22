@@ -78,16 +78,20 @@ defmodule GenStage.DemandDispatcher do
   end
 
   def dispatch(events, length, {demands, pending, max, false}) do
-    {events, demands} = dispatch_demand(events, length, demands)
-    {:ok, events, {demands, pending, max, false}}
+    {events, to_buffer, demands} = dispatch_demand(events, length, demands)
+    {:ok, events, {demands, max(pending - to_buffer, 0), max, false}}
   end
 
-  defp dispatch_demand([], _length, demands) do
-    {[], demands}
+  defp dispatch_demand([], length, demands) do
+    {[], length, demands}
   end
 
-  defp dispatch_demand(events, _length, [{0, _, _} | _] = demands) do
-    {events, demands}
+  defp dispatch_demand(events, length, []) do
+    {events, length, []}
+  end
+
+  defp dispatch_demand(events, length, [{0, _, _} | _] = demands) do
+    {events, length, demands}
   end
 
   defp dispatch_demand(events, length, [{counter, pid, ref} | demands]) do
