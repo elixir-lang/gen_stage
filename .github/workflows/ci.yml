@@ -24,7 +24,7 @@ jobs:
 
           - os: ubuntu-22.04
             elixir: "1.14"
-            otp: "23.2"
+            otp: "24.2"
 
     steps:
       - name: Check out this repository
