@@ -17,22 +17,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Latest supported versions.
           - os: ubuntu-22.04
             elixir: "1.18"
             otp: "27.2"
             lint: true
 
-          # This is a middle ground: it's old versions that we probably want to start
-          # requiring at some point, but technically we support older.
-          - os: ubuntu-20.04
-            elixir: "1.13"
-            otp: "22.3"
-
-          # Oldest supported versions.
-          - os: ubuntu-20.04
-            elixir: "1.11"
-            otp: "21.3.8.24"
+          - os: ubuntu-22.04
+            elixir: "1.14"
+            otp: "24.2"
 
     steps:
       - name: Check out this repository
