@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.0 (2025-06-24)
+
+This release addresses corner cases in both demand and broadcast dispatcher where they would sending events when the pipeline became temporarily empty.
+
+### Bug fixes
+
+  * Send events to dispatchers even if there are no consumers
+  * Hold demand in broadcast dispatcher until asking
+
 ## v1.2.1 (2023-03-20)
 
 ### Enhancements
