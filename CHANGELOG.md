@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.1 (2025-06-30)
+
+### Bug fixes
+
+  * Fix ordering when there are many buffered info messages
+
 ## v1.3.0 (2025-06-24)
 
 This release addresses corner cases in both demand and broadcast dispatcher where they would sending events when the pipeline became temporarily empty.
