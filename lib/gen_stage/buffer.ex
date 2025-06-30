@@ -178,7 +178,7 @@ defmodule GenStage.Buffer do
     case :maps.take(pos, wheel) do
       {perms, wheel} ->
         maybe_triplet = if wheel == %{}, do: max, else: {new_pos, max, wheel}
-        {:ok, perms, maybe_triplet}
+        {:ok, :lists.reverse(perms), maybe_triplet}
 
       :error ->
         {:error, {new_pos, max, wheel}}

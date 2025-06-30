@@ -1060,6 +1060,39 @@ defmodule GenStageTest do
       Counter.sync_queue(producer, [:c, :d, :e])
       assert_receive :sync
     end
+
+    test "delivers multiple info to producer in FIFO order" do
+      {:ok, producer} = Counter.start_link({:producer, self(), buffer_size: 10})
+      {:ok, consumer} = Forwarder.start_link({:consumer, self()})
+      GenStage.sync_subscribe(consumer, to: producer, consumer_demand: :manual)
+      assert_receive {:producer_subscribed, _}
+      assert_receive {:consumer_subscribed, sub}
+
+      Counter.sync_queue(producer, [:a, :b, :c])
+      GenStage.sync_info(producer, :d)
+      GenStage.sync_info(producer, :e)
+      GenStage.sync_info(producer, :f)
+      Counter.sync_queue(producer, [:g, :h])
+      GenStage.sync_info(producer, :i)
+
+      refute_received :d
+
+      Forwarder.ask(consumer, sub, 5)
+
+      assert_receive {:consumed, [:a, :b, :c]}
+      assert_receive {:consumed, [:g, :h]}
+
+      messages =
+        for n <- 1..4 do
+          receive do
+            msg -> msg
+          after
+            100 -> flunk("Did not receive expected number of messages (got #{n - 1})")
+          end
+        end
+
+      assert messages == [:d, :e, :f, :i]
+    end
   end
 
   describe "sync_subscribe/2" do
