@@ -57,7 +57,7 @@ defmodule GenStage.BroadcastDispatcher do
 
   @doc false
   def init(_opts) do
-    {:ok, {[], 0, MapSet.new()}}
+    {:ok, {[], 0, 0, MapSet.new()}}
   end
 
   @doc false
@@ -67,7 +67,7 @@ defmodule GenStage.BroadcastDispatcher do
   end
 
   @doc false
-  def subscribe(opts, {pid, ref}, {demands, waiting, subscribed_processes}) do
+  def subscribe(opts, {pid, ref}, {demands, waiting, requested, subscribed_processes}) do
     selector = validate_selector(opts)
 
     if subscribed?(subscribed_processes, pid) do
@@ -80,43 +80,42 @@ defmodule GenStage.BroadcastDispatcher do
     else
       subscribed_processes = add_subscriber(subscribed_processes, pid)
       demands = adjust_demand(-waiting, demands)
-      {:ok, 0, {add_demand(0, pid, ref, selector, demands), 0, subscribed_processes}}
+      {:ok, 0, {add_demand(0, pid, ref, selector, demands), 0, requested, subscribed_processes}}
     end
   end
 
   @doc false
-  def cancel({pid, ref}, {demands, waiting, subscribed_processes}) do
+  def cancel({pid, ref}, {demands, waiting, requested, subscribed_processes}) do
     subscribed_processes = delete_subscriber(subscribed_processes, pid)
 
     case delete_demand(ref, demands) do
       [] ->
-        {:ok, 0, {[], 0, subscribed_processes}}
+        {:ok, 0, {[], 0, requested, subscribed_processes}}
 
       demands ->
         # Since we may have removed the process we were waiting on,
         # cancellation may actually generate demand!
-        new_min = get_min(demands)
-        demands = adjust_demand(new_min, demands)
-        {:ok, new_min, {demands, waiting + new_min, subscribed_processes}}
+        {demands, upstream_demand, waiting, requested} = sync_demands(demands, waiting, requested)
+        {:ok, upstream_demand, {demands, waiting, requested, subscribed_processes}}
     end
   end
 
   @doc false
-  def ask(counter, {pid, ref}, {demands, waiting, subscribed_processes}) do
+  def ask(counter, {pid, ref}, {demands, waiting, requested, subscribed_processes}) do
     {current, selector, demands} = pop_demand(ref, demands)
     demands = add_demand(current + counter, pid, ref, selector, demands)
-    new_min = get_min(demands)
-    demands = adjust_demand(new_min, demands)
-    {:ok, new_min, {demands, waiting + new_min, subscribed_processes}}
+    {demands, upstream_demand, waiting, requested} = sync_demands(demands, waiting, requested)
+    {:ok, upstream_demand, {demands, waiting, requested, subscribed_processes}}
   end
 
   @doc false
-  def dispatch(events, _length, {demands, 0, subscribed_processes}) do
-    {:ok, events, {demands, 0, subscribed_processes}}
+  def dispatch(events, _length, {demands, 0, requested, subscribed_processes}) do
+    {:ok, events, {demands, 0, requested, subscribed_processes}}
   end
 
-  def dispatch(events, length, {demands, waiting, subscribed_processes}) do
-    {deliver_now, deliver_later, waiting} = split_events(events, length, waiting)
+  def dispatch(events, length, {demands, waiting, requested, subscribed_processes}) do
+    {deliver_now, deliver_later, waiting, deliver_now_count} =
+      split_events(events, length, waiting)
 
     for {_, pid, ref, selector} <- demands do
       selected =
@@ -133,7 +132,7 @@ defmodule GenStage.BroadcastDispatcher do
       :ok
     end
 
-    {:ok, deliver_later, {demands, waiting, subscribed_processes}}
+    {:ok, deliver_later, {demands, waiting, requested - deliver_now_count, subscribed_processes}}
   end
 
   defp filter_and_count(messages, nil) do
@@ -176,12 +175,21 @@ defmodule GenStage.BroadcastDispatcher do
     do: demands |> Enum.reduce(acc, fn {val, _, _, _}, acc -> min(val, acc) end) |> max(0)
 
   defp split_events(events, length, counter) when length <= counter do
-    {events, [], counter - length}
+    {events, [], counter - length, length}
   end
 
   defp split_events(events, _length, counter) do
     {now, later} = Enum.split(events, counter)
-    {now, later, 0}
+    {now, later, 0, counter}
+  end
+
+  defp sync_demands(demands, waiting, requested) do
+    new_min = get_min(demands)
+    demands = adjust_demand(new_min, demands)
+    waiting = waiting + new_min
+    request = max(0, waiting - requested)
+    requested = requested + request
+    {demands, request, waiting, requested}
   end
 
   defp adjust_demand(0, demands) do
