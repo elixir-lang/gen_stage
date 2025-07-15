@@ -105,6 +105,29 @@ defmodule GenStageTest do
     end
   end
 
+  defmodule NothingProducer do
+    @moduledoc """
+    A producer that does not produce any events.
+
+    It sends a message when there is demand to the pid in state.
+    """
+
+    use GenStage
+
+    def start_link(init, opts \\ []) do
+      GenStage.start_link(__MODULE__, init, opts)
+    end
+
+    def init(init) do
+      init
+    end
+
+    def handle_demand(demand, pid) do
+      send(pid, {:demand, demand})
+      {:noreply, [], pid}
+    end
+  end
+
   defmodule Doubler do
     @moduledoc """
     Multiples every event by two.
@@ -430,6 +453,22 @@ defmodule GenStageTest do
       # we will assert for events just later on.
       assert_receive {:consumed, [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]}
       assert_receive {:consumed, [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]}
+    end
+
+    test "with shared (broadcast) demand does not result in duplicate upstream demand" do
+      {:ok, producer} =
+        NothingProducer.start_link({:producer, self(), dispatcher: GenStage.BroadcastDispatcher})
+
+      {:ok, consumer1} = Sleeper.start_link({:consumer, self()})
+      {:ok, consumer2} = Sleeper.start_link({:consumer, self()})
+
+      {:ok, _} = GenStage.sync_subscribe(consumer1, to: producer, max_demand: 10, min_demand: 0)
+      {:ok, _} = GenStage.sync_subscribe(consumer2, to: producer, max_demand: 20, min_demand: 0)
+
+      # The demand of 10 (common demand of the two consumers) should be sent upstream only once
+      # (until the consumers demand another batch, which is never in the case of Sleepers).
+      assert_receive {:demand, 10}
+      refute_receive {:demand, _}
     end
   end
 
