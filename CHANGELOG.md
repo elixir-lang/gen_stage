@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.2 (2025-07-15)
+
+### Bug fixes
+
+  * Fix BroadcastDispatcher delivering duplicate demand in some cases
+
 ## v1.3.1 (2025-06-30)
 
 ### Bug fixes
