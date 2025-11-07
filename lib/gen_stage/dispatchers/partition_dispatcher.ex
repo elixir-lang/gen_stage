@@ -6,8 +6,7 @@ defmodule GenStage.PartitionDispatcher do
   See the ["Even distribution"](#module-even-distribution) section for
   more information.
 
-  When multiple consumers subscribe to one partition, the producer
-  behaves like a `GenStage.DemandDispatcher` *within that partition*.
+  Only one consumer is allowed per parition.
 
   ## Options
 
