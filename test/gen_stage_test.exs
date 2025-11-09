@@ -81,6 +81,109 @@ defmodule GenStageTest do
       events = Enum.to_list(counter..(counter + demand - 1))
       {:noreply, events, counter + demand}
     end
+
+    # Use continue instructions to modify the counter, this
+    # can be reached from any gen_server callback by supplying
+    # a continue instruction with an integer term.
+    def handle_continue(new_counter, _counter) when is_integer(new_counter) do
+      {:noreply, [], new_counter}
+    end
+  end
+
+  defmodule CounterNestedContinue do
+    @moduledoc """
+    A producer that works as a counter in batches.
+    It also supports events to be queued via sync
+    and async calls. A negative counter disables
+    the counting behaviour.
+
+    This counter uses a nested handle_continue on init.
+    """
+
+    use GenStage
+
+    def start_link(init, opts \\ []) do
+      GenStage.start_link(__MODULE__, init, opts)
+    end
+
+    def sync_queue(stage, events) do
+      GenStage.call(stage, {:queue, events})
+    end
+
+    def async_queue(stage, events) do
+      GenStage.cast(stage, {:queue, events})
+    end
+
+    def stop(stage) do
+      GenStage.call(stage, :stop)
+    end
+
+    ## Callbacks
+
+    def init(init) do
+      init
+    end
+
+    def handle_call(:stop, _from, state) do
+      {:stop, :shutdown, :ok, state}
+    end
+
+    def handle_call({:early_reply_queue, events}, from, state) do
+      GenStage.reply(from, state)
+      {:noreply, events, state}
+    end
+
+    def handle_call({:queue, events}, _from, state) do
+      {:reply, state, events, state}
+    end
+
+    def handle_cast({:queue, events}, state) do
+      {:noreply, events, state}
+    end
+
+    def handle_info({:queue, events}, state) do
+      {:noreply, events, state}
+    end
+
+    def handle_info(other, state) do
+      is_pid(state) && send(state, other)
+      {:noreply, [], state}
+    end
+
+    def handle_subscribe(:consumer, opts, from, state) do
+      is_pid(state) && send(state, {:producer_subscribed, from})
+      {Keyword.get(opts, :producer_demand, :automatic), state}
+    end
+
+    def handle_cancel(reason, from, state) do
+      is_pid(state) && send(state, {:producer_cancelled, from, reason})
+      {:noreply, [], state}
+    end
+
+    def handle_demand(demand, pid) when is_pid(pid) and demand > 0 do
+      {:noreply, [], pid}
+    end
+
+    def handle_demand(demand, counter) when demand > 0 do
+      # If the counter is 3 and we ask for 2 items, we will
+      # emit the items 3 and 4, and set the state to 5.
+      events = Enum.to_list(counter..(counter + demand - 1))
+      {:noreply, events, counter + demand}
+    end
+
+    # Use continue instructions to modify the counter, this
+    # can be reached from any gen_server callback by supplying
+    # a continue instruction with an integer term.
+    #
+    # This particular handle_continue returns another continue instruction
+    # testing that we handle nested continues properly.
+    def handle_continue(500, _counter) do
+      {:noreply, [], 500, {:continue, 2000}}
+    end
+
+    def handle_continue(2000, _counter) do
+      {:noreply, [], 2000}
+    end
   end
 
   defmodule DemandProducer do
@@ -161,6 +264,11 @@ defmodule GenStageTest do
     def handle_info(other, state) do
       is_pid(state) && send(state, other)
       {:noreply, [], state}
+    end
+
+    def handle_continue({:continue, term}, recipient) do
+      send(recipient, term)
+      {:noreply, [], recipient}
     end
   end
 
@@ -281,6 +389,11 @@ defmodule GenStageTest do
       {:noreply, [], recipient}
     end
 
+    def handle_continue({:continue, term}, recipient) do
+      send(recipient, term)
+      {:noreply, [], recipient}
+    end
+
     def terminate(reason, state) do
       send(state, {:terminated, reason})
     end
@@ -356,6 +469,97 @@ defmodule GenStageTest do
              shutdown: :infinity,
              start: {:foo, :bar, []}
            }
+  end
+
+  {otp_version, ""} = :otp_release |> :erlang.system_info() |> to_string() |> Integer.parse()
+
+  if otp_version >= 21 do
+    describe "handle_continue tests" do
+      test "producing_init with continue instruction setting counter start position" do
+        {:ok, producer} = Counter.start_link({:producer, 0, [], {:continue, 500}})
+        {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+
+        batch = Enum.to_list(0..499)
+        refute_receive {:consumed, ^batch}
+        batch = Enum.to_list(500..999)
+        assert_receive {:consumed, ^batch}
+        batch = Enum.to_list(1000..1499)
+        assert_receive {:consumed, ^batch}
+      end
+
+      test "producer_init with nested continue instruction setting counter start position" do
+        {:ok, producer} = CounterNestedContinue.start_link({:producer, 0, [], {:continue, 500}})
+        {:ok, _} = Forwarder.start_link({:consumer, self(), subscribe_to: [producer]})
+
+        # The nested continue sets the counter to 2000
+        batch = Enum.to_list(0..499)
+        refute_receive {:consumed, ^batch}
+        batch = Enum.to_list(500..999)
+        refute_receive {:consumed, ^batch}
+        batch = Enum.to_list(1000..1499)
+        refute_receive {:consumed, ^batch}
+        batch = Enum.to_list(1500..1999)
+        refute_receive {:consumed, ^batch}
+        batch = Enum.to_list(2000..2499)
+        assert_receive {:consumed, ^batch}
+      end
+
+      test "consumer_init with continue instruction" do
+        {:ok, producer} = Counter.start_link({:producer, 0, [], {:continue, 500}})
+
+        {:ok, _} =
+          Forwarder.start_link(
+            {:consumer, self(), [subscribe_to: [producer]], {:continue, :continue_reached}}
+          )
+
+        assert_receive :continue_reached
+      end
+
+      test "producer_consumer with continue instruction" do
+        {:ok, producer} = Counter.start_link({:producer, 0})
+
+        {:ok, _doubler} =
+          Doubler.start_link(
+            {:producer_consumer, self(),
+             [subscribe_to: [{producer, max_demand: 100, min_demand: 80}]],
+             {:continue, :continue_reached}}
+          )
+
+        assert_receive :continue_reached
+      end
+    end
+  end
+
+  describe "hibernate tests" do
+    test "producer_init with hibernate instruction" do
+      {:ok, producer} = Counter.start_link({:producer, 0, [], :hibernate})
+
+      assert :erlang.process_info(producer, :current_function) ==
+               {:current_function, {:erlang, :hibernate, 3}}
+    end
+
+    test "consumer_init with hibernate instruction" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+
+      {:ok, consumer} =
+        Forwarder.start_link({:consumer, self(), [subscribe_to: [producer]], :hibernate})
+
+      assert :erlang.process_info(consumer, :current_function) ==
+               {:current_function, {:erlang, :hibernate, 3}}
+    end
+
+    test "producer_consumer with hibernate instruction" do
+      {:ok, producer} = Counter.start_link({:producer, 0})
+
+      {:ok, doubler} =
+        Doubler.start_link(
+          {:producer_consumer, self(),
+           [subscribe_to: [{producer, max_demand: 100, min_demand: 80}]], :hibernate}
+        )
+
+      assert :erlang.process_info(doubler, :current_function) ==
+               {:current_function, {:erlang, :hibernate, 3}}
+    end
   end
 
   describe "producer-to-consumer demand" do
