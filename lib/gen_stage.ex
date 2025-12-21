@@ -204,21 +204,14 @@ defmodule GenStage do
   At this point, the producer has not been asked for more events yet since the demand
   didn't go below `:min_demand` yet. When the producer produces the next batch of
   `100` events, the consumer will process `50` events and the demand reaches the
-  minimum of `750`. The consumer sends `250` demand upstream (which is up to `:max_demand`).
-  of `250` to reach `:min_demand` again, and then consume the `50` events remaining.
-  `c:handle_demand/2` will be called on the producer with a demand of `250`.
+  minimum of `750`. The consumer sends `250` demand upstream to reach `:max_demand` again, 
+  and then consumes the `50` events remaining. `c:handle_demand/2` will be called on the
+  producer with a demand of `250`.
 
-  In the example above, B is a `:producer_consumer` and therefore
-  acts as a buffer. Getting the proper demand values in B is
-  important: making the buffer too small may make the whole pipeline
-  slower, making the buffer too big may unnecessarily consume
-  memory.
-
-  When such values are applied to the stages above, it is easy
-  to see the producer works in batches. The producer A ends-up
-  emitting batches of 50 items which will take approximately
-  50 seconds to be consumed by C, which will then request another
-  batch of 50 items.
+  In the earlier [example](#module-example), B is a `:producer_consumer` and therefore
+  acts as a buffer. Getting the proper demand values in B is important: making the buffer
+  too small may make the whole pipeline slower, making the buffer too big may unnecessarily
+  consume memory.
 
   ### `init` and `:subscribe_to`
 
@@ -1371,11 +1364,11 @@ defmodule GenStage do
       In case of exits, the same reason is used to exit the consumer.
       In case of cancellations, the reason is wrapped in a `:cancel` tuple.
 
-    * `:min_demand` - the minimum demand for this subscription. See the module
-      documentation for more information.
+    * `:min_demand` - the minimum demand for this subscription. Defaults to `max_demand / 2`. 
+      See the module documentation for more information.
 
-    * `:max_demand` - the maximum demand for this subscription. See the module
-      documentation for more information.
+    * `:max_demand` - the maximum demand for this subscription. Defaults to `1000`.
+      See the module documentation for more information.
 
   Any other option is sent to the producer stage. This may be used by
   dispatchers for custom configuration. For example, if a producer uses
