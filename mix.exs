@@ -13,7 +13,8 @@ defmodule GenStage.Mixfile do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       docs: [
-        main: "GenStage",
+        main: "readme",
+        extras: ["README.md"],
         source_ref: "v#{@version}",
         source_url: "https://github.com/elixir-lang/gen_stage"
       ]
