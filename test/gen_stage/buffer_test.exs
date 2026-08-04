@@ -132,5 +132,47 @@ defmodule GenStage.BufferTest do
       assert temps3 == [:temp10]
       assert perms3 == [:perm11]
     end
+
+    test "maintains FIFO order for permanent events with infinite buffer" do
+      buffer = Buffer.new(:infinity)
+
+      {buffer, _excess, _perms} =
+        Buffer.store_temporary(buffer, [:temp1, :temp2], :first)
+
+      {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm3)
+      {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm4)
+      {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm5)
+
+      {:ok, _buffer, _remaining_count, temps, perms} =
+        Buffer.take_count_or_until_permanent(buffer, 5)
+
+      assert temps == [:temp1, :temp2]
+      assert perms == [:perm3, :perm4, :perm5]
+    end
+
+    test "infinite buffer stops collecting permanents before next temporary event" do
+      buffer = Buffer.new(:infinity)
+
+      {buffer, _, _} = Buffer.store_temporary(buffer, [:temp1], :first)
+      {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm2)
+      {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm3)
+
+      {buffer, _, _} = Buffer.store_temporary(buffer, [:temp4], :first)
+      {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm5)
+
+      {:ok, buffer, remaining, temps, perms} =
+        Buffer.take_count_or_until_permanent(buffer, 5)
+
+      assert temps == [:temp1]
+      assert perms == [:perm2, :perm3]
+      assert remaining == 4
+
+      {:ok, _buffer, remaining, temps, perms} =
+        Buffer.take_count_or_until_permanent(buffer, remaining)
+
+      assert temps == [:temp4]
+      assert perms == [:perm5]
+      assert remaining == 3
+    end
   end
 end
