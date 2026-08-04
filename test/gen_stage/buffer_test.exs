@@ -175,5 +175,19 @@ defmodule GenStage.BufferTest do
       assert perms == [:perm5]
       assert remaining == 3
     end
+
+    test "infinite buffer returns permanents after the last requested temporary event" do
+      buffer = Buffer.new(:infinity)
+      {buffer, _, _} = Buffer.store_temporary(buffer, [:temp], :first)
+      {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm1)
+      {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm2)
+
+      {:ok, _buffer, remaining, temps, perms} =
+        Buffer.take_count_or_until_permanent(buffer, 1)
+
+      assert remaining == 0
+      assert temps == [:temp]
+      assert perms == [:perm1, :perm2]
+    end
   end
 end

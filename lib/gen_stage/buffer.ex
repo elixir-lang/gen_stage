@@ -122,6 +122,14 @@ defmodule GenStage.Buffer do
     take_count_or_until_permanent(counter, [], queue, buffer, infos)
   end
 
+  defp take_count_or_until_permanent(0, temps, queue, buffer, infos)
+       when is_reference(infos) do
+    {queue, buffer, perms} =
+      take_permanents(queue, buffer, infos, [])
+
+    {:ok, {queue, buffer, infos}, 0, :lists.reverse(temps), :lists.reverse(perms)}
+  end
+
   defp take_count_or_until_permanent(0, temps, queue, buffer, infos) do
     {:ok, {queue, buffer, infos}, 0, :lists.reverse(temps), []}
   end
