@@ -143,11 +143,12 @@ defmodule GenStage.BufferTest do
       {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm4)
       {:ok, buffer} = Buffer.store_permanent_unless_empty(buffer, :perm5)
 
-      {:ok, _buffer, _remaining_count, temps, perms} =
+      {:ok, buffer, _remaining_count, temps, perms} =
         Buffer.take_count_or_until_permanent(buffer, 5)
 
       assert temps == [:temp1, :temp2]
       assert perms == [:perm3, :perm4, :perm5]
+      assert Buffer.estimate_size(buffer) == 0
     end
 
     test "infinite buffer stops collecting permanents before next temporary event" do
