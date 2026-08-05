@@ -122,6 +122,14 @@ defmodule GenStage.Buffer do
     take_count_or_until_permanent(counter, [], queue, buffer, infos)
   end
 
+  defp take_count_or_until_permanent(0, temps, queue, buffer, infos)
+       when is_reference(infos) do
+    {queue, buffer, perms} =
+      take_permanents(queue, buffer, infos, [])
+
+    {:ok, {queue, buffer, infos}, 0, :lists.reverse(temps), :lists.reverse(perms)}
+  end
+
   defp take_count_or_until_permanent(0, temps, queue, buffer, infos) do
     {:ok, {queue, buffer, infos}, 0, :lists.reverse(temps), []}
   end
@@ -136,7 +144,10 @@ defmodule GenStage.Buffer do
 
     case value do
       {^infos, perm} ->
-        {:ok, {queue, buffer - 1, infos}, counter, :lists.reverse(temps), [perm]}
+        {queue, buffer, perms} =
+          take_permanents(queue, buffer - 1, infos, [perm])
+
+        {:ok, {queue, buffer, infos}, counter, :lists.reverse(temps), :lists.reverse(perms)}
 
       temp ->
         take_count_or_until_permanent(counter - 1, [temp | temps], queue, buffer - 1, infos)
@@ -152,6 +163,17 @@ defmodule GenStage.Buffer do
 
       {:error, infos} ->
         take_count_or_until_permanent(counter - 1, [temp | temps], queue, buffer - 1, infos)
+    end
+  end
+
+  defp take_permanents(queue, buffer, infos, perms) do
+    case :queue.peek(queue) do
+      {:value, {^infos, perm}} ->
+        {{:value, _}, queue} = :queue.out(queue)
+        take_permanents(queue, buffer - 1, infos, [perm | perms])
+
+      _ ->
+        {queue, buffer, perms}
     end
   end
 
